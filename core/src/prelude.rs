@@ -13,4 +13,4 @@ pub use crate::repository::Crud;
 pub use crate::serde_utils::id::Id;
 pub use crate::tx::{run_tx, TxResults, TxStmt};
 pub use surrealdb::types::{RecordId, Table};
-pub use crate::{declare_relation, impl_crud, impl_id};
+pub use crate::{declare_relation, impl_id};

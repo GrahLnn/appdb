@@ -4,11 +4,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use appdb::connection::{get_db, init_db, DbRuntime};
 use appdb::graph::GraphRepo;
+use appdb::model::meta::{register_table, ModelMeta};
 use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
-use appdb::{declare_relation, impl_crud, impl_id, Crud, Id, Store};
+use appdb::{declare_relation, impl_id, Crud, Id, Store};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
@@ -47,7 +48,15 @@ struct ItProfile {
     note: Option<String>,
 }
 
-impl_crud!(ItRecordUser, "it_record_user");
+impl ModelMeta for ItRecordUser {
+    fn table_name() -> &'static str {
+        static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+        TABLE_NAME.get_or_init(|| register_table(stringify!(ItRecordUser), "it_record_user"))
+    }
+}
+
+impl Crud for ItRecordUser {}
+
 impl_id!(ItRecordUser, id);
 declare_relation!(ItFollowsRel, "it_follows_rel");
 
@@ -358,7 +367,7 @@ fn inherent_record_model_api_roundtrip_passes() {
             .await
             .expect("delete_all should succeed");
 
-        let created = ItRecordUser::create_at(
+        let created = Repo::<ItRecordUser>::create_at(
             RecordId::new("it_record_user", "reload-me"),
             ItRecordUser {
                 id: RecordId::new("it_record_user", "reload-me"),
@@ -368,12 +377,12 @@ fn inherent_record_model_api_roundtrip_passes() {
         .await
         .expect("create_at should succeed");
 
-        let updated = ItRecordUser::update_at(
+        let updated = Repo::<ItRecordUser>::update_at(
+            RecordId::new("it_record_user", "reload-me"),
             ItRecordUser {
                 id: RecordId::new("it_record_user", "reload-me"),
                 name: "after".to_owned(),
             },
-            RecordId::new("it_record_user", "reload-me"),
         )
         .await
         .expect("update_at should succeed");
@@ -383,10 +392,9 @@ fn inherent_record_model_api_roundtrip_passes() {
             .expect("get_record should succeed");
         assert_eq!(reloaded.name, "after");
 
-        created
-            .delete()
+        Repo::<ItRecordUser>::delete_record(created.id.clone())
             .await
-            .expect("instance delete should succeed");
+            .expect("record delete should succeed");
     });
 }
 

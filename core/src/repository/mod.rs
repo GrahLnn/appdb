@@ -486,8 +486,27 @@ mod tests {
         id: String,
     }
 
-    crate::impl_crud!(AutoTableModel);
-    crate::impl_crud!(CustomTableModel, "custom_users");
+    impl ModelMeta for AutoTableModel {
+        fn table_name() -> &'static str {
+            static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+            TABLE_NAME.get_or_init(|| {
+                let table = crate::model::meta::default_table_name(stringify!(AutoTableModel));
+                crate::model::meta::register_table(stringify!(AutoTableModel), table)
+            })
+        }
+    }
+
+    impl ModelMeta for CustomTableModel {
+        fn table_name() -> &'static str {
+            static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+            TABLE_NAME.get_or_init(|| {
+                crate::model::meta::register_table(stringify!(CustomTableModel), "custom_users")
+            })
+        }
+    }
+
+    impl crate::repository::Crud for AutoTableModel {}
+    impl crate::repository::Crud for CustomTableModel {}
 
     #[test]
     fn extract_id_succeeds_for_valid_model() {
@@ -683,151 +702,3 @@ pub trait Crud: ModelMeta {
     }
 }
 
-#[macro_export]
-/// Legacy helper for models that still need explicit table names or non-`Id` `HasId` wiring.
-macro_rules! impl_crud {
-    ($t:ty) => {
-        impl $crate::model::meta::ModelMeta for $t {
-            fn table_name() -> &'static str {
-                static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-                TABLE_NAME.get_or_init(|| {
-                    let table = $crate::model::meta::default_table_name(stringify!($t));
-                    $crate::model::meta::register_table(stringify!($t), table)
-                })
-            }
-        }
-
-        impl $crate::repository::Crud for $t {}
-
-        impl $t {
-            pub async fn get<T>(id: T) -> anyhow::Result<Self>
-            where
-                surrealdb::types::RecordIdKey: From<T>,
-                T: Send,
-            {
-                $crate::repository::Repo::<Self>::get(id).await
-            }
-
-            pub async fn list() -> anyhow::Result<Vec<Self>> {
-                $crate::repository::Repo::<Self>::list().await
-            }
-
-            pub async fn list_limit(count: i64) -> anyhow::Result<Vec<Self>> {
-                $crate::repository::Repo::<Self>::list_limit(count).await
-            }
-
-            pub async fn delete_all() -> anyhow::Result<()> {
-                $crate::repository::Repo::<Self>::delete_all().await
-            }
-
-            pub async fn find_one_id(k: &str, v: &str) -> anyhow::Result<surrealdb::types::RecordId> {
-                $crate::repository::Repo::<Self>::find_one_id(k, v).await
-            }
-
-            pub async fn list_record_ids() -> anyhow::Result<Vec<surrealdb::types::RecordId>> {
-                $crate::repository::Repo::<Self>::list_record_ids().await
-            }
-
-            pub async fn create_at(
-                id: surrealdb::types::RecordId,
-                data: Self,
-            ) -> anyhow::Result<Self> {
-                $crate::repository::Repo::<Self>::create_at(id, data).await
-            }
-
-            pub async fn upsert_at(
-                id: surrealdb::types::RecordId,
-                data: Self,
-            ) -> anyhow::Result<Self> {
-                $crate::repository::Repo::<Self>::upsert_at(id, data).await
-            }
-
-            pub async fn update_at(
-                self,
-                id: surrealdb::types::RecordId,
-            ) -> anyhow::Result<Self> {
-                $crate::repository::Repo::<Self>::update_at(id, self).await
-            }
-
-            pub async fn delete<T>(id: T) -> anyhow::Result<()>
-            where
-                surrealdb::types::RecordIdKey: From<T>,
-                T: Send,
-            {
-                $crate::repository::Repo::<Self>::delete(id).await
-            }
-        }
-    };
-    ($t:ty, $table:expr) => {
-        impl $crate::model::meta::ModelMeta for $t {
-            fn table_name() -> &'static str {
-                static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-                TABLE_NAME.get_or_init(|| {
-                    let table: &'static str = $table;
-                    $crate::model::meta::register_table(stringify!($t), table)
-                })
-            }
-        }
-
-        impl $crate::repository::Crud for $t {}
-
-        impl $t {
-            pub async fn get<T>(id: T) -> anyhow::Result<Self>
-            where
-                surrealdb::types::RecordIdKey: From<T>,
-                T: Send,
-            {
-                $crate::repository::Repo::<Self>::get(id).await
-            }
-
-            pub async fn list() -> anyhow::Result<Vec<Self>> {
-                $crate::repository::Repo::<Self>::list().await
-            }
-
-            pub async fn list_limit(count: i64) -> anyhow::Result<Vec<Self>> {
-                $crate::repository::Repo::<Self>::list_limit(count).await
-            }
-
-            pub async fn delete_all() -> anyhow::Result<()> {
-                $crate::repository::Repo::<Self>::delete_all().await
-            }
-
-            pub async fn find_one_id(k: &str, v: &str) -> anyhow::Result<surrealdb::types::RecordId> {
-                $crate::repository::Repo::<Self>::find_one_id(k, v).await
-            }
-
-            pub async fn list_record_ids() -> anyhow::Result<Vec<surrealdb::types::RecordId>> {
-                $crate::repository::Repo::<Self>::list_record_ids().await
-            }
-
-            pub async fn create_at(
-                id: surrealdb::types::RecordId,
-                data: Self,
-            ) -> anyhow::Result<Self> {
-                $crate::repository::Repo::<Self>::create_at(id, data).await
-            }
-
-            pub async fn upsert_at(
-                id: surrealdb::types::RecordId,
-                data: Self,
-            ) -> anyhow::Result<Self> {
-                $crate::repository::Repo::<Self>::upsert_at(id, data).await
-            }
-
-            pub async fn update_at(
-                self,
-                id: surrealdb::types::RecordId,
-            ) -> anyhow::Result<Self> {
-                $crate::repository::Repo::<Self>::update_at(id, self).await
-            }
-
-            pub async fn delete<T>(id: T) -> anyhow::Result<()>
-            where
-                surrealdb::types::RecordIdKey: From<T>,
-                T: Send,
-            {
-                $crate::repository::Repo::<Self>::delete(id).await
-            }
-        }
-    };
-}
