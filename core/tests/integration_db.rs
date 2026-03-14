@@ -204,7 +204,7 @@ fn graph_relation_roundtrip_passes() {
 }
 
 #[test]
-fn graph_relation_name_is_validated() {
+fn graph_relation_name_is_bound_as_identifier() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
@@ -228,14 +228,22 @@ fn graph_relation_name_is_validated() {
             .await
             .expect("create y should succeed");
 
-        let err = GraphRepo::relate_by_id(
+        GraphRepo::relate_by_id(
             x.id.clone(),
             y.id.clone(),
             "bad-name; DELETE it_record_user RETURN NONE;",
         )
         .await
-        .expect_err("invalid relation name should fail before query execution");
-        assert!(err.to_string().contains("Invalid identifier"), "{err}");
+        .expect("relation name should be treated as bound identifier");
+
+        let selected_x = Repo::<ItRecordUser>::select("x")
+            .await
+            .expect("x should still exist");
+        let selected_y = Repo::<ItRecordUser>::select("y")
+            .await
+            .expect("y should still exist");
+        assert_eq!(selected_x.name, "X");
+        assert_eq!(selected_y.name, "Y");
     });
 }
 
