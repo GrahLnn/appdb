@@ -1,7 +1,8 @@
 pub use crate::facade::data::{
-    get_db, init_db, init_db_with_options, query_checked, query_raw, query_return, query_take,
-    relation_name, run_tx, Crud, GraphCrud, GraphRepo, HasId, ModelMeta, QueryKind, RawSql,
-    RecordId, Relation, RelationMeta, Repo, Table, TxRunner, TxStmt,
+    get_db, init_db, init_db_with_options, query_bound, query_bound_checked, query_bound_return,
+    query_bound_take, query_checked, query_raw, query_return, query_take, relation_name, run_tx,
+    Crud, GraphCrud, GraphRepo, HasId, ModelMeta, QueryKind, RawSql, RawSqlStmt, RecordId,
+    Relation, RelationMeta, Repo, Table, TxRunner, TxStmt,
 };
 pub use crate::facade::security::{ensure_root_user, CryptoContext, CryptoError};
 pub use crate::facade::support::{DBError, Id};

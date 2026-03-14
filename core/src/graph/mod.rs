@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 
 use crate::connection::get_db;
+use crate::model::identifier::ensure_identifier;
 use crate::model::meta::HasId;
+use crate::model::relation::ensure_relation_name;
 use crate::query::builder::QueryKind;
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue)]
@@ -18,6 +20,7 @@ pub struct GraphRepo;
 
 impl GraphRepo {
     pub async fn relate_by_id(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<()> {
+        ensure_relation_name(rel)?;
         let db = get_db()?;
         let sql = QueryKind::relate(&in_id, &out_id, rel);
         db.query(sql)
@@ -30,6 +33,7 @@ impl GraphRepo {
     }
 
     pub async fn unrelate_by_id(self_id: RecordId, target_id: RecordId, rel: &str) -> Result<()> {
+        ensure_relation_name(rel)?;
         let db = get_db()?;
         db.query(QueryKind::unrelate(&self_id, &target_id, rel))
             .bind(("rel", Table::from(rel)))
@@ -41,6 +45,7 @@ impl GraphRepo {
     }
 
     pub async fn unrelate_all(self_id: RecordId, rel: &str) -> Result<()> {
+        ensure_relation_name(rel)?;
         let db = get_db()?;
         db.query(QueryKind::unrelate_all(&self_id, rel))
             .bind(("rel", Table::from(rel)))
@@ -51,6 +56,8 @@ impl GraphRepo {
     }
 
     pub async fn outs(in_id: RecordId, rel: &str, out_table: &str) -> Result<Vec<RecordId>> {
+        ensure_relation_name(rel)?;
+        ensure_identifier(out_table, "table name")?;
         let sql = QueryKind::rel_outs(&in_id, rel, out_table);
         let db = get_db()?;
         let mut result = db
@@ -65,6 +72,8 @@ impl GraphRepo {
     }
 
     pub async fn ins(out_id: RecordId, rel: &str, in_table: &str) -> Result<Vec<RecordId>> {
+        ensure_relation_name(rel)?;
+        ensure_identifier(in_table, "table name")?;
         let sql = QueryKind::rel_ins(&out_id, rel, in_table);
         let db = get_db()?;
         let mut result = db
@@ -79,6 +88,7 @@ impl GraphRepo {
     }
 
     pub async fn insert_relation(rel: &str, data: Vec<Relation>) -> Result<Vec<Relation>> {
+        ensure_relation_name(rel)?;
         let db = get_db()?;
         let relate: Vec<Relation> = db.insert(rel).relation(data).await?;
         Ok(relate)

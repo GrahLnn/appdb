@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use appdb::connection::{get_db, init_db};
 use appdb::graph::GraphRepo;
 use appdb::model::relation::relation_name;
+use appdb::query::{query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
 use appdb::{declare_relation, impl_crud, impl_id};
@@ -203,7 +204,7 @@ fn graph_relation_roundtrip_passes() {
 }
 
 #[test]
-fn graph_relation_name_is_bound_as_identifier() {
+fn graph_relation_name_is_validated() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
@@ -227,22 +228,14 @@ fn graph_relation_name_is_bound_as_identifier() {
             .await
             .expect("create y should succeed");
 
-        GraphRepo::relate_by_id(
+        let err = GraphRepo::relate_by_id(
             x.id.clone(),
             y.id.clone(),
             "bad-name; DELETE it_record_user RETURN NONE;",
         )
         .await
-        .expect("relation name should be treated as bound identifier");
-
-        let selected_x = Repo::<ItRecordUser>::select("x")
-            .await
-            .expect("x should still exist");
-        let selected_y = Repo::<ItRecordUser>::select("y")
-            .await
-            .expect("y should still exist");
-        assert_eq!(selected_x.name, "X");
-        assert_eq!(selected_y.name, "Y");
+        .expect_err("invalid relation name should fail before query execution");
+        assert!(err.to_string().contains("Invalid identifier"), "{err}");
     });
 }
 
@@ -299,5 +292,19 @@ fn transaction_runner_executes_and_returns_value() {
         let mut res = run_tx(vec![stmt]).await.expect("tx should succeed");
         let value: Option<i64> = res.take(0).expect("take should decode value");
         assert_eq!(value, Some(42));
+    });
+}
+
+#[test]
+fn raw_sql_stmt_binds_values_safely() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        let stmt = RawSqlStmt::new("RETURN $value;").bind("value", 99i64);
+        let value = query_bound_return::<i64>(stmt)
+            .await
+            .expect("bound raw sql should succeed");
+        assert_eq!(value, Some(99));
     });
 }
