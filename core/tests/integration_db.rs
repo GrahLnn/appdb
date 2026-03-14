@@ -8,7 +8,7 @@ use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
-use appdb::{declare_relation, impl_crud, impl_id, Crud};
+use appdb::{declare_relation, impl_crud, impl_id, Crud, Id, Store};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
@@ -19,14 +19,14 @@ static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static TEST_RT: LazyLock<Runtime> =
     LazyLock::new(|| Runtime::new().expect("integration runtime should be created"));
 
-#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ItStringUser {
-    id: String,
+    id: Id,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNumberUser {
-    id: i64,
+    id: Id,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
@@ -35,23 +35,19 @@ struct ItRecordUser {
     name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNoId {
     name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ItProfile {
-    id: String,
+    id: Id,
     name: String,
     note: Option<String>,
 }
 
-impl_crud!(ItStringUser, "it_string_user");
-impl_crud!(ItNumberUser, "it_number_user");
 impl_crud!(ItRecordUser, "it_record_user");
-impl_crud!(ItNoId, "it_no_id");
-impl_crud!(ItProfile, "it_profile");
 impl_id!(ItRecordUser, id);
 declare_relation!(ItFollowsRel, "it_follows_rel");
 
@@ -92,16 +88,16 @@ fn id_repo_roundtrip_passes() {
             .expect("delete_all should succeed");
 
         let inserted = Repo::<ItStringUser>::save(ItStringUser {
-            id: "alice".to_owned(),
+            id: Id::from("alice"),
         })
         .await
         .expect("save should succeed");
-        assert_eq!(inserted.id, "alice");
+        assert_eq!(inserted.id, Id::from("alice"));
 
         let selected = Repo::<ItStringUser>::get("alice")
             .await
             .expect("get should succeed");
-        assert_eq!(selected.id, "alice");
+        assert_eq!(selected.id, Id::from("alice"));
     });
 }
 
@@ -116,7 +112,7 @@ fn inherent_model_api_roundtrip_passes() {
             .expect("delete_all should succeed");
 
         let inserted = Repo::<ItStringUser>::save(ItStringUser {
-            id: "alice".to_owned(),
+            id: Id::from("alice"),
         })
         .await
         .expect("save should succeed");
@@ -124,7 +120,7 @@ fn inherent_model_api_roundtrip_passes() {
         let loaded = ItStringUser::get("alice")
             .await
             .expect("get should succeed");
-        assert_eq!(loaded.id, "alice");
+        assert_eq!(loaded.id, Id::from("alice"));
 
         let listed = ItStringUser::list().await.expect("list should succeed");
         assert_eq!(listed.len(), 1);
@@ -163,7 +159,7 @@ fn select_missing_record_fails() {
         ensure_db().await;
 
         let _ = Repo::<ItStringUser>::save(ItStringUser {
-            id: "seed".to_owned(),
+            id: Id::from("seed"),
         })
         .await
         .expect("seed save should succeed");
@@ -185,16 +181,16 @@ fn number_id_repo_roundtrip_passes() {
             .await
             .expect("delete_all should succeed");
 
-        let inserted = Repo::<ItNumberUser>::save(ItNumberUser { id: 42 })
+        let inserted = Repo::<ItNumberUser>::save(ItNumberUser { id: Id::from(42i64) })
             .await
             .expect("save should succeed");
-        assert_eq!(inserted.id, 42);
+        assert_eq!(inserted.id, Id::from(42i64));
 
         let selected = Repo::<ItNumberUser>::list()
             .await
             .expect("list should succeed");
         assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].id, 42);
+        assert_eq!(selected[0].id, Id::from(42i64));
     });
 }
 
@@ -228,21 +224,21 @@ fn save_preserves_payload_fields() {
             .expect("delete_all should succeed");
 
         let inserted = Repo::<ItProfile>::save(ItProfile {
-            id: "p1".to_owned(),
+            id: Id::from("p1"),
             name: "alice".to_owned(),
             note: None,
         })
         .await
         .expect("save should succeed");
 
-        assert_eq!(inserted.id, "p1");
+        assert_eq!(inserted.id, Id::from("p1"));
         assert_eq!(inserted.name, "alice");
         assert_eq!(inserted.note, None);
 
         let selected = Repo::<ItProfile>::get("p1")
             .await
             .expect("get should succeed");
-        assert_eq!(selected.id, "p1");
+        assert_eq!(selected.id, Id::from("p1"));
         assert_eq!(selected.name, "alice");
         assert_eq!(selected.note, None);
     });
@@ -260,12 +256,12 @@ fn save_many_batches_rows() {
 
         let inserted = Repo::<ItProfile>::save_many(vec![
             ItProfile {
-                id: "p1".to_owned(),
+                id: Id::from("p1"),
                 name: "alice".to_owned(),
                 note: Some("a".to_owned()),
             },
             ItProfile {
-                id: "p2".to_owned(),
+                id: Id::from("p2"),
                 name: "bob".to_owned(),
                 note: None,
             },
@@ -274,10 +270,10 @@ fn save_many_batches_rows() {
         .expect("batch save should succeed");
 
         assert_eq!(inserted.len(), 2);
-        assert_eq!(inserted[0].id, "p1");
+        assert_eq!(inserted[0].id, Id::from("p1"));
         assert_eq!(inserted[0].name, "alice");
         assert_eq!(inserted[0].note.as_deref(), Some("a"));
-        assert_eq!(inserted[1].id, "p2");
+        assert_eq!(inserted[1].id, Id::from("p2"));
         assert_eq!(inserted[1].name, "bob");
         assert_eq!(inserted[1].note, None);
 
