@@ -15,7 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 aes-gcm.workspace = true
 anyhow.workspace = true
-appdb-macros = { path = "../macros", version = "0.1.0" }
+appdb-macros.workspace = true
 async-trait.workspace = true
 inventory.workspace = true
 keyring.workspace = true
