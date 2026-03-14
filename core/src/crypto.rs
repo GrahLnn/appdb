@@ -234,7 +234,7 @@ fn encode_hex(bytes: &[u8]) -> String {
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>, CryptoError> {
-    if value.len() != KEY_LEN * 2 || value.len() % 2 != 0 {
+    if value.len() != KEY_LEN * 2 {
         return Err(CryptoError::InvalidStoredKey);
     }
 

@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description = "Lightweight SurrealDB helper library for Tauri embedded database apps"
+documentation = "https://docs.rs/appdb"
 
 [lib]
 name = "appdb"
@@ -12,7 +14,7 @@ path = "src/lib.rs"
 [dependencies]
 aes-gcm.workspace = true
 anyhow.workspace = true
-appdb-macros = { path = "../macros" }
+appdb-macros = { path = "../macros", version = "0.1.0" }
 async-trait.workspace = true
 inventory.workspace = true
 keyring.workspace = true

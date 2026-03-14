@@ -491,6 +491,7 @@ where
     }
 }
 
+#[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
     use super::extract_record_id_key;
@@ -595,11 +596,9 @@ mod tests {
     }
 }
 
-/// Trait facade that forwards model methods to [`Repo`].
 #[async_trait]
-/// Convenience trait that forwards CRUD calls to `Repo<Self>`.
+/// Convenience trait that forwards CRUD calls to [`Repo<Self>`](Repo).
 pub trait Crud: ModelMeta {
-    /// Builds a record id for the model table.
     /// Builds a full record id for this model table.
     fn record_id<T>(id: T) -> RecordId
     where
@@ -608,19 +607,16 @@ pub trait Crud: ModelMeta {
         <Self as ModelMeta>::record_id(id)
     }
 
-    /// Creates the current value as a new row.
     /// Creates a copy of `self` in the database.
     async fn create(&self) -> Result<Self> {
         Repo::<Self>::create(self.clone()).await
     }
 
-    /// Creates the current value and returns only the record id.
     /// Creates a copy of `self` and returns its record id.
     async fn create_return_id(&self) -> Result<RecordId> {
         Repo::<Self>::create_return_id(self.clone()).await
     }
 
-    /// Creates a row using an explicit id key.
     /// Creates a row at an explicit id key.
     async fn create_by_id<T>(id: T, data: Self) -> Result<Self>
     where
@@ -630,7 +626,6 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::create_by_id(id, data).await
     }
 
-    /// Upserts the current value using [`HasId::id`].
     /// Upserts `self` using its `HasId` implementation.
     async fn upsert(&self) -> Result<Self>
     where
@@ -639,13 +634,11 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::upsert(self.clone()).await
     }
 
-    /// Upserts `data` into an explicit record id.
     /// Upserts `data` at the provided record id.
     async fn upsert_by_id(id: RecordId, data: Self) -> Result<Self> {
         Repo::<Self>::upsert_by_id(id, data).await
     }
 
-    /// Fetches one row by raw id key.
     /// Loads a row by table-local id key.
     async fn get_by_key<T>(id: T) -> Result<Self>
     where
@@ -655,31 +648,26 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::get_by_key(id).await
     }
 
-    /// Fetches one row by full record id.
     /// Loads a row by full `RecordId`.
     async fn get_record(record: RecordId) -> Result<Self> {
         Repo::<Self>::get_record(record).await
     }
 
-    /// Returns every row in the model table.
     /// Reads the entire table.
     async fn scan() -> Result<Vec<Self>> {
         Repo::<Self>::scan().await
     }
 
-    /// Lists all rows with a normalized `id` field.
     /// Lists all rows with normalized `id` values.
     async fn list() -> Result<Vec<Self>> {
         Repo::<Self>::list().await
     }
 
-    /// Lists up to `count` rows with a normalized `id` field.
     /// Lists up to `count` rows with normalized `id` values.
     async fn list_limit(count: i64) -> Result<Vec<Self>> {
         Repo::<Self>::list_limit(count).await
     }
 
-    /// Updates the current value at its record id.
     /// Replaces the stored content of `self`.
     async fn update(self) -> Result<Self>
     where
@@ -688,43 +676,36 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::update_by_id(self.id(), self).await
     }
 
-    /// Updates `self` at an explicit record id.
     /// Replaces the stored content of `self` at the provided id.
     async fn update_by_id(self, id: RecordId) -> Result<Self> {
         Repo::<Self>::update_by_id(id, self).await
     }
 
-    /// Merges a partial JSON object into a row.
     /// Merges a partial JSON object into an existing row.
     async fn merge(id: RecordId, data: Value) -> Result<Self> {
         Repo::<Self>::merge(id, data).await
     }
 
-    /// Applies patch operations to a row.
     /// Applies SurrealDB patch operations to an existing row.
     async fn patch(id: RecordId, data: Vec<PatchOp>) -> Result<Self> {
         Repo::<Self>::patch(id, data).await
     }
 
-    /// Bulk-inserts rows.
     /// Inserts many rows using SurrealDB bulk insert.
     async fn insert(data: Vec<Self>) -> Result<Vec<Self>> {
         Repo::<Self>::insert(data).await
     }
 
-    /// Bulk-inserts rows while ignoring duplicate conflicts.
     /// Inserts many rows while ignoring duplicate-key conflicts.
     async fn insert_ignore(data: Vec<Self>) -> Result<Vec<Self>> {
         Repo::<Self>::insert_ignore(data).await
     }
 
-    /// Bulk-inserts rows and updates conflicting rows.
     /// Inserts many rows and updates existing rows on duplicate key.
     async fn insert_or_replace(data: Vec<Self>) -> Result<Vec<Self>> {
         Repo::<Self>::insert_or_replace(data).await
     }
 
-    /// Deletes the current row.
     /// Deletes `self` by its record id.
     async fn delete(self) -> Result<()>
     where
@@ -733,7 +714,6 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::delete_record(self.id()).await
     }
 
-    /// Deletes one row by raw id key.
     /// Deletes a row by table-local id key.
     async fn delete_by_key<T>(id: T) -> Result<()>
     where
@@ -743,37 +723,31 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::delete_by_key(id).await
     }
 
-    /// Deletes one row by full record id.
     /// Deletes a row by full `RecordId`.
     async fn delete_record(id: RecordId) -> Result<()> {
         Repo::<Self>::delete_record(id).await
     }
 
-    /// Deletes all rows from the model table.
     /// Deletes every row in the model table.
     async fn delete_all() -> Result<()> {
         Repo::<Self>::delete_all().await
     }
 
-    /// Finds the first matching record id by field equality.
     /// Finds the first record id matching a field equality filter.
     async fn find_record_id(k: &str, v: &str) -> Result<RecordId> {
         Repo::<Self>::find_record_id(k, v).await
     }
 
     /// Lists all record ids in the model table.
-    /// Lists all record ids in the model table.
     async fn list_record_ids() -> Result<Vec<RecordId>> {
         Repo::<Self>::list_record_ids().await
     }
 
-    /// Upserts the current value by its `id` field.
     /// Saves `self` using its `id` field and returns the normalized row.
     async fn save(self) -> Result<Self> {
         Repo::<Self>::save(self).await
     }
 
-    /// Fetches one row by raw id key and normalized `id`.
     /// Loads a row by its `id` field.
     async fn get<T>(id: T) -> Result<Self>
     where
@@ -783,7 +757,6 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::get(id).await
     }
 
-    /// Batch-upserts rows by their `id` field.
     /// Saves many rows in chunks and returns normalized results.
     async fn save_many(data: Vec<Self>) -> Result<Vec<Self>> {
         Repo::<Self>::save_many(data).await

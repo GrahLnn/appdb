@@ -17,7 +17,7 @@ pub type DbHandle = Arc<Surreal<Db>>;
 static DB: LazyLock<OnceCell<DbHandle>> = LazyLock::new(OnceCell::new);
 
 /// Options used when opening the embedded SurrealDB runtime.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InitDbOptions {
     /// Enables SurrealKV versioned storage.
     pub versioned: bool,
@@ -31,19 +31,6 @@ pub struct InitDbOptions {
     pub changefeed_gc_interval: Option<Duration>,
     /// Enables SurrealDB AST payload storage.
     pub ast_payload: bool,
-}
-
-impl Default for InitDbOptions {
-    fn default() -> Self {
-        Self {
-            versioned: false,
-            version_retention: None,
-            query_timeout: None,
-            transaction_timeout: None,
-            changefeed_gc_interval: None,
-            ast_payload: false,
-        }
-    }
 }
 
 impl InitDbOptions {
