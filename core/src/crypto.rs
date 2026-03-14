@@ -3,7 +3,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use keyring::{Entry, Error as KeyringError};
-use rand::RngCore;
+use rand::RngExt;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -148,7 +148,7 @@ impl CryptoContext {
 pub fn encrypt_bytes(value: &[u8], context: &CryptoContext) -> Result<Vec<u8>, CryptoError> {
     let cipher = context.cipher();
     let mut nonce_bytes = [0_u8; NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    rand::rng().fill(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, value)
@@ -268,7 +268,7 @@ fn load_or_generate_key(
             }
 
             let mut key = [0_u8; KEY_LEN];
-            rand::thread_rng().fill_bytes(&mut key);
+            rand::rng().fill(&mut key);
             let encoded = encode_hex(&key);
             store.write_secret(&encoded)?;
             mirror_key_to_backup(&key, backup);
