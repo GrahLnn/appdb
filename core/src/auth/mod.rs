@@ -1,13 +1,9 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::Serialize;
 use surrealdb::opt::auth::Record;
 use surrealdb::types::SurrealValue;
 
 use crate::connection::get_db;
-use crate::query::query_return;
-
-const CHECK_ROOT_USER_SQL: &str =
-    r#"return (select * from user).find(|$v| $v.user = "root") != none"#;
 
 #[derive(Serialize, SurrealValue)]
 struct RootCredentials {
@@ -30,15 +26,25 @@ fn root_user(pass: &str) -> Record<RootCredentials> {
 pub async fn ensure_root_user(pass: &str) -> Result<()> {
     let db = get_db()?;
 
-    let exists = query_return::<bool>(CHECK_ROOT_USER_SQL)
-        .await?
-        .unwrap_or(false);
-
-    if !exists {
-        db.signup(root_user(pass)).await?;
-        return Ok(());
+    match db.signin(root_user(pass)).await {
+        Ok(_) => Ok(()),
+        Err(signin_err) => db.signup(root_user(pass)).await.map(|_| ()).map_err(|signup_err| {
+            anyhow!(
+                "root record access signin failed: {signin_err}; signup fallback failed: {signup_err}"
+            )
+        }),
     }
+}
 
-    db.signin(root_user(pass)).await?;
-    Ok(())
+#[cfg(test)]
+mod tests {
+    use super::root_user;
+
+    #[test]
+    fn root_user_uses_expected_record_access_shape() {
+        let record = root_user("secret");
+        assert_eq!(record.namespace, "app");
+        assert_eq!(record.database, "app");
+        assert_eq!(record.access, "account");
+    }
 }
