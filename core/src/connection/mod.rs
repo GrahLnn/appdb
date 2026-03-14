@@ -70,6 +70,40 @@ impl InitDbOptions {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct DbRuntime {
+    db: DbHandle,
+}
+
+impl DbRuntime {
+    pub async fn open(path: PathBuf) -> Result<Self> {
+        Self::open_with_options(path, InitDbOptions::default()).await
+    }
+
+    pub async fn open_with_options(path: PathBuf, options: InitDbOptions) -> Result<Self> {
+        fs::create_dir_all(&path)?;
+        let db = open_db(path, &options).await?;
+        db.use_ns("app").use_db("app").await?;
+        let runtime = Self { db: Arc::new(db) };
+        apply_schema(&runtime.db).await?;
+        Ok(runtime)
+    }
+
+    pub fn from_handle(db: DbHandle) -> Self {
+        Self { db }
+    }
+
+    pub fn handle(&self) -> DbHandle {
+        self.db.clone()
+    }
+
+    pub fn install_global(&self) -> Result<()> {
+        DB.set(self.db.clone())
+            .map_err(|_| DBError::AlreadyInitialized)?;
+        Ok(())
+    }
+}
+
 fn is_schema_already_defined_error(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("already exists") || lower.contains("already defined")
@@ -126,18 +160,7 @@ async fn open_db(path: PathBuf, options: &InitDbOptions) -> Result<Surreal<Db>> 
     Ok(builder.await?)
 }
 
-pub async fn init_db(path: PathBuf) -> Result<()> {
-    init_db_with_options(path, InitDbOptions::default()).await
-}
-
-pub async fn init_db_with_options(path: PathBuf, options: InitDbOptions) -> Result<()> {
-    fs::create_dir_all(&path)?;
-    let db = open_db(path, &options).await?;
-    db.use_ns("app").use_db("app").await?;
-
-    DB.set(Arc::new(db))
-        .map_err(|_| DBError::AlreadyInitialized)?;
-    let db = get_db()?;
+async fn apply_schema(db: &DbHandle) -> Result<()> {
     for item in inventory::iter::<schema::SchemaItem> {
         let ddl = make_schema_ddl_idempotent(item.ddl);
         let response = db.query(ddl.as_ref()).await?;
@@ -152,14 +175,26 @@ pub async fn init_db_with_options(path: PathBuf, options: InitDbOptions) -> Resu
     Ok(())
 }
 
+pub async fn init_db(path: PathBuf) -> Result<()> {
+    init_db_with_options(path, InitDbOptions::default()).await
+}
+
+pub async fn init_db_with_options(path: PathBuf, options: InitDbOptions) -> Result<()> {
+    let runtime = DbRuntime::open_with_options(path, options).await?;
+    runtime.install_global()?;
+    Ok(())
+}
+
 pub fn get_db() -> Result<DbHandle> {
     DB.get().cloned().ok_or(DBError::NotInitialized.into())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{make_schema_ddl_idempotent, InitDbOptions};
+    use super::{make_schema_ddl_idempotent, DbRuntime, InitDbOptions};
+    use std::sync::Arc;
     use std::time::Duration;
+    use surrealdb::Surreal;
 
     #[test]
     fn default_init_options_are_non_versioned() {
@@ -230,5 +265,12 @@ mod tests {
     fn idempotent_schema_leaves_other_statements_unchanged() {
         let ddl = "REMOVE TABLE user;";
         assert_eq!(make_schema_ddl_idempotent(ddl), ddl);
+    }
+
+    #[test]
+    fn runtime_wraps_existing_handle() {
+        let handle = Arc::new(Surreal::init());
+        let runtime = DbRuntime::from_handle(handle.clone());
+        assert!(Arc::ptr_eq(&runtime.handle(), &handle));
     }
 }

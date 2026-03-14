@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use appdb::connection::{get_db, init_db};
+use appdb::connection::{get_db, init_db, DbRuntime};
 use appdb::graph::GraphRepo;
 use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_return, RawSqlStmt};
@@ -144,6 +144,25 @@ fn number_id_repo_roundtrip_passes() {
             .expect("select_all_id should succeed");
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].id, 42);
+    });
+}
+
+#[test]
+fn db_runtime_opens_without_global_registration() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        let runtime = DbRuntime::open(test_db_path())
+            .await
+            .expect("runtime should open");
+        let db = runtime.handle();
+        let mut result = db
+            .query("RETURN 1;")
+            .await
+            .expect("query should succeed")
+            .check()
+            .expect("response should be valid");
+        let value: Option<i64> = result.take(0).expect("result should decode");
+        assert_eq!(value, Some(1));
     });
 }
 
