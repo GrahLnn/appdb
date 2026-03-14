@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 description = "Lightweight SurrealDB helper library for Tauri embedded database apps"
 documentation = "https://docs.rs/appdb"
+readme = "../README.md"
 
 [lib]
 name = "appdb"

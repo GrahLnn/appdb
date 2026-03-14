@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 description = "Proc macros for the appdb crate"
 documentation = "https://docs.rs/appdb-macros"
+readme = "../README.md"
 
 [lib]
 proc-macro = true
