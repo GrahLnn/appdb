@@ -1,0 +1,5 @@
+error: Store supports at most one `Id` field for automatic HasId generation
+ --> tests/ui/store/multiple_id_fields.rs:6:8
+  |
+6 | struct BadStore {
+  |        ^^^^^^^^

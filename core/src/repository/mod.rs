@@ -684,7 +684,7 @@ pub trait Crud: ModelMeta {
 }
 
 #[macro_export]
-/// Implements [`ModelMeta`] and [`Crud`] for a model type.
+/// Legacy helper for models that still need explicit table names or non-`Id` `HasId` wiring.
 macro_rules! impl_crud {
     ($t:ty) => {
         impl $crate::model::meta::ModelMeta for $t {
