@@ -91,6 +91,22 @@ fn record_id_key_to_json_value(key: &RecordIdKey) -> Value {
     }
 }
 
+fn prepare_upsert_by_id_value_parts<T>(data: T) -> Result<(RecordId, Value, Value)>
+where
+    T: ModelMeta,
+{
+    let table = T::table_name();
+    let key = extract_record_id_key(&data)?;
+    let id = record_id_key_to_json_value(&key);
+    let mut content = serde_json::to_value(&data)?;
+    if let Value::Object(map) = &mut content {
+        map.remove("id");
+    }
+    strip_null_fields(&mut content);
+    let record = RecordId::new(table, key);
+    Ok((record, content, id))
+}
+
 fn normalize_row_with_id<T>(row: SurrealDbValue, id: Value) -> Result<T>
 where
     T: ModelMeta,
@@ -336,15 +352,7 @@ where
 {
     pub async fn upsert_by_id_value(data: T) -> Result<T> {
         let db = get_db()?;
-        let table = T::table_name();
-        let key = extract_record_id_key(&data)?;
-        let id = record_id_key_to_json_value(&key);
-        let mut content = serde_json::to_value(&data)?;
-        if let Value::Object(map) = &mut content {
-            map.remove("id");
-        }
-        strip_null_fields(&mut content);
-        let record = RecordId::new(table, key);
+        let (record, content, id) = prepare_upsert_by_id_value_parts(data)?;
         let row: Option<SurrealDbValue> = db.upsert(record).content(content).await?;
         let row = row.ok_or(DBError::EmptyResult("upsert_by_id_value"))?;
         normalize_row_with_id(row, id)
@@ -394,12 +402,35 @@ where
             return Ok(vec![]);
         }
 
+        let db = get_db()?;
         let mut inserted_all = Vec::with_capacity(data.len());
         let chunk_size = 5_000;
 
         for chunk in data.chunks(chunk_size) {
-            for row in chunk.iter().cloned() {
-                let inserted = Self::upsert_by_id_value(row).await?;
+            let mut prepared = Vec::with_capacity(chunk.len());
+            let mut sql = String::new();
+
+            for (idx, row) in chunk.iter().cloned().enumerate() {
+                let (record, content, id) = prepare_upsert_by_id_value_parts(row)?;
+                sql.push_str(&format!(
+                    "UPSERT ONLY $record_{idx} CONTENT $data_{idx} RETURN AFTER;"
+                ));
+                prepared.push((record, content, id));
+            }
+
+            let mut query = db.query(sql);
+            for (idx, (record, content, _)) in prepared.iter().enumerate() {
+                query = query
+                    .bind((format!("record_{idx}"), record.clone()))
+                    .bind((format!("data_{idx}"), content.clone()));
+            }
+
+            let mut result = query.await?.check()?;
+
+            for (idx, (_, _, id)) in prepared.into_iter().enumerate() {
+                let row: Option<SurrealDbValue> = result.take(idx)?;
+                let row = row.ok_or(DBError::EmptyResult("insert_jump_by_id_value"))?;
+                let inserted = normalize_row_with_id(row, id)?;
                 inserted_all.push(inserted);
             }
         }

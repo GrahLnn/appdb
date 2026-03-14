@@ -179,6 +179,46 @@ fn upsert_by_id_value_preserves_payload_fields() {
 }
 
 #[test]
+fn insert_jump_by_id_value_batches_rows() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItProfile>::clean()
+            .await
+            .expect("clean should succeed");
+
+        let inserted = Repo::<ItProfile>::insert_jump_by_id_value(vec![
+            ItProfile {
+                id: "p1".to_owned(),
+                name: "alice".to_owned(),
+                note: Some("a".to_owned()),
+            },
+            ItProfile {
+                id: "p2".to_owned(),
+                name: "bob".to_owned(),
+                note: None,
+            },
+        ])
+        .await
+        .expect("batch upsert should succeed");
+
+        assert_eq!(inserted.len(), 2);
+        assert_eq!(inserted[0].id, "p1");
+        assert_eq!(inserted[0].name, "alice");
+        assert_eq!(inserted[0].note.as_deref(), Some("a"));
+        assert_eq!(inserted[1].id, "p2");
+        assert_eq!(inserted[1].name, "bob");
+        assert_eq!(inserted[1].note, None);
+
+        let selected = Repo::<ItProfile>::select_all_id()
+            .await
+            .expect("select_all_id should succeed");
+        assert_eq!(selected.len(), 2);
+    });
+}
+
+#[test]
 fn upsert_id_without_id_field_fails() {
     let _guard = acquire_test_lock();
     run_async(async {
