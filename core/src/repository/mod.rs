@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value;
 use surrealdb::opt::PatchOp;
-use surrealdb::types::{RecordId, RecordIdKey, Table};
+use surrealdb::types::{RecordId, RecordIdKey, Table, Value as SurrealDbValue};
 
 use crate::connection::get_db;
 use crate::error::DBError;
@@ -77,6 +77,32 @@ fn extract_record_id_key<T: Serialize>(data: &T) -> Result<RecordIdKey> {
         },
         _ => Err(DBError::InvalidModel(format!(
             "model `{}` must serialize to an object",
+            std::any::type_name::<T>()
+        ))
+        .into()),
+    }
+}
+
+fn record_id_key_to_json_value(key: &RecordIdKey) -> Value {
+    match key {
+        RecordIdKey::String(value) => Value::String(value.clone()),
+        RecordIdKey::Number(value) => Value::Number(serde_json::Number::from(*value)),
+        _ => unreachable!("extract_record_id_key only returns string or number ids"),
+    }
+}
+
+fn normalize_row_with_id<T>(row: SurrealDbValue, id: Value) -> Result<T>
+where
+    T: ModelMeta,
+{
+    let mut row = row.into_json_value();
+    match &mut row {
+        Value::Object(map) => {
+            map.insert("id".to_owned(), id);
+            Ok(serde_json::from_value(row)?)
+        }
+        _ => Err(DBError::InvalidModel(format!(
+            "database returned non-object row for `{}`",
             std::any::type_name::<T>()
         ))
         .into()),
@@ -312,20 +338,16 @@ where
         let db = get_db()?;
         let table = T::table_name();
         let key = extract_record_id_key(&data)?;
+        let id = record_id_key_to_json_value(&key);
         let mut content = serde_json::to_value(&data)?;
         if let Value::Object(map) = &mut content {
             map.remove("id");
         }
         strip_null_fields(&mut content);
         let record = RecordId::new(table, key);
-        let _: Option<surrealdb::types::Value> = db.upsert(record.clone()).content(content).await?;
-        let mut result = db
-            .query(QueryKind::select_by_id())
-            .bind(("record", record))
-            .await?
-            .check()?;
-        let row: Option<T> = result.take(0)?;
-        row.ok_or(DBError::NotFound.into())
+        let row: Option<SurrealDbValue> = db.upsert(record).content(content).await?;
+        let row = row.ok_or(DBError::EmptyResult("upsert_by_id_value"))?;
+        normalize_row_with_id(row, id)
     }
 
     pub async fn select_by_id_value<K>(id: K) -> Result<T>

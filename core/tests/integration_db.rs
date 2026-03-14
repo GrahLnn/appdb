@@ -40,10 +40,18 @@ struct ItNoId {
     name: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+struct ItProfile {
+    id: String,
+    name: String,
+    note: Option<String>,
+}
+
 impl_crud!(ItStringUser, "it_string_user");
 impl_crud!(ItNumberUser, "it_number_user");
 impl_crud!(ItRecordUser, "it_record_user");
 impl_crud!(ItNoId, "it_no_id");
+impl_crud!(ItProfile, "it_profile");
 impl_id!(ItRecordUser, id);
 declare_relation!(ItFollowsRel, "it_follows_rel");
 
@@ -136,6 +144,37 @@ fn number_id_repo_roundtrip_passes() {
             .expect("select_all_id should succeed");
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].id, 42);
+    });
+}
+
+#[test]
+fn upsert_by_id_value_preserves_payload_fields() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItProfile>::clean()
+            .await
+            .expect("clean should succeed");
+
+        let inserted = Repo::<ItProfile>::upsert_by_id_value(ItProfile {
+            id: "p1".to_owned(),
+            name: "alice".to_owned(),
+            note: None,
+        })
+        .await
+        .expect("upsert_by_id_value should succeed");
+
+        assert_eq!(inserted.id, "p1");
+        assert_eq!(inserted.name, "alice");
+        assert_eq!(inserted.note, None);
+
+        let selected = Repo::<ItProfile>::select_by_id_value("p1")
+            .await
+            .expect("select_by_id_value should succeed");
+        assert_eq!(selected.id, "p1");
+        assert_eq!(selected.name, "alice");
+        assert_eq!(selected.note, None);
     });
 }
 
