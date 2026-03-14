@@ -87,20 +87,20 @@ fn id_repo_roundtrip_passes() {
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItStringUser>::clean()
+        Repo::<ItStringUser>::delete_all()
             .await
-            .expect("clean should succeed");
+            .expect("delete_all should succeed");
 
-        let inserted = Repo::<ItStringUser>::upsert_by_id_value(ItStringUser {
+        let inserted = Repo::<ItStringUser>::save(ItStringUser {
             id: "alice".to_owned(),
         })
         .await
-        .expect("upsert_by_id_value should succeed");
+        .expect("save should succeed");
         assert_eq!(inserted.id, "alice");
 
-        let selected = Repo::<ItStringUser>::select_by_id_value("alice")
+        let selected = Repo::<ItStringUser>::get("alice")
             .await
-            .expect("select_by_id_value should succeed");
+            .expect("get should succeed");
         assert_eq!(selected.id, "alice");
     });
 }
@@ -111,13 +111,13 @@ fn select_missing_record_fails() {
     run_async(async {
         ensure_db().await;
 
-        let _ = Repo::<ItStringUser>::upsert_by_id_value(ItStringUser {
+        let _ = Repo::<ItStringUser>::save(ItStringUser {
             id: "seed".to_owned(),
         })
         .await
-        .expect("seed insert should succeed");
+        .expect("seed save should succeed");
 
-        let err = Repo::<ItStringUser>::select_by_id_value("missing")
+        let err = Repo::<ItStringUser>::get("missing")
             .await
             .expect_err("missing record should fail");
         assert!(err.to_string().contains("Record not found"), "{err}");
@@ -130,18 +130,18 @@ fn number_id_repo_roundtrip_passes() {
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItNumberUser>::clean()
+        Repo::<ItNumberUser>::delete_all()
             .await
-            .expect("clean should succeed");
+            .expect("delete_all should succeed");
 
-        let inserted = Repo::<ItNumberUser>::upsert_by_id_value(ItNumberUser { id: 42 })
+        let inserted = Repo::<ItNumberUser>::save(ItNumberUser { id: 42 })
             .await
-            .expect("upsert_by_id_value should succeed");
+            .expect("save should succeed");
         assert_eq!(inserted.id, 42);
 
-        let selected = Repo::<ItNumberUser>::select_all_id()
+        let selected = Repo::<ItNumberUser>::list()
             .await
-            .expect("select_all_id should succeed");
+            .expect("list should succeed");
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].id, 42);
     });
@@ -167,30 +167,30 @@ fn db_runtime_opens_without_global_registration() {
 }
 
 #[test]
-fn upsert_by_id_value_preserves_payload_fields() {
+fn save_preserves_payload_fields() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItProfile>::clean()
+        Repo::<ItProfile>::delete_all()
             .await
-            .expect("clean should succeed");
+            .expect("delete_all should succeed");
 
-        let inserted = Repo::<ItProfile>::upsert_by_id_value(ItProfile {
+        let inserted = Repo::<ItProfile>::save(ItProfile {
             id: "p1".to_owned(),
             name: "alice".to_owned(),
             note: None,
         })
         .await
-        .expect("upsert_by_id_value should succeed");
+        .expect("save should succeed");
 
         assert_eq!(inserted.id, "p1");
         assert_eq!(inserted.name, "alice");
         assert_eq!(inserted.note, None);
 
-        let selected = Repo::<ItProfile>::select_by_id_value("p1")
+        let selected = Repo::<ItProfile>::get("p1")
             .await
-            .expect("select_by_id_value should succeed");
+            .expect("get should succeed");
         assert_eq!(selected.id, "p1");
         assert_eq!(selected.name, "alice");
         assert_eq!(selected.note, None);
@@ -198,16 +198,16 @@ fn upsert_by_id_value_preserves_payload_fields() {
 }
 
 #[test]
-fn insert_jump_by_id_value_batches_rows() {
+fn save_many_batches_rows() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItProfile>::clean()
+        Repo::<ItProfile>::delete_all()
             .await
-            .expect("clean should succeed");
+            .expect("delete_all should succeed");
 
-        let inserted = Repo::<ItProfile>::insert_jump_by_id_value(vec![
+        let inserted = Repo::<ItProfile>::save_many(vec![
             ItProfile {
                 id: "p1".to_owned(),
                 name: "alice".to_owned(),
@@ -220,7 +220,7 @@ fn insert_jump_by_id_value_batches_rows() {
             },
         ])
         .await
-        .expect("batch upsert should succeed");
+        .expect("batch save should succeed");
 
         assert_eq!(inserted.len(), 2);
         assert_eq!(inserted[0].id, "p1");
@@ -230,9 +230,9 @@ fn insert_jump_by_id_value_batches_rows() {
         assert_eq!(inserted[1].name, "bob");
         assert_eq!(inserted[1].note, None);
 
-        let selected = Repo::<ItProfile>::select_all_id()
+        let selected = Repo::<ItProfile>::list()
             .await
-            .expect("select_all_id should succeed");
+            .expect("list should succeed");
         assert_eq!(selected.len(), 2);
     });
 }
@@ -243,7 +243,7 @@ fn upsert_id_without_id_field_fails() {
     run_async(async {
         ensure_db().await;
 
-        let err = Repo::<ItNoId>::upsert_by_id_value(ItNoId {
+        let err = Repo::<ItNoId>::save(ItNoId {
             name: "alice".to_owned(),
         })
         .await
@@ -260,9 +260,9 @@ fn graph_relation_roundtrip_passes() {
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItRecordUser>::clean()
+        Repo::<ItRecordUser>::delete_all()
             .await
-            .expect("clean should succeed");
+            .expect("delete_all should succeed");
 
         let a = ItRecordUser {
             id: RecordId::new("it_record_user", "a"),
@@ -285,18 +285,18 @@ fn graph_relation_roundtrip_passes() {
             .await
             .expect("relate should succeed");
 
-        let outs = GraphRepo::outs(a.id.clone(), rel, "it_record_user")
+        let outs = GraphRepo::out_ids(a.id.clone(), rel, "it_record_user")
             .await
-            .expect("outs should succeed");
+            .expect("out_ids should succeed");
         assert!(outs.iter().any(|id| id == &b.id));
 
         GraphRepo::unrelate_by_id(a.id.clone(), b.id.clone(), rel)
             .await
             .expect("unrelate should succeed");
 
-        let outs_after = GraphRepo::outs(a.id.clone(), rel, "it_record_user")
+        let outs_after = GraphRepo::out_ids(a.id.clone(), rel, "it_record_user")
             .await
-            .expect("outs after unrelate should succeed");
+            .expect("out_ids after unrelate should succeed");
         assert!(!outs_after.iter().any(|id| id == &b.id));
     });
 }
@@ -307,9 +307,9 @@ fn graph_relation_name_is_bound_as_identifier() {
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItRecordUser>::clean()
+        Repo::<ItRecordUser>::delete_all()
             .await
-            .expect("clean should succeed");
+            .expect("delete_all should succeed");
 
         let x = ItRecordUser {
             id: RecordId::new("it_record_user", "x"),
@@ -334,10 +334,10 @@ fn graph_relation_name_is_bound_as_identifier() {
         .await
         .expect("relation name should be treated as bound identifier");
 
-        let selected_x = Repo::<ItRecordUser>::select("x")
+        let selected_x = Repo::<ItRecordUser>::get_by_key("x")
             .await
             .expect("x should still exist");
-        let selected_y = Repo::<ItRecordUser>::select("y")
+        let selected_y = Repo::<ItRecordUser>::get_by_key("y")
             .await
             .expect("y should still exist");
         assert_eq!(selected_x.name, "X");
@@ -351,9 +351,9 @@ fn delete_target_string_bind_fails_but_table_bind_passes() {
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItRecordUser>::clean()
+        Repo::<ItRecordUser>::delete_all()
             .await
-            .expect("clean should succeed");
+            .expect("delete_all should succeed");
 
         Repo::<ItRecordUser>::create_by_id(
             "z",

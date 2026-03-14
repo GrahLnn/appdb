@@ -75,7 +75,7 @@ impl QueryKind {
     pub fn insert(_table: &str) -> String {
         "INSERT IGNORE INTO $table $data;".to_owned()
     }
-    pub fn insert_replace(_table: &str, keys: Vec<String>) -> String {
+    pub fn insert_or_replace(_table: &str, keys: Vec<String>) -> String {
         let mut sql = String::from("INSERT INTO $table $data ON DUPLICATE KEY UPDATE ");
         for (idx, key) in keys.iter().enumerate() {
             if idx > 0 {
@@ -114,11 +114,11 @@ impl QueryKind {
     pub fn unrelate_all(_self_id: &RecordId, _rel: &str) -> String {
         "DELETE $rel WHERE in = $in RETURN NONE;".to_owned()
     }
-    pub fn rel_outs(_in_id: &RecordId, _rel: &str, _out_table: &str) -> String {
+    pub fn select_out_ids(_in_id: &RecordId, _rel: &str, _out_table: &str) -> String {
         "RETURN (SELECT VALUE out FROM $rel WHERE in = $in AND record::tb(out) = $out_table);"
             .to_owned()
     }
-    pub fn rel_ins(_out_id: &RecordId, _rel: &str, _in_table: &str) -> String {
+    pub fn select_in_ids(_out_id: &RecordId, _rel: &str, _in_table: &str) -> String {
         "RETURN (SELECT VALUE in FROM $rel WHERE out = $out AND record::tb(in) = $in_table);"
             .to_owned()
     }
@@ -137,10 +137,10 @@ impl QueryKind {
     pub fn select_by_id() -> String {
         "RETURN (SELECT *, record::id(id) AS id FROM ONLY $record);".to_owned()
     }
-    pub fn select_all_id() -> String {
+    pub fn select_all_with_id() -> String {
         "SELECT *, record::id(id) AS id FROM $table;".to_owned()
     }
-    pub fn select_limit_id() -> String {
+    pub fn select_limit_with_id() -> String {
         "SELECT *, record::id(id) AS id FROM $table LIMIT $count;".to_owned()
     }
 }
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn relation_lookups_use_bind_placeholders() {
         let in_id = RecordId::new("user", "u1");
-        let sql = QueryKind::rel_outs(&in_id, "follows", "user");
+        let sql = QueryKind::select_out_ids(&in_id, "follows", "user");
         assert!(sql.contains("FROM $rel"));
         assert!(sql.contains("record::tb(out) = $out_table"));
     }

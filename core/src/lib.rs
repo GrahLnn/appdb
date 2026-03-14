@@ -3,7 +3,6 @@ extern crate self as appdb;
 pub mod auth;
 pub mod connection;
 pub mod crypto;
-pub mod database;
 pub mod error;
 pub mod facade;
 pub mod graph;

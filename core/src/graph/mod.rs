@@ -50,8 +50,8 @@ impl GraphRepo {
         Ok(())
     }
 
-    pub async fn outs(in_id: RecordId, rel: &str, out_table: &str) -> Result<Vec<RecordId>> {
-        let sql = QueryKind::rel_outs(&in_id, rel, out_table);
+    pub async fn out_ids(in_id: RecordId, rel: &str, out_table: &str) -> Result<Vec<RecordId>> {
+        let sql = QueryKind::select_out_ids(&in_id, rel, out_table);
         let db = get_db()?;
         let mut result = db
             .query(sql)
@@ -64,8 +64,8 @@ impl GraphRepo {
         Ok(rows)
     }
 
-    pub async fn ins(out_id: RecordId, rel: &str, in_table: &str) -> Result<Vec<RecordId>> {
-        let sql = QueryKind::rel_ins(&out_id, rel, in_table);
+    pub async fn in_ids(out_id: RecordId, rel: &str, in_table: &str) -> Result<Vec<RecordId>> {
+        let sql = QueryKind::select_in_ids(&out_id, rel, in_table);
         let db = get_db()?;
         let mut result = db
             .query(sql)
