@@ -72,25 +72,6 @@ fn to_snake_case(input: &str) -> String {
     out
 }
 
-#[macro_export]
-/// Implements [`HasId`] by cloning the chosen field or field path.
-macro_rules! impl_id {
-    ($t:ty, $id:ident) => {
-        impl $crate::model::meta::HasId for $t {
-            fn id(&self) -> surrealdb::types::RecordId {
-                self.$id.clone()
-            }
-        }
-    };
-    ($t:ty, $($path:tt)+) => {
-        impl $crate::model::meta::HasId for $t {
-            fn id(&self) -> surrealdb::types::RecordId {
-                self.$($path)+.clone()
-            }
-        }
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use super::{default_table_name, register_table};
