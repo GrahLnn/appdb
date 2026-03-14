@@ -25,7 +25,7 @@ Official guidance:
 Why it matters here:
 - `Repo<T>` and most graph helpers are mostly aligned with this pattern.
 - `RawSql` is intentionally outside that safety boundary and therefore should be treated as an advanced escape hatch.
-- `QueryKind::insert_replace` still builds identifier fragments dynamically from serialized field names. That is not value interpolation, but it is still a query-construction trust boundary.
+- `QueryKind::insert_or_replace` still builds identifier fragments dynamically from serialized field names. That is not value interpolation, but it is still a query-construction trust boundary.
 
 Library implication:
 - Keep user data in bind variables.
@@ -52,7 +52,7 @@ Official guidance:
 - Unique identity beyond the record id should be backed by a unique index.
 
 Why it matters here:
-- `select_record_id(k, v)` is only performant if `k` is indexed.
+- `find_record_id(k, v)` is only performant if `k` is indexed.
 - pagination helpers that order by arbitrary fields assume the caller has defined a compatible index.
 - graph lookups by `in` and `out` benefit from relation-table indexing.
 
@@ -69,7 +69,7 @@ Official guidance:
 
 Why it matters here:
 - This crate already exposes id-centric CRUD and a dedicated `Id` abstraction.
-- `upsert_by_id_value` is conceptually closer to the SurrealDB model than a secondary-field lookup followed by mutation.
+- `save` is conceptually closer to the SurrealDB model than a secondary-field lookup followed by mutation.
 
 Library implication:
 - Keep leaning toward id-addressed APIs.
@@ -187,7 +187,7 @@ All functions in this module are pure SQL string emitters. Their FSM shape is `I
 - `all_by_order`: emit ordered full-table query
 - `limit`: emit bounded select query
 - `insert`: emit `INSERT IGNORE` query
-- `insert_replace`: emit `INSERT ... ON DUPLICATE KEY UPDATE` query using caller-supplied field names
+- `insert_or_replace`: emit `INSERT ... ON DUPLICATE KEY UPDATE` query using caller-supplied field names
 - `upsert_set`: emit field-set update query
 - `select_id_single`: emit query that returns a single record id by field equality
 - `all_id`: emit query returning all ids from a table
@@ -196,19 +196,19 @@ All functions in this module are pure SQL string emitters. Their FSM shape is `I
 - `relate`: emit relation insert query
 - `unrelate`: emit edge delete query for a specific pair
 - `unrelate_all`: emit edge delete query for all outgoing edges
-- `rel_outs`: emit query returning `out` record ids for an incoming record
-- `rel_ins`: emit query returning `in` record ids for an outgoing record
+- `select_out_ids`: emit query returning `out` record ids for an incoming record
+- `select_in_ids`: emit query returning `in` record ids for an outgoing record
 - `rel_id`: emit query returning a single relation record id
 - `create_return_id`: emit create-and-return-id query
 - `delete_record`: emit record deletion query
 - `delete_table`: emit table wipe query
 - `select_by_id`: emit query that projects `record::id(id) AS id`
-- `select_all_id`: emit full-table select with normalized `id` projection
-- `select_limit_id`: emit bounded select with normalized `id` projection
+- `select_all_with_id`: emit full-table select with normalized `id` projection
+- `select_limit_with_id`: emit bounded select with normalized `id` projection
 
 State observation:
 - The pure-builder model is good for composability.
-- The weak point is identifier trust: table names, relation names, and especially `insert_replace` field names are not represented by typed safe identifiers.
+- The weak point is identifier trust: table names, relation names, and especially `insert_or_replace` field names are not represented by typed safe identifiers.
 
 ### `core/src/query/sql.rs`
 
@@ -237,26 +237,26 @@ State observation:
 - `create_by_id`: `I(id, model) -> A(get_db) -> B(record target) -> X(db.create((table,id)).content) -> N(Option<T> -> T) -> O | E(empty/create)`
 - `upsert`: `I(model with HasId) -> A(get_db) -> B(model.id()) -> X(db.upsert(id).content(model)) -> N(Option<T> -> T) -> O | E(empty/upsert)`
 - `upsert_by_id`: `I(id, model) -> A(get_db) -> X(db.upsert(id).content(model)) -> N(Option<T> -> T) -> O | E(empty/upsert)`
-- `select`: `I(id key) -> A(get_db) -> X(db.select((table,id))) -> N(Option<T> -> T) -> O | E(NotFound/select)`
-- `select_record`: `I(record id) -> A(get_db) -> X(db.select(record)) -> N(Option<T> -> T) -> O | E(NotFound)`
-- `select_all_unbounded`: `I -> A(get_db) -> X(db.select(table)) -> O(Vec<T>) | E(select)`
+- `get_by_key`: `I(id key) -> A(get_db) -> X(db.select((table,id))) -> N(Option<T> -> T) -> O | E(NotFound/select)`
+- `get_record`: `I(record id) -> A(get_db) -> X(db.select(record)) -> N(Option<T> -> T) -> O | E(NotFound)`
+- `scan`: `I -> A(get_db) -> X(db.select(table)) -> O(Vec<T>) | E(select)`
 - `select_limit`: `I(count) -> A(get_db) -> B(limit SQL) -> X(query + binds) -> N(check + take rows) -> O(Vec<T>) | E`
 - `update_by_id`: `I(id, model) -> A(get_db) -> X(db.update(id).content(model)) -> N(Option<T> -> T) -> O | E(NotFound)`
 - `merge`: `I(id, patch object) -> A(get_db) -> X(db.update(id).merge(data)) -> N(Option<T> -> T) -> O | E(NotFound)`
 - `patch`: `I(id, ops) -> A(get_db) -> V(empty patch special-case) -> B(chain patch ops) -> X(await final patch query) -> N(Option<T> -> T) -> O | E(NotFound/patch)`
 - `insert`: `I(Vec<T>) -> A(get_db) -> X(db.insert(table).content(data)) -> O(Vec<T>) | E(insert)`
-- `insert_jump`: `I(Vec<T>) -> A(get_db) -> V(chunk into 50k) -> loop[B(insert SQL) -> X(query each chunk) -> N(check + take)] -> O(all rows) | E(chunk query)`
-- `insert_replace`: `I(Vec<T>) -> V(empty fast path) -> A(get_db) -> X(struct_field_names(first row)) -> V(chunk into 50k) -> loop[B(dynamic insert_replace SQL) -> X(query each chunk) -> N(check + take) -> X(stdout progress print)] -> O(all rows) | E`
+- `insert_ignore`: `I(Vec<T>) -> A(get_db) -> V(chunk into 50k) -> loop[B(insert SQL) -> X(query each chunk) -> N(check + take)] -> O(all rows) | E(chunk query)`
+- `insert_or_replace`: `I(Vec<T>) -> V(empty fast path) -> A(get_db) -> X(struct_field_names(first row)) -> V(chunk into 50k) -> loop[B(dynamic insert_or_replace SQL) -> X(query each chunk) -> N(check + take)] -> O(all rows) | E`
 - `delete_by_key`: `I(id key) -> B(RecordId::new) -> X(delegate delete_record) -> O | E`
 - `delete_record`: `I(record id) -> A(get_db) -> B(delete_record SQL) -> X(query + bind) -> N(check) -> O(()) | E`
-- `clean`: `I -> A(get_db) -> B(delete_table SQL) -> X(query + bind) -> N(ignore only table-missing errors) -> O | E`
-- `select_record_id`: `I(field,value) -> A(get_db) -> B(select_id_single SQL) -> X(query + binds) -> N(check + take ids + first) -> O(RecordId) | E(NotFound)`
-- `all_record`: `I -> A(get_db) -> B(all_id SQL) -> X(query + bind) -> N(check + take ids) -> O(Vec<RecordId>) | E`
-- `upsert_by_id_value`: `I(model) -> A(get_db) -> X(extract_record_id_key + serialize model) -> V(remove id + strip nulls) -> B(RecordId::new) -> X(db.upsert(record).content(content)) -> B(select_by_id SQL) -> X(query record again) -> N(check + take row) -> O(T) | E`
-- `select_by_id_value`: `I(id key) -> A(get_db) -> B(RecordId::new + select_by_id SQL) -> X(query + bind) -> N(check + take row) -> O(T) | E(NotFound)`
-- `select_all_id`: `I -> A(get_db) -> B(select_all_id SQL) -> X(query + bind table) -> N(check + take rows) -> O(Vec<T>) | E`
-- `select_limit_id`: `I(count) -> A(get_db) -> B(select_limit_id SQL) -> X(query + binds) -> N(check + take rows) -> O(Vec<T>) | E`
-- `insert_jump_by_id_value`: `I(Vec<T>) -> V(empty fast path) -> V(chunk into 5k) -> nested loop[X(upsert_by_id_value per row)] -> O(Vec<T>) | E(first row failure)`
+- `delete_all`: `I -> A(get_db) -> B(delete_table SQL) -> X(query + bind) -> N(ignore only table-missing errors) -> O | E`
+- `find_record_id`: `I(field,value) -> A(get_db) -> B(select_id_single SQL) -> X(query + binds) -> N(check + take ids + first) -> O(RecordId) | E(NotFound)`
+- `list_record_ids`: `I -> A(get_db) -> B(all_id SQL) -> X(query + bind) -> N(check + take ids) -> O(Vec<RecordId>) | E`
+- `save`: `I(model) -> A(get_db) -> X(extract_record_id_key + serialize model) -> V(remove id + strip nulls) -> B(RecordId::new) -> X(db.upsert(record).content(content)) -> N(normalize returned row with id) -> O(T) | E`
+- `get`: `I(id key) -> A(get_db) -> B(RecordId::new + select_by_id SQL) -> X(query + bind) -> N(check + take row) -> O(T) | E(NotFound)`
+- `list`: `I -> A(get_db) -> B(select_all_with_id SQL) -> X(query + bind table) -> N(check + take rows) -> O(Vec<T>) | E`
+- `list_limit`: `I(count) -> A(get_db) -> B(select_limit_with_id SQL) -> X(query + binds) -> N(check + take rows) -> O(Vec<T>) | E`
+- `save_many`: `I(Vec<T>) -> V(empty fast path) -> V(chunk into 5k) -> loop[B(compose chunked upsert SQL) -> X(query + binds) -> N(check + normalize rows)] -> O(Vec<T>) | E`
 
 ### `core/src/repository/mod.rs` `Crud` trait wrappers
 
@@ -269,25 +269,26 @@ Wrapper mapping:
 - `create_by_id` -> `Repo::<Self>::create_by_id`
 - `upsert` -> `Repo::<Self>::upsert`
 - `upsert_by_id` -> `Repo::<Self>::upsert_by_id`
-- `select` -> `Repo::<Self>::select`
-- `select_record` -> `Repo::<Self>::select_record`
-- `select_all_unbounded` -> `Repo::<Self>::select_all_unbounded`
-- `select_all` -> `Self::select_all_unbounded`
+- `get_by_key` -> `Repo::<Self>::get_by_key`
+- `get_record` -> `Repo::<Self>::get_record`
+- `scan` -> `Repo::<Self>::scan`
 - `select_limit` -> `Repo::<Self>::select_limit`
 - `update` -> `Repo::<Self>::update_by_id(self.id(), self)`
 - `update_by_id` -> `Repo::<Self>::update_by_id`
 - `merge` -> `Repo::<Self>::merge`
 - `patch` -> `Repo::<Self>::patch`
 - `insert` -> `Repo::<Self>::insert`
-- `insert_jump` -> `Repo::<Self>::insert_jump`
-- `insert_replace` -> `Repo::<Self>::insert_replace`
+- `insert_ignore` -> `Repo::<Self>::insert_ignore`
+- `insert_or_replace` -> `Repo::<Self>::insert_or_replace`
 - `delete` -> `Repo::<Self>::delete_record(self.id())`
 - `delete_by_key` -> `Repo::<Self>::delete_by_key`
-- `delete_by_idkey` -> `Self::delete_by_key`
 - `delete_record` -> `Repo::<Self>::delete_record`
-- `clean` -> `Repo::<Self>::clean`
-- `select_record_id` -> `Repo::<Self>::select_record_id`
-- `all_record` -> `Repo::<Self>::all_record`
+- `delete_all` -> `Repo::<Self>::delete_all`
+- `find_record_id` -> `Repo::<Self>::find_record_id`
+- `list_record_ids` -> `Repo::<Self>::list_record_ids`
+- `save` -> `Repo::<Self>::save`
+- `get` -> `Repo::<Self>::get`
+- `save_many` -> `Repo::<Self>::save_many`
 
 State observation:
 - The repository layer is the main business-facing capability surface.
@@ -298,8 +299,8 @@ State observation:
 - `GraphRepo::relate_by_id`: `I(in_id,out_id,rel) -> A(get_db) -> B(relate SQL) -> X(query + bind rel/in/out) -> N(check) -> O(()) | E`
 - `GraphRepo::unrelate_by_id`: `I(self_id,target_id,rel) -> A(get_db) -> B(unrelate SQL) -> X(query + binds) -> N(check) -> O | E`
 - `GraphRepo::unrelate_all`: `I(self_id,rel) -> A(get_db) -> B(unrelate_all SQL) -> X(query + binds) -> N(check) -> O | E`
-- `GraphRepo::outs`: `I(in_id,rel,out_table) -> A(get_db) -> B(rel_outs SQL) -> X(query + binds) -> N(check + take ids) -> O(Vec<RecordId>) | E`
-- `GraphRepo::ins`: `I(out_id,rel,in_table) -> A(get_db) -> B(rel_ins SQL) -> X(query + binds) -> N(check + take ids) -> O(Vec<RecordId>) | E`
+- `GraphRepo::out_ids`: `I(in_id,rel,out_table) -> A(get_db) -> B(select_out_ids SQL) -> X(query + binds) -> N(check + take ids) -> O(Vec<RecordId>) | E`
+- `GraphRepo::in_ids`: `I(out_id,rel,in_table) -> A(get_db) -> B(select_in_ids SQL) -> X(query + binds) -> N(check + take ids) -> O(Vec<RecordId>) | E`
 - `GraphRepo::insert_relation`: `I(rel, rows) -> A(get_db) -> X(db.insert(rel).relation(rows)) -> O(Vec<Relation>) | E`
 - `GraphCrud::relate`: `I(self,target,rel) -> B(self.id,target.id) -> X(GraphRepo::relate_by_id) -> O | E`
 - `GraphCrud::unrelate`: `I(self,target,rel) -> B(self.id,target.id) -> X(GraphRepo::unrelate_by_id) -> O | E`
@@ -423,16 +424,15 @@ Helpers and backup path:
 
 - `core/src/model/relation.rs`: `ensure_relation_name` is a no-op. The crate conceptually has a relation-identifier invariant, but it is not enforced anywhere.
 - `core/src/query/sql.rs`: `RawSql` exposes unchecked raw SQL without a paired safe builder-and-bind API. That is fine as an escape hatch, but the facade should make the trust boundary explicit.
-- `core/src/repository/mod.rs`: `insert_replace` trusts serialized field names when constructing SQL. Even if model field names are usually compile-time, this is still identifier construction without validation.
+- `core/src/repository/mod.rs`: `insert_or_replace` trusts serialized field names when constructing SQL. Even if model field names are usually compile-time, this is still identifier construction without validation.
 - `core/src/auth/mod.rs`: `ensure_root_user` assumes access `account`, namespace `app`, database `app`, and a queryable `user` table shape. That is a brittle operational contract.
 - `core/src/tx/mod.rs`: transaction success returns only the last statement response. Intermediate state exists but is discarded, which makes it harder to reason about correctness for multi-step flows.
 
 ### P1: obvious performance issues
 
-- `core/src/repository/mod.rs`: `insert_jump_by_id_value` is effectively `O(n)` network or engine round trips because it calls `upsert_by_id_value` for each row.
-- `core/src/repository/mod.rs`: `upsert_by_id_value` performs one write and then one follow-up select. If SurrealDB can return the normalized row directly for the chosen statement shape, that extra read should be eliminated.
-- `core/src/repository/mod.rs`: `select_all_unbounded` is a footgun for large tables. It is convenient, but it makes an unbounded full read the default path.
-- `core/src/repository/mod.rs`: `insert_replace` prints progress with `println!` from library code, which is both a performance tax and an API smell.
+- `core/src/repository/mod.rs`: older per-row `insert_jump_by_id_value` style batching would be `O(n)` network or engine round trips. The current `save_many` design avoids that by composing chunked upserts into a single query per batch.
+- `core/src/repository/mod.rs`: older `upsert_by_id_value` style flows needed a follow-up select after write. The current `save` path normalizes the returned row directly and avoids that extra read.
+- `core/src/repository/mod.rs`: `scan` is still a footgun for large tables. It is convenient, but it makes an unbounded full read easy to reach.
 - `core/src/connection/mod.rs`: schema inventory DDL is replayed sequentially on every initialization and idempotence is inferred by string matching on error messages.
 
 ### P2: architectural limitations
@@ -452,9 +452,9 @@ Helpers and backup path:
 
 ### Step 2: remove avoidable round trips
 
-- Replace `insert_jump_by_id_value` with a batch upsert strategy instead of per-row looping.
-- Rework `upsert_by_id_value` so the write path can return the final typed row directly if the chosen SurrealQL form allows it.
-- Consider a bounded iterator or page-stream API instead of treating `select_all_unbounded` as the normal convenience path.
+- Keep `save_many` on chunked batch upserts rather than regressing to per-row write loops.
+- Keep `save` on a single write path that returns the normalized typed row directly.
+- Consider a bounded iterator or page-stream API instead of treating `scan` as the normal convenience path.
 
 ### Step 3: make runtime state explicit
 

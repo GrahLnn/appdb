@@ -91,7 +91,7 @@ fn record_id_key_to_json_value(key: &RecordIdKey) -> Value {
     }
 }
 
-fn prepare_upsert_by_id_value_parts<T>(data: T) -> Result<(RecordId, Value, Value)>
+fn prepare_save_parts<T>(data: T) -> Result<(RecordId, Value, Value)>
 where
     T: ModelMeta,
 {
@@ -174,7 +174,7 @@ where
         updated.ok_or(DBError::EmptyResult("upsert_by_id").into())
     }
 
-    pub async fn select<K>(id: K) -> Result<T>
+    pub async fn get_by_key<K>(id: K) -> Result<T>
     where
         RecordIdKey: From<K>,
         K: Send,
@@ -184,19 +184,19 @@ where
         record.ok_or(DBError::NotFound.into())
     }
 
-    pub async fn select_record(record: RecordId) -> Result<T> {
+    pub async fn get_record(record: RecordId) -> Result<T> {
         let db = get_db()?;
         let record: Option<T> = db.select(record).await?;
         record.ok_or(DBError::NotFound.into())
     }
 
-    pub async fn select_all_unbounded() -> Result<Vec<T>> {
+    pub async fn scan() -> Result<Vec<T>> {
         let db = get_db()?;
         let records: Vec<T> = db.select(T::table_name()).await?;
         Ok(records)
     }
 
-    pub async fn select_limit(count: i64) -> Result<Vec<T>> {
+    pub async fn scan_limit(count: i64) -> Result<Vec<T>> {
         let db = get_db()?;
         let records: Vec<T> = db
             .query(QueryKind::limit(T::table_name(), count))
@@ -242,7 +242,7 @@ where
         Ok(created)
     }
 
-    pub async fn insert_jump(data: Vec<T>) -> Result<Vec<T>> {
+    pub async fn insert_ignore(data: Vec<T>) -> Result<Vec<T>> {
         let db = get_db()?;
         let chunk_size = 50_000;
         let mut inserted_all = Vec::with_capacity(data.len());
@@ -262,7 +262,7 @@ where
         Ok(inserted_all)
     }
 
-    pub async fn insert_replace(data: Vec<T>) -> Result<Vec<T>> {
+    pub async fn insert_or_replace(data: Vec<T>) -> Result<Vec<T>> {
         if data.is_empty() {
             return Ok(vec![]);
         }
@@ -275,7 +275,7 @@ where
         for chunk in data.chunks(chunk_size) {
             let chunk_clone = chunk.to_vec();
             let inserted: Vec<T> = db
-                .query(QueryKind::insert_replace(T::table_name(), keys.clone()))
+                .query(QueryKind::insert_or_replace(T::table_name(), keys.clone()))
                 .bind(("table", Table::from(T::table_name())))
                 .bind(("data", chunk_clone))
                 .await?
@@ -305,7 +305,7 @@ where
         Ok(())
     }
 
-    pub async fn clean() -> Result<()> {
+    pub async fn delete_all() -> Result<()> {
         let db = get_db()?;
         let result = db
             .query(QueryKind::delete_table())
@@ -320,7 +320,7 @@ where
         Ok(())
     }
 
-    pub async fn select_record_id(k: &str, v: &str) -> Result<RecordId> {
+    pub async fn find_record_id(k: &str, v: &str) -> Result<RecordId> {
         let db = get_db()?;
         let ids: Vec<RecordId> = db
             .query(QueryKind::select_id_single(T::table_name()))
@@ -334,7 +334,7 @@ where
         id.ok_or(DBError::NotFound.into())
     }
 
-    pub async fn all_record() -> Result<Vec<RecordId>> {
+    pub async fn list_record_ids() -> Result<Vec<RecordId>> {
         let db = get_db()?;
         let mut result = db
             .query(QueryKind::all_id(T::table_name()))
@@ -350,15 +350,15 @@ impl<T> Repo<T>
 where
     T: ModelMeta,
 {
-    pub async fn upsert_by_id_value(data: T) -> Result<T> {
+    pub async fn save(data: T) -> Result<T> {
         let db = get_db()?;
-        let (record, content, id) = prepare_upsert_by_id_value_parts(data)?;
+        let (record, content, id) = prepare_save_parts(data)?;
         let row: Option<SurrealDbValue> = db.upsert(record).content(content).await?;
-        let row = row.ok_or(DBError::EmptyResult("upsert_by_id_value"))?;
+        let row = row.ok_or(DBError::EmptyResult("save"))?;
         normalize_row_with_id(row, id)
     }
 
-    pub async fn select_by_id_value<K>(id: K) -> Result<T>
+    pub async fn get<K>(id: K) -> Result<T>
     where
         RecordIdKey: From<K>,
         K: Send,
@@ -374,10 +374,10 @@ where
         row.ok_or(DBError::NotFound.into())
     }
 
-    pub async fn select_all_id() -> Result<Vec<T>> {
+    pub async fn list() -> Result<Vec<T>> {
         let db = get_db()?;
         let mut result = db
-            .query(QueryKind::select_all_id())
+            .query(QueryKind::select_all_with_id())
             .bind(("table", Table::from(T::table_name())))
             .await?
             .check()?;
@@ -385,10 +385,10 @@ where
         Ok(rows)
     }
 
-    pub async fn select_limit_id(count: i64) -> Result<Vec<T>> {
+    pub async fn list_limit(count: i64) -> Result<Vec<T>> {
         let db = get_db()?;
         let mut result = db
-            .query(QueryKind::select_limit_id())
+            .query(QueryKind::select_limit_with_id())
             .bind(("table", Table::from(T::table_name())))
             .bind(("count", count))
             .await?
@@ -397,7 +397,7 @@ where
         Ok(rows)
     }
 
-    pub async fn insert_jump_by_id_value(data: Vec<T>) -> Result<Vec<T>> {
+    pub async fn save_many(data: Vec<T>) -> Result<Vec<T>> {
         if data.is_empty() {
             return Ok(vec![]);
         }
@@ -411,7 +411,7 @@ where
             let mut sql = String::new();
 
             for (idx, row) in chunk.iter().cloned().enumerate() {
-                let (record, content, id) = prepare_upsert_by_id_value_parts(row)?;
+                let (record, content, id) = prepare_save_parts(row)?;
                 sql.push_str(&format!(
                     "UPSERT ONLY $record_{idx} CONTENT $data_{idx} RETURN AFTER;"
                 ));
@@ -429,7 +429,7 @@ where
 
             for (idx, (_, _, id)) in prepared.into_iter().enumerate() {
                 let row: Option<SurrealDbValue> = result.take(idx)?;
-                let row = row.ok_or(DBError::EmptyResult("insert_jump_by_id_value"))?;
+                let row = row.ok_or(DBError::EmptyResult("save_many"))?;
                 let inserted = normalize_row_with_id(row, id)?;
                 inserted_all.push(inserted);
             }
@@ -579,28 +579,28 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::upsert_by_id(id, data).await
     }
 
-    async fn select<T>(id: T) -> Result<Self>
+    async fn get_by_key<T>(id: T) -> Result<Self>
     where
         RecordIdKey: From<T>,
         T: Send,
     {
-        Repo::<Self>::select(id).await
+        Repo::<Self>::get_by_key(id).await
     }
 
-    async fn select_record(record: RecordId) -> Result<Self> {
-        Repo::<Self>::select_record(record).await
+    async fn get_record(record: RecordId) -> Result<Self> {
+        Repo::<Self>::get_record(record).await
     }
 
-    async fn select_all_unbounded() -> Result<Vec<Self>> {
-        Repo::<Self>::select_all_unbounded().await
+    async fn scan() -> Result<Vec<Self>> {
+        Repo::<Self>::scan().await
     }
 
-    async fn select_all() -> Result<Vec<Self>> {
-        Self::select_all_unbounded().await
+    async fn list() -> Result<Vec<Self>> {
+        Repo::<Self>::list().await
     }
 
-    async fn select_limit(count: i64) -> Result<Vec<Self>> {
-        Repo::<Self>::select_limit(count).await
+    async fn list_limit(count: i64) -> Result<Vec<Self>> {
+        Repo::<Self>::list_limit(count).await
     }
 
     async fn update(self) -> Result<Self>
@@ -626,12 +626,12 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::insert(data).await
     }
 
-    async fn insert_jump(data: Vec<Self>) -> Result<Vec<Self>> {
-        Repo::<Self>::insert_jump(data).await
+    async fn insert_ignore(data: Vec<Self>) -> Result<Vec<Self>> {
+        Repo::<Self>::insert_ignore(data).await
     }
 
-    async fn insert_replace(data: Vec<Self>) -> Result<Vec<Self>> {
-        Repo::<Self>::insert_replace(data).await
+    async fn insert_or_replace(data: Vec<Self>) -> Result<Vec<Self>> {
+        Repo::<Self>::insert_or_replace(data).await
     }
 
     async fn delete(self) -> Result<()>
@@ -649,24 +649,36 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::delete_by_key(id).await
     }
 
-    async fn delete_by_idkey(id: &str) -> Result<()> {
-        Self::delete_by_key(id).await
-    }
-
     async fn delete_record(id: RecordId) -> Result<()> {
         Repo::<Self>::delete_record(id).await
     }
 
-    async fn clean() -> Result<()> {
-        Repo::<Self>::clean().await
+    async fn delete_all() -> Result<()> {
+        Repo::<Self>::delete_all().await
     }
 
-    async fn select_record_id(k: &str, v: &str) -> Result<RecordId> {
-        Repo::<Self>::select_record_id(k, v).await
+    async fn find_record_id(k: &str, v: &str) -> Result<RecordId> {
+        Repo::<Self>::find_record_id(k, v).await
     }
 
-    async fn all_record() -> Result<Vec<RecordId>> {
-        Repo::<Self>::all_record().await
+    async fn list_record_ids() -> Result<Vec<RecordId>> {
+        Repo::<Self>::list_record_ids().await
+    }
+
+    async fn save(self) -> Result<Self> {
+        Repo::<Self>::save(self).await
+    }
+
+    async fn get<T>(id: T) -> Result<Self>
+    where
+        RecordIdKey: From<T>,
+        T: Send,
+    {
+        Repo::<Self>::get(id).await
+    }
+
+    async fn save_many(data: Vec<Self>) -> Result<Vec<Self>> {
+        Repo::<Self>::save_many(data).await
     }
 }
 
