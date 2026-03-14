@@ -5696,8 +5696,3 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[patch.unused]]
-name = "surrealkv"
-version = "0.20.2"
-source = "git+https://github.com/lukas-hradecky/surrealkv.git?rev=fa032486d260ca6dbe111a7cca274ee6e7671cc4#fa032486d260ca6dbe111a7cca274ee6e7671cc4"
