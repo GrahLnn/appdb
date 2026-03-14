@@ -44,6 +44,7 @@ struct ItNoId {
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ItProfile {
     id: Id,
+    #[unique]
     name: String,
     note: Option<String>,
 }
@@ -256,6 +257,20 @@ fn save_preserves_payload_fields() {
         assert_eq!(selected.name, "alice");
         assert_eq!(selected.note, None);
     });
+}
+
+#[test]
+fn store_unique_field_registers_schema_index() {
+    let ddls = inventory::iter::<appdb::model::schema::SchemaItem>
+        .into_iter()
+        .map(|item| item.ddl)
+        .collect::<Vec<_>>();
+
+    assert!(ddls.iter().any(|ddl| {
+        ddl.contains("DEFINE INDEX IF NOT EXISTS it_profile_name_unique")
+            && ddl.contains("ON it_profile")
+            && ddl.contains("FIELDS name UNIQUE")
+    }));
 }
 
 #[test]

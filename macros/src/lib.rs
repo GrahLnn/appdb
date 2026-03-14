@@ -13,7 +13,7 @@ pub fn derive_sensitive(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(Store)]
+#[proc_macro_derive(Store, attributes(unique))]
 pub fn derive_store(input: TokenStream) -> TokenStream {
     match derive_store_impl(parse_macro_input!(input as DeriveInput)) {
         Ok(tokens) => tokens.into(),
@@ -48,6 +48,12 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         .map(|field| field.ident.clone().expect("named field"))
         .collect::<Vec<_>>();
 
+    let unique_fields = named_fields
+        .iter()
+        .filter(|field| has_unique_attr(&field.attrs))
+        .map(|field| field.ident.clone().expect("named field"))
+        .collect::<Vec<_>>();
+
     if id_fields.len() > 1 {
         return Err(Error::new_spanned(
             struct_ident,
@@ -68,6 +74,23 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
     });
 
+    let unique_schema_impls = unique_fields.iter().map(|field| {
+        let field_name = field.to_string();
+        let index_name = format!("{}_{}_unique", to_snake_case(&struct_ident.to_string()), field_name);
+        let ddl = format!(
+            "DEFINE INDEX IF NOT EXISTS {index_name} ON {} FIELDS {field_name} UNIQUE;",
+            to_snake_case(&struct_ident.to_string())
+        );
+
+        quote! {
+            ::inventory::submit! {
+                ::appdb::model::schema::SchemaItem {
+                    ddl: #ddl,
+                }
+            }
+        }
+    });
+
     Ok(quote! {
         impl ::appdb::model::meta::ModelMeta for #struct_ident {
             fn table_name() -> &'static str {
@@ -80,6 +103,8 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
 
         #auto_has_id_impl
+
+        #( #unique_schema_impls )*
 
         impl ::appdb::repository::Crud for #struct_ident {}
 
@@ -262,6 +287,10 @@ fn has_secure_attr(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident("secure"))
 }
 
+fn has_unique_attr(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| attr.path().is_ident("unique"))
+}
+
 enum SecureKind {
     String,
     OptionString,
@@ -347,4 +376,24 @@ fn option_inner_type(ty: &Type) -> Option<&Type> {
         return None;
     };
     Some(inner)
+}
+
+fn to_snake_case(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 4);
+    let mut prev_is_lower_or_digit = false;
+
+    for ch in input.chars() {
+        if ch.is_ascii_uppercase() {
+            if prev_is_lower_or_digit {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+            prev_is_lower_or_digit = false;
+        } else {
+            out.push(ch);
+            prev_is_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        }
+    }
+
+    out
 }
