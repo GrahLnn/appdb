@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Result};
+use surrealdb::opt;
 use surrealdb::types::{SurrealValue, Value};
 use surrealdb::IndexedResults;
 
@@ -27,11 +28,51 @@ impl TxStmt {
 
 pub struct TxRunner;
 
+pub struct TxResults {
+    statements: Vec<IndexedResults>,
+}
+
+impl TxResults {
+    pub fn len(&self) -> usize {
+        self.statements.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.statements.is_empty()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&IndexedResults> {
+        self.statements.get(index)
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut IndexedResults> {
+        self.statements.get_mut(index)
+    }
+
+    pub fn take<R>(
+        &mut self,
+        statement_index: usize,
+        result_index: impl opt::QueryResult<R>,
+    ) -> Result<R>
+    where
+        R: SurrealValue,
+    {
+        let results = self.statements.get_mut(statement_index).ok_or_else(|| {
+            anyhow!("transaction statement index out of range: {statement_index}")
+        })?;
+        Ok(results.take(result_index)?)
+    }
+
+    pub fn into_inner(self) -> Vec<IndexedResults> {
+        self.statements
+    }
+}
+
 impl TxRunner {
-    pub async fn run(stmts: Vec<TxStmt>) -> Result<IndexedResults> {
+    pub async fn run(stmts: Vec<TxStmt>) -> Result<TxResults> {
         let db = get_db()?;
         let tx = db.as_ref().clone().begin().await?;
-        let mut last_response: Option<IndexedResults> = None;
+        let mut responses = Vec::with_capacity(stmts.len());
 
         for stmt in stmts {
             let sql_for_error = stmt.sql.clone();
@@ -44,20 +85,22 @@ impl TxRunner {
                 .map_err(|e| anyhow!("tx query failed: `{sql_for_error}`: {e}"))?
                 .check()
                 .map_err(|e| anyhow!("tx response check failed: `{sql_for_error}`: {e}"))?;
-            last_response = Some(response);
+            responses.push(response);
         }
 
         tx.commit().await?;
 
-        if let Some(response) = last_response {
-            Ok(response)
-        } else {
+        if responses.is_empty() {
             let response = db.query("RETURN NONE;").await?.check()?;
-            Ok(response)
+            responses.push(response);
         }
+
+        Ok(TxResults {
+            statements: responses,
+        })
     }
 }
 
-pub async fn run_tx(stmts: Vec<TxStmt>) -> Result<IndexedResults> {
+pub async fn run_tx(stmts: Vec<TxStmt>) -> Result<TxResults> {
     TxRunner::run(stmts).await
 }
