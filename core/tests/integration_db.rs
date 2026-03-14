@@ -377,8 +377,27 @@ fn transaction_runner_executes_and_returns_value() {
 
         let stmt = TxStmt::new("RETURN $v;").bind("v", 42i64);
         let mut res = run_tx(vec![stmt]).await.expect("tx should succeed");
-        let value: Option<i64> = res.take(0).expect("take should decode value");
+        let value: Option<i64> = res.take(0, 0).expect("take should decode value");
         assert_eq!(value, Some(42));
+    });
+}
+
+#[test]
+fn transaction_runner_returns_all_statement_results() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        let stmt1 = TxStmt::new("RETURN $v;").bind("v", 7i64);
+        let stmt2 = TxStmt::new("RETURN $v;").bind("v", 11i64);
+        let mut res = run_tx(vec![stmt1, stmt2]).await.expect("tx should succeed");
+
+        assert_eq!(res.len(), 2);
+
+        let first: Option<i64> = res.take(0, 0).expect("first statement should decode");
+        let second: Option<i64> = res.take(1, 0).expect("second statement should decode");
+        assert_eq!(first, Some(7));
+        assert_eq!(second, Some(11));
     });
 }
 
