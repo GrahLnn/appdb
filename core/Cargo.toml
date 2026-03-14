@@ -1,0 +1,33 @@
+[package]
+name = "appdb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "appdb"
+path = "src/lib.rs"
+
+[dependencies]
+aes-gcm.workspace = true
+anyhow.workspace = true
+appdb-macros = { path = "../macros" }
+async-trait.workspace = true
+inventory.workspace = true
+keyring.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+surrealdb.workspace = true
+surrealdb-types.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+trybuild.workspace = true
+
+[target."cfg(windows)".dependencies]
+windows.workspace = true

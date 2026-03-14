@@ -1,0 +1,29 @@
+[workspace]
+members = ["core", "macros"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+rust-version = "1.89.0"
+
+[workspace.dependencies]
+aes-gcm = "0.10.3"
+anyhow = "1.0.102"
+async-trait = "0.1.89"
+inventory = "0.3.22"
+keyring = "3.6.3"
+proc-macro2 = "1.0.95"
+quote = "1.0.40"
+rand = "0.8.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+specta = { version = "2.0.0-rc.23", features = ["derive"] }
+surrealdb = { version = "3.0.2", features = ["kv-surrealkv"] }
+surrealdb-types = "3.0.2"
+syn = { version = "2.0.104", features = ["full"] }
+thiserror = "2.0.18"
+tokio = { version = "1.50.0", features = ["sync"] }
+trybuild = "1.0.112"
+windows = { version = "0.62.2", features = ["Win32_Security_Cryptography", "Win32_System_Memory"] }
