@@ -13,6 +13,140 @@ pub fn derive_sensitive(input: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro_derive(Store)]
+pub fn derive_store(input: TokenStream) -> TokenStream {
+    match derive_store_impl(parse_macro_input!(input as DeriveInput)) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let struct_ident = input.ident;
+
+    let named_fields = match input.data {
+        Data::Struct(data) => match data.fields {
+            Fields::Named(fields) => fields.named,
+            _ => {
+                return Err(Error::new_spanned(
+                    struct_ident,
+                    "Store can only be derived for structs with named fields",
+                ))
+            }
+        },
+        _ => {
+            return Err(Error::new_spanned(
+                struct_ident,
+                "Store can only be derived for structs",
+            ))
+        }
+    };
+
+    let id_fields = named_fields
+        .iter()
+        .filter(|field| is_id_type(&field.ty))
+        .map(|field| field.ident.clone().expect("named field"))
+        .collect::<Vec<_>>();
+
+    if id_fields.len() > 1 {
+        return Err(Error::new_spanned(
+            struct_ident,
+            "Store supports at most one `Id` field for automatic HasId generation",
+        ));
+    }
+
+    let auto_has_id_impl = id_fields.first().map(|field| {
+        quote! {
+            impl ::appdb::model::meta::HasId for #struct_ident {
+                fn id(&self) -> ::surrealdb::types::RecordId {
+                    ::surrealdb::types::RecordId::new(
+                        <Self as ::appdb::model::meta::ModelMeta>::table_name(),
+                        self.#field.clone(),
+                    )
+                }
+            }
+        }
+    });
+
+    Ok(quote! {
+        impl ::appdb::model::meta::ModelMeta for #struct_ident {
+            fn table_name() -> &'static str {
+                static TABLE_NAME: ::std::sync::OnceLock<&'static str> = ::std::sync::OnceLock::new();
+                TABLE_NAME.get_or_init(|| {
+                    let table = ::appdb::model::meta::default_table_name(stringify!(#struct_ident));
+                    ::appdb::model::meta::register_table(stringify!(#struct_ident), table)
+                })
+            }
+        }
+
+        #auto_has_id_impl
+
+        impl ::appdb::repository::Crud for #struct_ident {}
+
+        impl #struct_ident {
+            pub async fn get<T>(id: T) -> ::anyhow::Result<Self>
+            where
+                ::surrealdb::types::RecordIdKey: From<T>,
+                T: Send,
+            {
+                ::appdb::repository::Repo::<Self>::get(id).await
+            }
+
+            pub async fn list() -> ::anyhow::Result<::std::vec::Vec<Self>> {
+                ::appdb::repository::Repo::<Self>::list().await
+            }
+
+            pub async fn list_limit(count: i64) -> ::anyhow::Result<::std::vec::Vec<Self>> {
+                ::appdb::repository::Repo::<Self>::list_limit(count).await
+            }
+
+            pub async fn delete_all() -> ::anyhow::Result<()> {
+                ::appdb::repository::Repo::<Self>::delete_all().await
+            }
+
+            pub async fn find_one_id(
+                k: &str,
+                v: &str,
+            ) -> ::anyhow::Result<::surrealdb::types::RecordId> {
+                ::appdb::repository::Repo::<Self>::find_one_id(k, v).await
+            }
+
+            pub async fn list_record_ids() -> ::anyhow::Result<::std::vec::Vec<::surrealdb::types::RecordId>> {
+                ::appdb::repository::Repo::<Self>::list_record_ids().await
+            }
+
+            pub async fn create_at(
+                id: ::surrealdb::types::RecordId,
+                data: Self,
+            ) -> ::anyhow::Result<Self> {
+                ::appdb::repository::Repo::<Self>::create_at(id, data).await
+            }
+
+            pub async fn upsert_at(
+                id: ::surrealdb::types::RecordId,
+                data: Self,
+            ) -> ::anyhow::Result<Self> {
+                ::appdb::repository::Repo::<Self>::upsert_at(id, data).await
+            }
+
+            pub async fn update_at(
+                self,
+                id: ::surrealdb::types::RecordId,
+            ) -> ::anyhow::Result<Self> {
+                ::appdb::repository::Repo::<Self>::update_at(id, self).await
+            }
+
+            pub async fn delete<T>(id: T) -> ::anyhow::Result<()>
+            where
+                ::surrealdb::types::RecordIdKey: From<T>,
+                T: Send,
+            {
+                ::appdb::repository::Repo::<Self>::delete(id).await
+            }
+        }
+    })
+}
+
 fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let struct_ident = input.ident;
     let encrypted_ident = format_ident!("Encrypted{}", struct_ident);
@@ -184,6 +318,16 @@ fn secure_kind(field: &Field) -> syn::Result<SecureKind> {
 fn is_string_type(ty: &Type) -> bool {
     match ty {
         Type::Path(TypePath { path, .. }) => path.is_ident("String"),
+        _ => false,
+    }
+}
+
+fn is_id_type(ty: &Type) -> bool {
+    match ty {
+        Type::Path(TypePath { path, .. }) => path.segments.last().is_some_and(|segment| {
+            let ident = segment.ident.to_string();
+            ident == "Id"
+        }),
         _ => false,
     }
 }

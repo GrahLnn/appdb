@@ -23,7 +23,7 @@ pub mod serde_utils;
 /// Explicit transaction runner helpers.
 pub mod tx;
 
-pub use appdb_macros::Sensitive;
+pub use appdb_macros::{Sensitive, Store};
 pub use auth::*;
 pub use connection::*;
 pub use crypto::*;
