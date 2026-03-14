@@ -4,8 +4,8 @@
 
 目标只有几个：
 
-- 用 `impl_crud!` 给模型挂上直接可用的仓储能力
-- 用 facade / prelude 导出一个简单的使用面
+- 用 `#[derive(Store)]` 给模型挂上直接可用的仓储能力
+- 用 prelude 导出一个简单的使用面
 - 保持 API 以 `save`、`get`、`list` 这种直观名字为主
 - 给需要加密的字段提供 `Sensitive` 派生支持
 
@@ -18,7 +18,7 @@
 
 - `appdb::prelude::*`: 常用类型和能力的集中导出
 - `appdb::connection`: 数据库初始化和运行时
-- `appdb::repository::Repo`: 直接用类型驱动的 CRUD
+- `#[derive(Store)]`: 业务模型的主入口
 - `appdb::graph::GraphRepo`: relation table 辅助
 - `appdb::query`: 原始 SQL 与带 bind 的查询辅助
 
@@ -26,30 +26,28 @@
 
 ```rust
 use appdb::prelude::*;
-use appdb::impl_crud;
+use appdb::Store;
 use serde::{Deserialize, Serialize};
 use surrealdb::types::SurrealValue;
 
-#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct User {
-    id: String,
+    id: Id,
     name: String,
 }
-
-impl_crud!(User, "user");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_db("data/appdb".into()).await?;
 
-    let saved = Repo::<User>::save(User {
-        id: "u1".into(),
+    let saved = User::save(User {
+        id: Id::from("u1"),
         name: "alice".into(),
     })
     .await?;
 
-    let loaded = Repo::<User>::get("u1").await?;
-    let all = Repo::<User>::list().await?;
+    let loaded = User::get("u1").await?;
+    let all = User::list().await?;
 
     assert_eq!(saved.name, loaded.name);
     assert_eq!(all.len(), 1);
@@ -63,8 +61,8 @@ async fn main() -> anyhow::Result<()> {
 use appdb::prelude::*;
 
 let rel = relation_name::<FollowRel>();
-GraphRepo::relate_by_id(user_a.id.clone(), user_b.id.clone(), rel).await?;
-let targets = GraphRepo::out_ids(user_a.id.clone(), rel, "user").await?;
+GraphRepo::relate_at(user_a.id(), user_b.id(), rel).await?;
+let targets = GraphRepo::out_ids(user_a.id(), rel, "user").await?;
 ```
 
 ## 原始查询
