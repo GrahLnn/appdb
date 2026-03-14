@@ -9,6 +9,7 @@ use surrealdb::types::{RecordId, RecordIdKey, Table};
 
 use crate::connection::get_db;
 use crate::error::DBError;
+use crate::model::identifier::ensure_identifier;
 use crate::model::meta::{HasId, ModelMeta};
 use crate::query::builder::QueryKind;
 
@@ -18,6 +19,13 @@ fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
         Value::Object(map) => Ok(map.keys().cloned().collect()),
         _ => Ok(vec![]),
     }
+}
+
+fn ensure_field_identifiers(keys: &[String]) -> Result<()> {
+    for key in keys {
+        ensure_identifier(key, "field name")?;
+    }
+    Ok(())
 }
 
 fn strip_null_fields(value: &mut Value) {
@@ -229,6 +237,7 @@ where
         let chunk_size = 50_000;
         let mut inserted_all = Vec::with_capacity(data.len());
         let keys = struct_field_names(&data[0])?;
+        ensure_field_identifiers(&keys)?;
 
         for chunk in data.chunks(chunk_size) {
             let chunk_clone = chunk.to_vec();
@@ -240,12 +249,6 @@ where
                 .check()?
                 .take(0)?;
             inserted_all.extend(inserted);
-            println!(
-                "{} inserted: {}/{}",
-                T::table_name(),
-                inserted_all.len(),
-                data.len()
-            );
         }
 
         Ok(inserted_all)
@@ -285,6 +288,7 @@ where
     }
 
     pub async fn select_record_id(k: &str, v: &str) -> Result<RecordId> {
+        ensure_identifier(k, "field name")?;
         let db = get_db()?;
         let ids: Vec<RecordId> = db
             .query(QueryKind::select_id_single(T::table_name()))
@@ -394,7 +398,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::extract_record_id_key;
+    use super::{ensure_field_identifiers, extract_record_id_key};
     use crate::model::meta::ModelMeta;
     use serde::{Deserialize, Serialize};
     use surrealdb::types::{RecordIdKey, SurrealValue};
@@ -493,6 +497,13 @@ mod tests {
             <CustomTableModel as ModelMeta>::table_name(),
             "custom_users"
         );
+    }
+
+    #[test]
+    fn field_names_reject_invalid_identifier() {
+        let err = ensure_field_identifiers(&["bad-name".to_owned()])
+            .expect_err("expected invalid field identifier");
+        assert!(err.to_string().contains("Invalid identifier"));
     }
 }
 

@@ -3,6 +3,8 @@ use std::sync::{LazyLock, Mutex};
 
 use anyhow::Result;
 
+use crate::model::identifier::ensure_identifier;
+
 static RELATION_REGISTRY: LazyLock<Mutex<HashSet<&'static str>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
@@ -23,8 +25,7 @@ pub fn relation_name<R: RelationMeta>() -> &'static str {
 }
 
 pub fn ensure_relation_name(name: &str) -> Result<()> {
-    let _ = name;
-    Ok(())
+    ensure_identifier(name, "relation name")
 }
 
 #[macro_export]
@@ -70,10 +71,10 @@ mod tests {
     }
 
     #[test]
-    fn relation_name_accepts_arbitrary_name() {
-        assert!(ensure_relation_name("9invalid").is_ok());
-        assert!(ensure_relation_name("bad-name").is_ok());
-        assert!(ensure_relation_name("").is_ok());
+    fn relation_name_rejects_invalid_identifier() {
+        assert!(ensure_relation_name("9invalid").is_err());
+        assert!(ensure_relation_name("bad-name").is_err());
+        assert!(ensure_relation_name("").is_err());
     }
 
     #[test]
