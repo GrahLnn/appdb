@@ -21,6 +21,7 @@ const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
 
 #[derive(Debug, Error)]
+/// Errors produced by key loading and field encryption helpers.
 pub enum CryptoError {
     #[error("crypto key must be exactly {KEY_LEN} bytes")]
     InvalidKeyLength,
@@ -42,7 +43,9 @@ pub enum CryptoError {
     ProtectedBackup(String),
 }
 
+/// Source of a symmetric encryption key for [`CryptoContext`].
 pub trait KeyProvider {
+    /// Loads a raw 32-byte key.
     fn load_key(&self) -> Result<Vec<u8>, CryptoError>;
 }
 
@@ -57,11 +60,13 @@ trait KeyBackupStore {
 }
 
 #[derive(Debug, Clone)]
+/// In-memory key provider for tests or externally managed keys.
 pub struct StaticKeyProvider {
     key: Vec<u8>,
 }
 
 impl StaticKeyProvider {
+    /// Creates a provider from raw key bytes.
     pub fn new(key: impl Into<Vec<u8>>) -> Self {
         Self { key: key.into() }
     }
@@ -99,12 +104,14 @@ impl SecretStore for KeyringSecretStore {
 }
 
 #[derive(Debug)]
+/// Key provider backed by the OS keyring with a protected local backup.
 pub struct KeyringKeyProvider {
     store: KeyringSecretStore,
     backup: Option<DpapiKeyBackupStore>,
 }
 
 impl KeyringKeyProvider {
+    /// Creates a keyring-backed provider for the given service and account.
     pub fn new(service: &str, account: &str) -> Result<Self, CryptoError> {
         Ok(Self {
             store: KeyringSecretStore::new(service, account)?,
@@ -120,11 +127,13 @@ impl KeyProvider for KeyringKeyProvider {
 }
 
 #[derive(Debug, Clone)]
+/// Encryption context holding the symmetric key used by generated `Sensitive` types.
 pub struct CryptoContext {
     key: [u8; KEY_LEN],
 }
 
 impl CryptoContext {
+    /// Builds a context from raw key bytes.
     pub fn new(key: impl AsRef<[u8]>) -> Result<Self, CryptoError> {
         let key = key.as_ref();
         if key.len() != KEY_LEN {
@@ -136,6 +145,7 @@ impl CryptoContext {
         Ok(Self { key: bytes })
     }
 
+    /// Builds a context by loading the key from a provider.
     pub fn from_provider(provider: &impl KeyProvider) -> Result<Self, CryptoError> {
         Self::new(provider.load_key()?)
     }
@@ -145,6 +155,7 @@ impl CryptoContext {
     }
 }
 
+/// Encrypts arbitrary bytes and prefixes the output with a random nonce.
 pub fn encrypt_bytes(value: &[u8], context: &CryptoContext) -> Result<Vec<u8>, CryptoError> {
     let cipher = context.cipher();
     let mut nonce_bytes = [0_u8; NONCE_LEN];
@@ -160,6 +171,7 @@ pub fn encrypt_bytes(value: &[u8], context: &CryptoContext) -> Result<Vec<u8>, C
     Ok(output)
 }
 
+/// Decrypts bytes produced by [`encrypt_bytes`].
 pub fn decrypt_bytes(value: &[u8], context: &CryptoContext) -> Result<Vec<u8>, CryptoError> {
     if value.len() < NONCE_LEN {
         return Err(CryptoError::CiphertextTooShort);
@@ -172,14 +184,17 @@ pub fn decrypt_bytes(value: &[u8], context: &CryptoContext) -> Result<Vec<u8>, C
         .map_err(|_| CryptoError::Decrypt)
 }
 
+/// Encrypts a UTF-8 string into nonce-prefixed ciphertext bytes.
 pub fn encrypt_string(value: &str, context: &CryptoContext) -> Result<Vec<u8>, CryptoError> {
     encrypt_bytes(value.as_bytes(), context)
 }
 
+/// Decrypts bytes from [`encrypt_string`] back into a UTF-8 string.
 pub fn decrypt_string(value: &[u8], context: &CryptoContext) -> Result<String, CryptoError> {
     Ok(String::from_utf8(decrypt_bytes(value, context)?)?)
 }
 
+/// Encrypts an optional string while preserving `None`.
 pub fn encrypt_optional_string(
     value: &Option<String>,
     context: &CryptoContext,
@@ -190,6 +205,7 @@ pub fn encrypt_optional_string(
         .transpose()
 }
 
+/// Decrypts an optional encrypted string while preserving `None`.
 pub fn decrypt_optional_string(
     value: &Option<Vec<u8>>,
     context: &CryptoContext,

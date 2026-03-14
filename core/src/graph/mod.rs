@@ -7,16 +7,21 @@ use crate::connection::get_db;
 use crate::model::meta::HasId;
 use crate::query::builder::QueryKind;
 
+/// Edge payload used with relation-table inserts.
 #[derive(Debug, Serialize, Deserialize, SurrealValue)]
 pub struct Relation {
+    /// Source record id.
     #[serde(rename = "in")]
     pub _in: RecordId,
+    /// Target record id.
     pub out: RecordId,
 }
 
+/// Repository-style helpers for SurrealDB relation tables.
 pub struct GraphRepo;
 
 impl GraphRepo {
+    /// Creates a relation row from `in_id` to `out_id` in `rel`.
     pub async fn relate_by_id(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<()> {
         let db = get_db()?;
         let sql = QueryKind::relate(&in_id, &out_id, rel);
@@ -29,6 +34,7 @@ impl GraphRepo {
         Ok(())
     }
 
+    /// Deletes a single outgoing relation from `self_id` to `target_id`.
     pub async fn unrelate_by_id(self_id: RecordId, target_id: RecordId, rel: &str) -> Result<()> {
         let db = get_db()?;
         db.query(QueryKind::unrelate(&self_id, &target_id, rel))
@@ -40,6 +46,7 @@ impl GraphRepo {
         Ok(())
     }
 
+    /// Deletes all outgoing relations for `self_id` in `rel`.
     pub async fn unrelate_all(self_id: RecordId, rel: &str) -> Result<()> {
         let db = get_db()?;
         db.query(QueryKind::unrelate_all(&self_id, rel))
@@ -50,6 +57,7 @@ impl GraphRepo {
         Ok(())
     }
 
+    /// Lists target record ids reachable from `in_id` through `rel`.
     pub async fn out_ids(in_id: RecordId, rel: &str, out_table: &str) -> Result<Vec<RecordId>> {
         let sql = QueryKind::select_out_ids(&in_id, rel, out_table);
         let db = get_db()?;
@@ -64,6 +72,7 @@ impl GraphRepo {
         Ok(rows)
     }
 
+    /// Lists source record ids that point to `out_id` through `rel`.
     pub async fn in_ids(out_id: RecordId, rel: &str, in_table: &str) -> Result<Vec<RecordId>> {
         let sql = QueryKind::select_in_ids(&out_id, rel, in_table);
         let db = get_db()?;
@@ -78,6 +87,7 @@ impl GraphRepo {
         Ok(rows)
     }
 
+    /// Inserts multiple relation rows into the given relation table.
     pub async fn insert_relation(rel: &str, data: Vec<Relation>) -> Result<Vec<Relation>> {
         let db = get_db()?;
         let relate: Vec<Relation> = db.insert(rel).relation(data).await?;
@@ -85,8 +95,10 @@ impl GraphRepo {
     }
 }
 
+/// Convenience graph methods for models that already expose a record id.
 #[async_trait]
 pub trait GraphCrud: HasId + Send + Sync {
+    /// Creates a relation from `self` to `target`.
     async fn relate<T>(&self, target: T, rel: &str) -> Result<()>
     where
         T: HasId + Send + Sync,
@@ -94,6 +106,7 @@ pub trait GraphCrud: HasId + Send + Sync {
         GraphRepo::relate_by_id(self.id(), target.id(), rel).await
     }
 
+    /// Deletes a relation from `self` to `target`.
     async fn unrelate<T>(&self, target: T, rel: &str) -> Result<()>
     where
         T: HasId + Send + Sync,
@@ -104,10 +117,12 @@ pub trait GraphCrud: HasId + Send + Sync {
 
 impl<T> GraphCrud for T where T: HasId + Send + Sync {}
 
+/// Free-function wrapper for [`GraphRepo::relate_by_id`].
 pub async fn relate_by_id(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<()> {
     GraphRepo::relate_by_id(in_id, out_id, rel).await
 }
 
+/// Free-function wrapper for [`GraphRepo::unrelate_by_id`].
 pub async fn unrelate_by_id(self_id: RecordId, target_id: RecordId, rel: &str) -> Result<()> {
     GraphRepo::unrelate_by_id(self_id, target_id, rel).await
 }

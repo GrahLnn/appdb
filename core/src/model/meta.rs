@@ -6,10 +6,13 @@ use surrealdb::types::{RecordId, RecordIdKey, SurrealValue};
 static TABLE_REGISTRY: LazyLock<Mutex<HashMap<&'static str, &'static str>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Trait for models that can expose a full SurrealDB record id.
 pub trait HasId {
+    /// Returns the record id used for graph and direct record operations.
     fn id(&self) -> RecordId;
 }
 
+/// Metadata required for repository-style access to a model type.
 pub trait ModelMeta:
     Serialize
     + for<'de> Deserialize<'de>
@@ -20,8 +23,10 @@ pub trait ModelMeta:
     + Send
     + Sync
 {
+    /// Returns the table name used for this model.
     fn table_name() -> &'static str;
 
+    /// Builds a record id in the model table.
     fn record_id<T>(id: T) -> RecordId
     where
         RecordIdKey: From<T>,
@@ -30,6 +35,7 @@ pub trait ModelMeta:
     }
 }
 
+/// Registers a stable table name for a model type.
 pub fn register_table(model: &'static str, table: &'static str) -> &'static str {
     let mut registry = TABLE_REGISTRY.lock().unwrap_or_else(|err| err.into_inner());
     if let Some(existing) = registry.get(model) {
@@ -39,6 +45,7 @@ pub fn register_table(model: &'static str, table: &'static str) -> &'static str 
     table
 }
 
+/// Converts a Rust type name into the default snake_case table name.
 pub fn default_table_name(type_name: &str) -> &'static str {
     let bare = type_name.rsplit("::").next().unwrap_or(type_name);
     let snake = to_snake_case(bare);
@@ -66,6 +73,7 @@ fn to_snake_case(input: &str) -> String {
 }
 
 #[macro_export]
+/// Implements [`HasId`] by cloning the chosen field or field path.
 macro_rules! impl_id {
     ($t:ty, $id:ident) => {
         impl $crate::model::meta::HasId for $t {

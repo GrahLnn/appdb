@@ -11,17 +11,25 @@ use surrealdb::opt::Config;
 use surrealdb::Surreal;
 use tokio::sync::OnceCell;
 
+/// Shared SurrealDB handle used by the runtime and global facade.
 pub type DbHandle = Arc<Surreal<Db>>;
 
 static DB: LazyLock<OnceCell<DbHandle>> = LazyLock::new(OnceCell::new);
 
+/// Options used when opening the embedded SurrealDB runtime.
 #[derive(Debug, Clone)]
 pub struct InitDbOptions {
+    /// Enables SurrealKV versioned storage.
     pub versioned: bool,
+    /// Optional retention window used when versioning is enabled.
     pub version_retention: Option<Duration>,
+    /// Optional per-query timeout.
     pub query_timeout: Option<Duration>,
+    /// Optional per-transaction timeout.
     pub transaction_timeout: Option<Duration>,
+    /// Optional changefeed garbage-collection interval.
     pub changefeed_gc_interval: Option<Duration>,
+    /// Enables SurrealDB AST payload storage.
     pub ast_payload: bool,
 }
 
@@ -39,47 +47,56 @@ impl Default for InitDbOptions {
 }
 
 impl InitDbOptions {
+    /// Enables or disables versioned storage.
     pub fn versioned(mut self, enabled: bool) -> Self {
         self.versioned = enabled;
         self
     }
 
+    /// Sets the retention window for versioned storage.
     pub fn version_retention(mut self, duration: Option<Duration>) -> Self {
         self.version_retention = duration;
         self
     }
 
+    /// Sets the query timeout.
     pub fn query_timeout(mut self, duration: Option<Duration>) -> Self {
         self.query_timeout = duration;
         self
     }
 
+    /// Sets the transaction timeout.
     pub fn transaction_timeout(mut self, duration: Option<Duration>) -> Self {
         self.transaction_timeout = duration;
         self
     }
 
+    /// Sets the changefeed garbage-collection interval.
     pub fn changefeed_gc_interval(mut self, duration: Option<Duration>) -> Self {
         self.changefeed_gc_interval = duration;
         self
     }
 
+    /// Enables or disables AST payload storage.
     pub fn ast_payload(mut self, enabled: bool) -> Self {
         self.ast_payload = enabled;
         self
     }
 }
 
+/// Owned database runtime that can be installed globally or passed around directly.
 #[derive(Debug, Clone)]
 pub struct DbRuntime {
     db: DbHandle,
 }
 
 impl DbRuntime {
+    /// Opens a runtime with default options.
     pub async fn open(path: PathBuf) -> Result<Self> {
         Self::open_with_options(path, InitDbOptions::default()).await
     }
 
+    /// Opens a runtime with explicit options and applies registered schema.
     pub async fn open_with_options(path: PathBuf, options: InitDbOptions) -> Result<Self> {
         fs::create_dir_all(&path)?;
         let db = open_db(path, &options).await?;
@@ -89,14 +106,17 @@ impl DbRuntime {
         Ok(runtime)
     }
 
+    /// Wraps an existing SurrealDB handle.
     pub fn from_handle(db: DbHandle) -> Self {
         Self { db }
     }
 
+    /// Returns a clone of the underlying database handle.
     pub fn handle(&self) -> DbHandle {
         self.db.clone()
     }
 
+    /// Installs this runtime into the global singleton used by facade helpers.
     pub fn install_global(&self) -> Result<()> {
         DB.set(self.db.clone())
             .map_err(|_| DBError::AlreadyInitialized)?;
@@ -175,16 +195,19 @@ async fn apply_schema(db: &DbHandle) -> Result<()> {
     Ok(())
 }
 
+/// Opens a database and installs it as the global runtime.
 pub async fn init_db(path: PathBuf) -> Result<()> {
     init_db_with_options(path, InitDbOptions::default()).await
 }
 
+/// Opens a database with explicit options and installs it globally.
 pub async fn init_db_with_options(path: PathBuf, options: InitDbOptions) -> Result<()> {
     let runtime = DbRuntime::open_with_options(path, options).await?;
     runtime.install_global()?;
     Ok(())
 }
 
+/// Returns the global database handle previously installed by [`init_db`] or [`DbRuntime::install_global`].
 pub fn get_db() -> Result<DbHandle> {
     DB.get().cloned().ok_or(DBError::NotInitialized.into())
 }

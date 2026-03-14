@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+/// Library-level database error variants.
 pub enum DBError {
     #[error("SurrealDB error: {0}")]
     Surreal(String),

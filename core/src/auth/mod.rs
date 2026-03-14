@@ -6,6 +6,7 @@ use surrealdb::types::SurrealValue;
 use crate::connection::get_db;
 
 #[derive(Serialize, SurrealValue)]
+/// Credentials used for the built-in root account bootstrap flow.
 struct RootCredentials {
     user: String,
     pass: String,
@@ -23,6 +24,7 @@ fn root_user(pass: &str) -> Record<RootCredentials> {
     }
 }
 
+/// Ensures the default root record-access account exists and is usable.
 pub async fn ensure_root_user(pass: &str) -> Result<()> {
     let db = get_db()?;
 
