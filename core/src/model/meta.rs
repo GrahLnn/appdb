@@ -39,7 +39,7 @@ pub trait ModelMeta:
 pub fn register_table(model: &'static str, table: &'static str) -> &'static str {
     let mut registry = TABLE_REGISTRY.lock().unwrap_or_else(|err| err.into_inner());
     if let Some(existing) = registry.get(model) {
-        return *existing;
+        return existing;
     }
     registry.insert(model, table);
     table

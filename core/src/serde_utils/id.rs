@@ -146,8 +146,9 @@ impl SurrealValue for Id {
         match value {
             Value::String(value) => Ok(Self::String(value)),
             Value::Number(Number::Int(value)) => Ok(Self::Number(value)),
-            Value::RecordId(record) => record_key_to_id(record.key)
-                .map_err(|message| surrealdb::types::Error::internal(message)),
+            Value::RecordId(record) => {
+                record_key_to_id(record.key).map_err(surrealdb::types::Error::internal)
+            }
             other => Err(surrealdb::types::Error::internal(format!(
                 "expected string/number/record id for Id, got {}",
                 other.kind().to_sql()
