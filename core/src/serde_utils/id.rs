@@ -23,12 +23,16 @@ fn record_key_to_id(key: RecordIdKey) -> Result<Id, String> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Type)]
+/// Application-facing id type that accepts either string or integer ids.
 pub enum Id {
+    /// String record key.
     String(String),
+    /// Integer record key.
     Number(i64),
 }
 
 impl Id {
+    /// Returns the inner string when this id is string-backed.
     pub fn as_string(&self) -> Option<&str> {
         match self {
             Self::String(value) => Some(value.as_str()),
@@ -36,6 +40,7 @@ impl Id {
         }
     }
 
+    /// Returns the inner number when this id is number-backed.
     pub fn as_number(&self) -> Option<i64> {
         match self {
             Self::String(_) => None,
@@ -43,6 +48,7 @@ impl Id {
         }
     }
 
+    /// Converts this value into a SurrealDB record-id key.
     pub fn into_record_id_key(self) -> RecordIdKey {
         match self {
             Self::String(value) => RecordIdKey::String(value),
@@ -150,6 +156,7 @@ impl SurrealValue for Id {
     }
 }
 
+/// Deserializes a string, number, or record id into a plain string id.
 pub fn deserialize_id_or_record_id_as_string<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -158,6 +165,7 @@ where
     Ok(value.to_string())
 }
 
+/// Serializes an id field as a plain string.
 pub fn serialize_id_as_string<S>(value: &str, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
