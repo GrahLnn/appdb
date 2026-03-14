@@ -155,16 +155,11 @@ where
         created.ok_or(DBError::EmptyResult("create_return_id").into())
     }
 
-    /// Creates a row with an explicit record id key.
-    /// Creates a new row at an explicit id key.
-    pub async fn create_by_id<K>(id: K, data: T) -> Result<T>
-    where
-        RecordIdKey: From<K>,
-        K: Send,
-    {
+    /// Creates a new row at the provided record id.
+    pub async fn create_at(id: RecordId, data: T) -> Result<T> {
         let db = get_db()?;
-        let created: Option<T> = db.create((T::table_name(), id)).content(data).await?;
-        created.ok_or(DBError::EmptyResult("create_by_id").into())
+        let created: Option<T> = db.create(id).content(data).await?;
+        created.ok_or(DBError::EmptyResult("create_at").into())
     }
 
     /// Upserts a row using [`HasId::id`] as the record id.
@@ -178,24 +173,11 @@ where
         updated.ok_or(DBError::EmptyResult("upsert").into())
     }
 
-    /// Upserts a row into an explicit record id.
     /// Upserts a row at the provided record id.
-    pub async fn upsert_by_id(id: RecordId, data: T) -> Result<T> {
+    pub async fn upsert_at(id: RecordId, data: T) -> Result<T> {
         let db = get_db()?;
         let updated: Option<T> = db.upsert(id).content(data).await?;
-        updated.ok_or(DBError::EmptyResult("upsert_by_id").into())
-    }
-
-    /// Fetches a row by the model table plus raw id key.
-    /// Loads a row by table-local id key.
-    pub async fn get_by_key<K>(id: K) -> Result<T>
-    where
-        RecordIdKey: From<K>,
-        K: Send,
-    {
-        let db = get_db()?;
-        let record: Option<T> = db.select((T::table_name(), id)).await?;
-        record.ok_or(DBError::NotFound.into())
+        updated.ok_or(DBError::EmptyResult("upsert_at").into())
     }
 
     /// Fetches a row by full record id.
@@ -206,31 +188,8 @@ where
         record.ok_or(DBError::NotFound.into())
     }
 
-    /// Returns every row in the table.
-    /// Reads the entire table as typed rows.
-    pub async fn scan() -> Result<Vec<T>> {
-        let db = get_db()?;
-        let records: Vec<T> = db.select(T::table_name()).await?;
-        Ok(records)
-    }
-
-    /// Returns up to `count` rows from the table.
-    /// Reads up to `count` rows from the table.
-    pub async fn scan_limit(count: i64) -> Result<Vec<T>> {
-        let db = get_db()?;
-        let records: Vec<T> = db
-            .query(QueryKind::limit(T::table_name(), count))
-            .bind(("table", Table::from(T::table_name())))
-            .bind(("count", count))
-            .await?
-            .check()?
-            .take(0)?;
-        Ok(records)
-    }
-
-    /// Replaces the stored row at `id` with `data`.
-    /// Replaces the stored content of a row by id.
-    pub async fn update_by_id(id: RecordId, data: T) -> Result<T> {
+    /// Replaces the stored content of a row at the provided record id.
+    pub async fn update_at(id: RecordId, data: T) -> Result<T> {
         let db = get_db()?;
         let updated: Option<T> = db.update(id).content(data).await?;
         updated.ok_or(DBError::NotFound.into())
@@ -319,9 +278,8 @@ where
         Ok(inserted_all)
     }
 
-    /// Deletes one row by raw id key.
-    /// Deletes a row by table-local id key.
-    pub async fn delete_by_key<K>(id: K) -> Result<()>
+    /// Deletes a row by its table-local `id` value.
+    pub async fn delete<K>(id: K) -> Result<()>
     where
         RecordIdKey: From<K>,
         K: Send,
@@ -358,9 +316,8 @@ where
         Ok(())
     }
 
-    /// Finds the first record id where field `k` equals `v`.
     /// Finds the first record id matching a field equality filter.
-    pub async fn find_record_id(k: &str, v: &str) -> Result<RecordId> {
+    pub async fn find_one_id(k: &str, v: &str) -> Result<RecordId> {
         let db = get_db()?;
         let ids: Vec<RecordId> = db
             .query(QueryKind::select_id_single(T::table_name()))
@@ -597,7 +554,7 @@ mod tests {
 }
 
 #[async_trait]
-/// Convenience trait that forwards CRUD calls to [`Repo<Self>`](Repo).
+/// Convenience trait that forwards instance-level CRUD calls to [`Repo<Self>`](Repo).
 pub trait Crud: ModelMeta {
     /// Builds a full record id for this model table.
     fn record_id<T>(id: T) -> RecordId
@@ -617,15 +574,6 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::create_return_id(self.clone()).await
     }
 
-    /// Creates a row at an explicit id key.
-    async fn create_by_id<T>(id: T, data: Self) -> Result<Self>
-    where
-        RecordIdKey: From<T>,
-        T: Send,
-    {
-        Repo::<Self>::create_by_id(id, data).await
-    }
-
     /// Upserts `self` using its `HasId` implementation.
     async fn upsert(&self) -> Result<Self>
     where
@@ -634,28 +582,9 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::upsert(self.clone()).await
     }
 
-    /// Upserts `data` at the provided record id.
-    async fn upsert_by_id(id: RecordId, data: Self) -> Result<Self> {
-        Repo::<Self>::upsert_by_id(id, data).await
-    }
-
-    /// Loads a row by table-local id key.
-    async fn get_by_key<T>(id: T) -> Result<Self>
-    where
-        RecordIdKey: From<T>,
-        T: Send,
-    {
-        Repo::<Self>::get_by_key(id).await
-    }
-
     /// Loads a row by full `RecordId`.
     async fn get_record(record: RecordId) -> Result<Self> {
         Repo::<Self>::get_record(record).await
-    }
-
-    /// Reads the entire table.
-    async fn scan() -> Result<Vec<Self>> {
-        Repo::<Self>::scan().await
     }
 
     /// Lists all rows with normalized `id` values.
@@ -673,12 +602,12 @@ pub trait Crud: ModelMeta {
     where
         Self: HasId,
     {
-        Repo::<Self>::update_by_id(self.id(), self).await
+        Repo::<Self>::update_at(self.id(), self).await
     }
 
-    /// Replaces the stored content of `self` at the provided id.
-    async fn update_by_id(self, id: RecordId) -> Result<Self> {
-        Repo::<Self>::update_by_id(id, self).await
+    /// Replaces the stored content of `self` at the provided record id.
+    async fn update_at(self, id: RecordId) -> Result<Self> {
+        Repo::<Self>::update_at(id, self).await
     }
 
     /// Merges a partial JSON object into an existing row.
@@ -714,15 +643,6 @@ pub trait Crud: ModelMeta {
         Repo::<Self>::delete_record(self.id()).await
     }
 
-    /// Deletes a row by table-local id key.
-    async fn delete_by_key<T>(id: T) -> Result<()>
-    where
-        RecordIdKey: From<T>,
-        T: Send,
-    {
-        Repo::<Self>::delete_by_key(id).await
-    }
-
     /// Deletes a row by full `RecordId`.
     async fn delete_record(id: RecordId) -> Result<()> {
         Repo::<Self>::delete_record(id).await
@@ -734,8 +654,8 @@ pub trait Crud: ModelMeta {
     }
 
     /// Finds the first record id matching a field equality filter.
-    async fn find_record_id(k: &str, v: &str) -> Result<RecordId> {
-        Repo::<Self>::find_record_id(k, v).await
+    async fn find_one_id(k: &str, v: &str) -> Result<RecordId> {
+        Repo::<Self>::find_one_id(k, v).await
     }
 
     /// Lists all record ids in the model table.
@@ -778,6 +698,65 @@ macro_rules! impl_crud {
         }
 
         impl $crate::repository::Crud for $t {}
+
+        impl $t {
+            pub async fn get<T>(id: T) -> anyhow::Result<Self>
+            where
+                surrealdb::types::RecordIdKey: From<T>,
+                T: Send,
+            {
+                $crate::repository::Repo::<Self>::get(id).await
+            }
+
+            pub async fn list() -> anyhow::Result<Vec<Self>> {
+                $crate::repository::Repo::<Self>::list().await
+            }
+
+            pub async fn list_limit(count: i64) -> anyhow::Result<Vec<Self>> {
+                $crate::repository::Repo::<Self>::list_limit(count).await
+            }
+
+            pub async fn delete_all() -> anyhow::Result<()> {
+                $crate::repository::Repo::<Self>::delete_all().await
+            }
+
+            pub async fn find_one_id(k: &str, v: &str) -> anyhow::Result<surrealdb::types::RecordId> {
+                $crate::repository::Repo::<Self>::find_one_id(k, v).await
+            }
+
+            pub async fn list_record_ids() -> anyhow::Result<Vec<surrealdb::types::RecordId>> {
+                $crate::repository::Repo::<Self>::list_record_ids().await
+            }
+
+            pub async fn create_at(
+                id: surrealdb::types::RecordId,
+                data: Self,
+            ) -> anyhow::Result<Self> {
+                $crate::repository::Repo::<Self>::create_at(id, data).await
+            }
+
+            pub async fn upsert_at(
+                id: surrealdb::types::RecordId,
+                data: Self,
+            ) -> anyhow::Result<Self> {
+                $crate::repository::Repo::<Self>::upsert_at(id, data).await
+            }
+
+            pub async fn update_at(
+                self,
+                id: surrealdb::types::RecordId,
+            ) -> anyhow::Result<Self> {
+                $crate::repository::Repo::<Self>::update_at(id, self).await
+            }
+
+            pub async fn delete<T>(id: T) -> anyhow::Result<()>
+            where
+                surrealdb::types::RecordIdKey: From<T>,
+                T: Send,
+            {
+                $crate::repository::Repo::<Self>::delete(id).await
+            }
+        }
     };
     ($t:ty, $table:expr) => {
         impl $crate::model::meta::ModelMeta for $t {
@@ -791,5 +770,64 @@ macro_rules! impl_crud {
         }
 
         impl $crate::repository::Crud for $t {}
+
+        impl $t {
+            pub async fn get<T>(id: T) -> anyhow::Result<Self>
+            where
+                surrealdb::types::RecordIdKey: From<T>,
+                T: Send,
+            {
+                $crate::repository::Repo::<Self>::get(id).await
+            }
+
+            pub async fn list() -> anyhow::Result<Vec<Self>> {
+                $crate::repository::Repo::<Self>::list().await
+            }
+
+            pub async fn list_limit(count: i64) -> anyhow::Result<Vec<Self>> {
+                $crate::repository::Repo::<Self>::list_limit(count).await
+            }
+
+            pub async fn delete_all() -> anyhow::Result<()> {
+                $crate::repository::Repo::<Self>::delete_all().await
+            }
+
+            pub async fn find_one_id(k: &str, v: &str) -> anyhow::Result<surrealdb::types::RecordId> {
+                $crate::repository::Repo::<Self>::find_one_id(k, v).await
+            }
+
+            pub async fn list_record_ids() -> anyhow::Result<Vec<surrealdb::types::RecordId>> {
+                $crate::repository::Repo::<Self>::list_record_ids().await
+            }
+
+            pub async fn create_at(
+                id: surrealdb::types::RecordId,
+                data: Self,
+            ) -> anyhow::Result<Self> {
+                $crate::repository::Repo::<Self>::create_at(id, data).await
+            }
+
+            pub async fn upsert_at(
+                id: surrealdb::types::RecordId,
+                data: Self,
+            ) -> anyhow::Result<Self> {
+                $crate::repository::Repo::<Self>::upsert_at(id, data).await
+            }
+
+            pub async fn update_at(
+                self,
+                id: surrealdb::types::RecordId,
+            ) -> anyhow::Result<Self> {
+                $crate::repository::Repo::<Self>::update_at(id, self).await
+            }
+
+            pub async fn delete<T>(id: T) -> anyhow::Result<()>
+            where
+                surrealdb::types::RecordIdKey: From<T>,
+                T: Send,
+            {
+                $crate::repository::Repo::<Self>::delete(id).await
+            }
+        }
     };
 }

@@ -22,7 +22,7 @@ pub struct GraphRepo;
 
 impl GraphRepo {
     /// Creates a relation row from `in_id` to `out_id` in `rel`.
-    pub async fn relate_by_id(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<()> {
+    pub async fn relate_at(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<()> {
         let db = get_db()?;
         let sql = QueryKind::relate(&in_id, &out_id, rel);
         db.query(sql)
@@ -35,7 +35,7 @@ impl GraphRepo {
     }
 
     /// Deletes a single outgoing relation from `self_id` to `target_id`.
-    pub async fn unrelate_by_id(self_id: RecordId, target_id: RecordId, rel: &str) -> Result<()> {
+    pub async fn unrelate_at(self_id: RecordId, target_id: RecordId, rel: &str) -> Result<()> {
         let db = get_db()?;
         db.query(QueryKind::unrelate(&self_id, &target_id, rel))
             .bind(("rel", Table::from(rel)))
@@ -103,7 +103,7 @@ pub trait GraphCrud: HasId + Send + Sync {
     where
         T: HasId + Send + Sync,
     {
-        GraphRepo::relate_by_id(self.id(), target.id(), rel).await
+        GraphRepo::relate_at(self.id(), target.id(), rel).await
     }
 
     /// Deletes a relation from `self` to `target`.
@@ -111,18 +111,18 @@ pub trait GraphCrud: HasId + Send + Sync {
     where
         T: HasId + Send + Sync,
     {
-        GraphRepo::unrelate_by_id(self.id(), target.id(), rel).await
+        GraphRepo::unrelate_at(self.id(), target.id(), rel).await
     }
 }
 
 impl<T> GraphCrud for T where T: HasId + Send + Sync {}
 
-/// Free-function wrapper for [`GraphRepo::relate_by_id`].
-pub async fn relate_by_id(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<()> {
-    GraphRepo::relate_by_id(in_id, out_id, rel).await
+/// Free-function wrapper for [`GraphRepo::relate_at`].
+pub async fn relate_at(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<()> {
+    GraphRepo::relate_at(in_id, out_id, rel).await
 }
 
-/// Free-function wrapper for [`GraphRepo::unrelate_by_id`].
-pub async fn unrelate_by_id(self_id: RecordId, target_id: RecordId, rel: &str) -> Result<()> {
-    GraphRepo::unrelate_by_id(self_id, target_id, rel).await
+/// Free-function wrapper for [`GraphRepo::unrelate_at`].
+pub async fn unrelate_at(self_id: RecordId, target_id: RecordId, rel: &str) -> Result<()> {
+    GraphRepo::unrelate_at(self_id, target_id, rel).await
 }

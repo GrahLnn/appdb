@@ -8,7 +8,7 @@ use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
-use appdb::{declare_relation, impl_crud, impl_id};
+use appdb::{declare_relation, impl_crud, impl_id, Crud};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
@@ -102,6 +102,57 @@ fn id_repo_roundtrip_passes() {
             .await
             .expect("get should succeed");
         assert_eq!(selected.id, "alice");
+    });
+}
+
+#[test]
+fn inherent_model_api_roundtrip_passes() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItStringUser::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let inserted = Repo::<ItStringUser>::save(ItStringUser {
+            id: "alice".to_owned(),
+        })
+        .await
+        .expect("save should succeed");
+
+        let loaded = ItStringUser::get("alice")
+            .await
+            .expect("get should succeed");
+        assert_eq!(loaded.id, "alice");
+
+        let listed = ItStringUser::list().await.expect("list should succeed");
+        assert_eq!(listed.len(), 1);
+
+        let ids = ItStringUser::list_record_ids()
+            .await
+            .expect("list_record_ids should succeed");
+        assert_eq!(ids.len(), 1);
+
+        let record = ItStringUser::list_record_ids()
+            .await
+            .expect("list_record_ids should succeed")
+            .into_iter()
+            .next()
+            .expect("one record id should exist");
+
+        assert_eq!(record.table, Table::from("it_string_user"));
+
+        ItStringUser::delete("alice")
+            .await
+            .expect("delete should succeed");
+
+        let err = ItStringUser::get("alice")
+            .await
+            .expect_err("deleted record should not load");
+        assert!(err.to_string().contains("Record not found"));
+
+        drop(inserted);
     });
 }
 
@@ -273,15 +324,15 @@ fn graph_relation_roundtrip_passes() {
             name: "B".to_owned(),
         };
 
-        Repo::<ItRecordUser>::create_by_id("a", a.clone())
+        Repo::<ItRecordUser>::create_at(a.id.clone(), a.clone())
             .await
             .expect("create a should succeed");
-        Repo::<ItRecordUser>::create_by_id("b", b.clone())
+        Repo::<ItRecordUser>::create_at(b.id.clone(), b.clone())
             .await
             .expect("create b should succeed");
 
         let rel = relation_name::<ItFollowsRel>();
-        GraphRepo::relate_by_id(a.id.clone(), b.id.clone(), rel)
+        GraphRepo::relate_at(a.id.clone(), b.id.clone(), rel)
             .await
             .expect("relate should succeed");
 
@@ -290,7 +341,7 @@ fn graph_relation_roundtrip_passes() {
             .expect("out_ids should succeed");
         assert!(outs.iter().any(|id| id == &b.id));
 
-        GraphRepo::unrelate_by_id(a.id.clone(), b.id.clone(), rel)
+        GraphRepo::unrelate_at(a.id.clone(), b.id.clone(), rel)
             .await
             .expect("unrelate should succeed");
 
@@ -298,6 +349,48 @@ fn graph_relation_roundtrip_passes() {
             .await
             .expect("out_ids after unrelate should succeed");
         assert!(!outs_after.iter().any(|id| id == &b.id));
+    });
+}
+
+#[test]
+fn inherent_record_model_api_roundtrip_passes() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItRecordUser::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let created = ItRecordUser::create_at(
+            RecordId::new("it_record_user", "reload-me"),
+            ItRecordUser {
+                id: RecordId::new("it_record_user", "reload-me"),
+                name: "before".to_owned(),
+            },
+        )
+        .await
+        .expect("create_at should succeed");
+
+        let updated = ItRecordUser::update_at(
+            ItRecordUser {
+                id: RecordId::new("it_record_user", "reload-me"),
+                name: "after".to_owned(),
+            },
+            RecordId::new("it_record_user", "reload-me"),
+        )
+        .await
+        .expect("update_at should succeed");
+
+        let reloaded = ItRecordUser::get_record(updated.id.clone())
+            .await
+            .expect("get_record should succeed");
+        assert_eq!(reloaded.name, "after");
+
+        created
+            .delete()
+            .await
+            .expect("instance delete should succeed");
     });
 }
 
@@ -319,14 +412,14 @@ fn graph_relation_name_is_bound_as_identifier() {
             id: RecordId::new("it_record_user", "y"),
             name: "Y".to_owned(),
         };
-        Repo::<ItRecordUser>::create_by_id("x", x.clone())
+        Repo::<ItRecordUser>::create_at(x.id.clone(), x.clone())
             .await
             .expect("create x should succeed");
-        Repo::<ItRecordUser>::create_by_id("y", y.clone())
+        Repo::<ItRecordUser>::create_at(y.id.clone(), y.clone())
             .await
             .expect("create y should succeed");
 
-        GraphRepo::relate_by_id(
+        GraphRepo::relate_at(
             x.id.clone(),
             y.id.clone(),
             "bad-name; DELETE it_record_user RETURN NONE;",
@@ -334,10 +427,10 @@ fn graph_relation_name_is_bound_as_identifier() {
         .await
         .expect("relation name should be treated as bound identifier");
 
-        let selected_x = Repo::<ItRecordUser>::get_by_key("x")
+        let selected_x = Repo::<ItRecordUser>::get_record(RecordId::new("it_record_user", "x"))
             .await
             .expect("x should still exist");
-        let selected_y = Repo::<ItRecordUser>::get_by_key("y")
+        let selected_y = Repo::<ItRecordUser>::get_record(RecordId::new("it_record_user", "y"))
             .await
             .expect("y should still exist");
         assert_eq!(selected_x.name, "X");
@@ -355,8 +448,8 @@ fn delete_target_string_bind_fails_but_table_bind_passes() {
             .await
             .expect("delete_all should succeed");
 
-        Repo::<ItRecordUser>::create_by_id(
-            "z",
+        Repo::<ItRecordUser>::create_at(
+            RecordId::new("it_record_user", "z"),
             ItRecordUser {
                 id: RecordId::new("it_record_user", "z"),
                 name: "Z".to_owned(),
