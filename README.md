@@ -26,7 +26,7 @@
 
 ```rust
 use appdb::prelude::*;
-use appdb::{impl_crud, impl_id};
+use appdb::impl_crud;
 use serde::{Deserialize, Serialize};
 use surrealdb::types::SurrealValue;
 
