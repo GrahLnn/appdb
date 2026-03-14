@@ -4,12 +4,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use appdb::connection::{get_db, init_db, DbRuntime};
 use appdb::graph::GraphRepo;
-use appdb::model::meta::{register_table, ModelMeta};
+use appdb::model::meta::{HasId, register_table, ModelMeta};
 use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
-use appdb::{declare_relation, impl_id, Crud, Id, Store};
+use appdb::{declare_relation, Crud, Id, Store};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
@@ -57,7 +57,12 @@ impl ModelMeta for ItRecordUser {
 
 impl Crud for ItRecordUser {}
 
-impl_id!(ItRecordUser, id);
+impl HasId for ItRecordUser {
+    fn id(&self) -> RecordId {
+        self.id.clone()
+    }
+}
+
 declare_relation!(ItFollowsRel, "it_follows_rel");
 
 fn test_db_path() -> PathBuf {
