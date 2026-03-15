@@ -49,6 +49,22 @@ struct ItProfile {
     note: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct ItCompositeUnique {
+    id: Id,
+    #[unique]
+    name: String,
+    #[unique]
+    locale: String,
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct ItFallbackLookup {
+    name: String,
+    note: Option<String>,
+}
+
 impl ModelMeta for ItRecordUser {
     fn table_name() -> &'static str {
         static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
@@ -281,6 +297,135 @@ fn store_unique_field_registers_schema_index() {
             && ddl.contains("ON it_profile")
             && ddl.contains("FIELDS name UNIQUE")
     }));
+}
+
+#[test]
+fn store_auto_lookup_uses_unique_fields() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItProfile>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let saved = Repo::<ItProfile>::save(ItProfile {
+            id: Id::from("p-lookup"),
+            name: "alice".to_owned(),
+            note: Some("x".to_owned()),
+        })
+        .await
+        .expect("save should succeed");
+
+        let id = Repo::<ItProfile>::find_unique_id_for(&ItProfile {
+            id: Id::from("ignored"),
+            name: "alice".to_owned(),
+            note: None,
+        })
+        .await
+        .expect("unique lookup should succeed");
+
+        assert_eq!(id, saved.id());
+    });
+}
+
+#[test]
+fn store_auto_lookup_uses_all_unique_fields_together() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItCompositeUnique>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let saved = Repo::<ItCompositeUnique>::save(ItCompositeUnique {
+            id: Id::from("cu-1"),
+            name: "alice".to_owned(),
+            locale: "en".to_owned(),
+            note: Some("hello".to_owned()),
+        })
+        .await
+        .expect("save should succeed");
+
+        let id = Repo::<ItCompositeUnique>::find_unique_id_for(&ItCompositeUnique {
+            id: Id::from("ignored"),
+            name: "alice".to_owned(),
+            locale: "en".to_owned(),
+            note: None,
+        })
+        .await
+        .expect("composite unique lookup should succeed");
+
+        assert_eq!(id, saved.id());
+    });
+}
+
+#[test]
+fn store_auto_lookup_falls_back_to_non_id_fields() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItFallbackLookup>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let created = Repo::<ItFallbackLookup>::create(ItFallbackLookup {
+            name: "fallback".to_owned(),
+            note: Some("note".to_owned()),
+        })
+        .await
+        .expect("create should succeed");
+
+        let id = Repo::<ItFallbackLookup>::find_unique_id_for(&ItFallbackLookup {
+            name: "fallback".to_owned(),
+            note: Some("note".to_owned()),
+        })
+        .await
+        .expect("fallback lookup should succeed");
+
+        let loaded = Repo::<ItFallbackLookup>::get_record(id)
+            .await
+            .expect("get_record should succeed");
+        assert_eq!(loaded.name, created.name);
+        assert_eq!(loaded.note, created.note);
+    });
+}
+
+#[test]
+fn store_auto_lookup_errors_when_match_is_not_unique() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItFallbackLookup>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        Repo::<ItFallbackLookup>::create(ItFallbackLookup {
+            name: "dup".to_owned(),
+            note: Some("same".to_owned()),
+        })
+        .await
+        .expect("first create should succeed");
+
+        Repo::<ItFallbackLookup>::create(ItFallbackLookup {
+            name: "dup".to_owned(),
+            note: Some("same".to_owned()),
+        })
+        .await
+        .expect("second create should succeed");
+
+        let err = Repo::<ItFallbackLookup>::find_unique_id_for(&ItFallbackLookup {
+            name: "dup".to_owned(),
+            note: Some("same".to_owned()),
+        })
+        .await
+        .expect_err("duplicate fallback lookup should fail");
+
+        assert!(err.to_string().contains("multiple records"), "{err}");
+    });
 }
 
 #[test]
@@ -659,3 +804,4 @@ fn raw_sql_stmt_binds_values_safely() {
         assert_eq!(value, Some(99));
     });
 }
+

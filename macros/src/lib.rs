@@ -99,6 +99,23 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
     });
 
+    let lookup_fields = if unique_fields.is_empty() {
+        named_fields
+            .iter()
+            .filter_map(|field| {
+                let ident = field.ident.as_ref()?;
+                if ident == "id" {
+                    None
+                } else {
+                    Some(ident.to_string())
+                }
+            })
+            .collect::<Vec<_>>()
+    } else {
+        unique_fields.iter().map(|field| field.to_string()).collect::<Vec<_>>()
+    };
+    let lookup_field_literals = lookup_fields.iter().map(|field| quote! { #field });
+
     Ok(quote! {
         impl ::appdb::model::meta::ModelMeta for #struct_ident {
             fn table_name() -> &'static str {
@@ -107,6 +124,12 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                     let table = ::appdb::model::meta::default_table_name(stringify!(#struct_ident));
                     ::appdb::model::meta::register_table(stringify!(#struct_ident), table)
                 })
+            }
+        }
+
+        impl ::appdb::model::meta::UniqueLookupMeta for #struct_ident {
+            fn lookup_fields() -> &'static [&'static str] {
+                &[ #( #lookup_field_literals ),* ]
             }
         }
 

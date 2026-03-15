@@ -109,6 +109,16 @@ impl QueryKind {
     pub fn select_id_single(_table: &str) -> String {
         "RETURN (SELECT id FROM ONLY $table WHERE [$k] = $v LIMIT 1).id;".to_owned()
     }
+    /// Builds a query that returns up to two record ids by multiple field equalities.
+    pub fn select_id_by_fields(fields: &[String]) -> String {
+        let where_clause = fields
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| format!("type::field($field_{idx}) = $value_{idx}"))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        format!("SELECT VALUE id FROM $table WHERE {where_clause} LIMIT 2;")
+    }
     /// Builds a query that returns all record ids in a table.
     pub fn all_id(_table: &str) -> String {
         "RETURN (SELECT id FROM $table).id;".to_owned()
