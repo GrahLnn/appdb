@@ -5,11 +5,12 @@ use surrealdb::types::{RecordId, SurrealValue, Table};
 
 use crate::connection::get_db;
 use crate::model::meta::HasId;
+use crate::model::relation::RelationMeta;
 use crate::query::builder::QueryKind;
 
 /// Edge payload used with relation-table inserts.
 #[derive(Debug, Serialize, Deserialize, SurrealValue)]
-pub struct Relation {
+pub struct RelationEdge {
     /// Source record id.
     #[serde(rename = "in")]
     pub _in: RecordId,
@@ -88,9 +89,9 @@ impl GraphRepo {
     }
 
     /// Inserts multiple relation rows into the given relation table.
-    pub async fn insert_relation(rel: &str, data: Vec<Relation>) -> Result<Vec<Relation>> {
+    pub async fn insert_relation(rel: &str, data: Vec<RelationEdge>) -> Result<Vec<RelationEdge>> {
         let db = get_db()?;
-        let relate: Vec<Relation> = db.insert(rel).relation(data).await?;
+        let relate: Vec<RelationEdge> = db.insert(rel).relation(data).await?;
         Ok(relate)
     }
 }
@@ -99,19 +100,21 @@ impl GraphRepo {
 #[async_trait]
 pub trait GraphCrud: HasId + Send + Sync {
     /// Creates a relation from `self` to `target`.
-    async fn relate<T>(&self, target: T, rel: &str) -> Result<()>
+    async fn relate<R, T>(&self, target: &T) -> Result<()>
     where
+        R: RelationMeta + Send + Sync,
         T: HasId + Send + Sync,
     {
-        GraphRepo::relate_at(self.id(), target.id(), rel).await
+        GraphRepo::relate_at(self.id(), target.id(), R::relation_name()).await
     }
 
     /// Deletes a relation from `self` to `target`.
-    async fn unrelate<T>(&self, target: T, rel: &str) -> Result<()>
+    async fn unrelate<R, T>(&self, target: &T) -> Result<()>
     where
+        R: RelationMeta + Send + Sync,
         T: HasId + Send + Sync,
     {
-        GraphRepo::unrelate_at(self.id(), target.id(), rel).await
+        GraphRepo::unrelate_at(self.id(), target.id(), R::relation_name()).await
     }
 }
 
@@ -125,4 +128,14 @@ pub async fn relate_at(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<(
 /// Free-function wrapper for [`GraphRepo::unrelate_at`].
 pub async fn unrelate_at(self_id: RecordId, target_id: RecordId, rel: &str) -> Result<()> {
     GraphRepo::unrelate_at(self_id, target_id, rel).await
+}
+
+/// Free-function wrapper for [`GraphRepo::out_ids`].
+pub async fn out_ids(in_id: RecordId, rel: &str, out_table: &str) -> Result<Vec<RecordId>> {
+    GraphRepo::out_ids(in_id, rel, out_table).await
+}
+
+/// Free-function wrapper for [`GraphRepo::in_ids`].
+pub async fn in_ids(out_id: RecordId, rel: &str, in_table: &str) -> Result<Vec<RecordId>> {
+    GraphRepo::in_ids(out_id, rel, in_table).await
 }

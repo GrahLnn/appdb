@@ -32,42 +32,16 @@ pub fn ensure_relation_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-#[macro_export]
-/// Declares a zero-sized relation marker type and implements [`RelationMeta`] for it.
-macro_rules! declare_relation {
-    ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub struct $name;
-
-        impl $crate::model::relation::RelationMeta for $name {
-            fn relation_name() -> &'static str {
-                static REL_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-                REL_NAME.get_or_init(|| {
-                    let rel = $crate::model::meta::default_table_name(stringify!($name));
-                    $crate::model::relation::register_relation(rel)
-                })
-            }
-        }
-    };
-    ($name:ident, $rel:literal) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub struct $name;
-
-        impl $crate::model::relation::RelationMeta for $name {
-            fn relation_name() -> &'static str {
-                static REL_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-                REL_NAME.get_or_init(|| $crate::model::relation::register_relation($rel))
-            }
-        }
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use super::{ensure_relation_name, register_relation, RelationMeta};
 
-    crate::declare_relation!(AutoRelName);
-    crate::declare_relation!(ManualRelName, "manual_rel");
+    #[derive(crate::Relation)]
+    struct AutoRelName;
+
+    #[derive(crate::Relation)]
+    #[relation(name = "manual_rel")]
+    struct ManualRelName;
 
     #[test]
     fn relation_name_accepts_valid_identifier() {

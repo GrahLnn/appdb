@@ -21,6 +21,14 @@ pub fn derive_store(input: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro_derive(Relation, attributes(relation))]
+pub fn derive_relation(input: TokenStream) -> TokenStream {
+    match derive_relation_impl(parse_macro_input!(input as DeriveInput)) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let struct_ident = input.ident;
 
@@ -172,6 +180,71 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
     })
 }
 
+fn derive_relation_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let struct_ident = input.ident;
+    let relation_name = relation_name_override(&input.attrs)?
+        .unwrap_or_else(|| to_snake_case(&struct_ident.to_string()));
+
+    match input.data {
+        Data::Struct(data) => match data.fields {
+            Fields::Unit | Fields::Named(_) => {}
+            _ => {
+                return Err(Error::new_spanned(
+                    struct_ident,
+                    "Relation can only be derived for unit structs or structs with named fields",
+                ))
+            }
+        },
+        _ => {
+            return Err(Error::new_spanned(
+                struct_ident,
+                "Relation can only be derived for structs",
+            ))
+        }
+    }
+
+    Ok(quote! {
+        impl ::appdb::model::relation::RelationMeta for #struct_ident {
+            fn relation_name() -> &'static str {
+                static REL_NAME: ::std::sync::OnceLock<&'static str> = ::std::sync::OnceLock::new();
+                REL_NAME.get_or_init(|| ::appdb::model::relation::register_relation(#relation_name))
+            }
+        }
+
+        impl #struct_ident {
+            pub async fn relate<A, B>(a: &A, b: &B) -> ::anyhow::Result<()>
+            where
+                A: ::appdb::model::meta::HasId + Send + Sync,
+                B: ::appdb::model::meta::HasId + Send + Sync,
+            {
+                ::appdb::graph::relate_at(a.id(), b.id(), <Self as ::appdb::model::relation::RelationMeta>::relation_name()).await
+            }
+
+            pub async fn unrelate<A, B>(a: &A, b: &B) -> ::anyhow::Result<()>
+            where
+                A: ::appdb::model::meta::HasId + Send + Sync,
+                B: ::appdb::model::meta::HasId + Send + Sync,
+            {
+                ::appdb::graph::unrelate_at(a.id(), b.id(), <Self as ::appdb::model::relation::RelationMeta>::relation_name()).await
+            }
+
+            pub async fn out_ids<A>(a: &A, out_table: &str) -> ::anyhow::Result<::std::vec::Vec<::surrealdb::types::RecordId>>
+            where
+                A: ::appdb::model::meta::HasId + Send + Sync,
+            {
+                ::appdb::graph::out_ids(a.id(), <Self as ::appdb::model::relation::RelationMeta>::relation_name(), out_table).await
+            }
+
+            pub async fn in_ids<B>(b: &B, in_table: &str) -> ::anyhow::Result<::std::vec::Vec<::surrealdb::types::RecordId>>
+            where
+                B: ::appdb::model::meta::HasId + Send + Sync,
+            {
+                ::appdb::graph::in_ids(b.id(), <Self as ::appdb::model::relation::RelationMeta>::relation_name(), in_table).await
+            }
+        }
+    })
+}
+
 fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let struct_ident = input.ident;
     let encrypted_ident = format_ident!("Encrypted{}", struct_ident);
@@ -289,6 +362,29 @@ fn has_secure_attr(attrs: &[Attribute]) -> bool {
 
 fn has_unique_attr(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident("unique"))
+}
+
+fn relation_name_override(attrs: &[Attribute]) -> syn::Result<Option<String>> {
+    for attr in attrs {
+        if !attr.path().is_ident("relation") {
+            continue;
+        }
+
+        let mut name = None;
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("name") {
+                let value = meta.value()?;
+                let literal: syn::LitStr = value.parse()?;
+                name = Some(literal.value());
+                Ok(())
+            } else {
+                Err(meta.error("unsupported relation attribute"))
+            }
+        })?;
+        return Ok(name);
+    }
+
+    Ok(None)
 }
 
 enum SecureKind {

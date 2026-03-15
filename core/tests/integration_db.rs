@@ -3,13 +3,13 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use appdb::connection::{get_db, init_db, DbRuntime};
-use appdb::graph::GraphRepo;
+use appdb::graph::{GraphCrud, GraphRepo};
 use appdb::model::meta::{HasId, register_table, ModelMeta};
 use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
-use appdb::{declare_relation, Crud, Id, Store};
+use appdb::{Crud, Id, Relation, Store};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
@@ -64,7 +64,17 @@ impl HasId for ItRecordUser {
     }
 }
 
-declare_relation!(ItFollowsRel, "it_follows_rel");
+#[derive(Debug, Clone, Copy, Relation)]
+#[relation(name = "it_follows_rel")]
+struct ItFollowsRel;
+
+#[derive(Debug, Clone, Copy, Relation)]
+struct AutoNamedTestRelation;
+
+#[derive(Debug, Clone, Relation)]
+struct NamedFieldTestRelation {
+    created_at: i64,
+}
 
 fn test_db_path() -> PathBuf {
     let nanos = SystemTime::now()
@@ -373,6 +383,105 @@ fn graph_relation_roundtrip_passes() {
         let outs_after = GraphRepo::out_ids(a.id.clone(), rel, "it_record_user")
             .await
             .expect("out_ids after unrelate should succeed");
+        assert!(!outs_after.iter().any(|id| id == &b.id));
+    });
+}
+
+#[test]
+fn relation_derive_registers_default_and_overridden_names() {
+    assert_eq!(relation_name::<ItFollowsRel>(), "it_follows_rel");
+    assert_eq!(relation_name::<AutoNamedTestRelation>(), "auto_named_test_relation");
+    assert_eq!(relation_name::<NamedFieldTestRelation>(), "named_field_test_relation");
+}
+
+#[test]
+fn relation_type_api_roundtrip_passes() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecordUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let a = ItRecordUser {
+            id: RecordId::new("it_record_user", "type-a"),
+            name: "A".to_owned(),
+        };
+        let b = ItRecordUser {
+            id: RecordId::new("it_record_user", "type-b"),
+            name: "B".to_owned(),
+        };
+
+        Repo::<ItRecordUser>::create_at(a.id.clone(), a.clone())
+            .await
+            .expect("create a should succeed");
+        Repo::<ItRecordUser>::create_at(b.id.clone(), b.clone())
+            .await
+            .expect("create b should succeed");
+
+        ItFollowsRel::relate(&a, &b)
+            .await
+            .expect("type-level relate should succeed");
+
+        let outs = ItFollowsRel::out_ids(&a, "it_record_user")
+            .await
+            .expect("type-level out_ids should succeed");
+        assert!(outs.iter().any(|id| id == &b.id));
+
+        ItFollowsRel::unrelate(&a, &b)
+            .await
+            .expect("type-level unrelate should succeed");
+
+        let outs_after = ItFollowsRel::out_ids(&a, "it_record_user")
+            .await
+            .expect("type-level out_ids after unrelate should succeed");
+        assert!(!outs_after.iter().any(|id| id == &b.id));
+    });
+}
+
+#[test]
+fn graph_instance_api_roundtrip_passes() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecordUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let a = ItRecordUser {
+            id: RecordId::new("it_record_user", "inst-a"),
+            name: "A".to_owned(),
+        };
+        let b = ItRecordUser {
+            id: RecordId::new("it_record_user", "inst-b"),
+            name: "B".to_owned(),
+        };
+
+        Repo::<ItRecordUser>::create_at(a.id.clone(), a.clone())
+            .await
+            .expect("create a should succeed");
+        Repo::<ItRecordUser>::create_at(b.id.clone(), b.clone())
+            .await
+            .expect("create b should succeed");
+
+        a.relate::<ItFollowsRel, _>(&b)
+            .await
+            .expect("instance relate should succeed");
+
+        let outs = ItFollowsRel::out_ids(&a, "it_record_user")
+            .await
+            .expect("out_ids should succeed");
+        assert!(outs.iter().any(|id| id == &b.id));
+
+        a.unrelate::<ItFollowsRel, _>(&b)
+            .await
+            .expect("instance unrelate should succeed");
+
+        let outs_after = ItFollowsRel::out_ids(&a, "it_record_user")
+            .await
+            .expect("out_ids after instance unrelate should succeed");
         assert!(!outs_after.iter().any(|id| id == &b.id));
     });
 }
