@@ -65,6 +65,18 @@ struct ItFallbackLookup {
     note: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct ItLookupSource {
+    #[unique]
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct ItLookupTarget {
+    #[unique]
+    code: String,
+}
+
 impl ModelMeta for ItRecordUser {
     fn table_name() -> &'static str {
         static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
@@ -77,6 +89,13 @@ impl Crud for ItRecordUser {}
 impl HasId for ItRecordUser {
     fn id(&self) -> RecordId {
         self.id.clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl appdb::model::meta::ResolveRecordId for ItRecordUser {
+    async fn resolve_record_id(&self) -> anyhow::Result<RecordId> {
+        Ok(self.id())
     }
 }
 
@@ -529,6 +548,100 @@ fn graph_relation_roundtrip_passes() {
             .await
             .expect("out_ids after unrelate should succeed");
         assert!(!outs_after.iter().any(|id| id == &b.id));
+    });
+}
+
+#[test]
+fn graph_instance_api_accepts_store_models_without_has_id() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItLookupSource>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItLookupTarget>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let source = Repo::<ItLookupSource>::create(ItLookupSource {
+            name: "source-a".to_owned(),
+        })
+        .await
+        .expect("source create should succeed");
+        let target = Repo::<ItLookupTarget>::create(ItLookupTarget {
+            code: "target-b".to_owned(),
+        })
+        .await
+        .expect("target create should succeed");
+
+        source
+            .relate::<ItFollowsRel, _>(&target)
+            .await
+            .expect("instance relate should resolve record ids");
+
+        let source_id = Repo::<ItLookupSource>::find_unique_id_for(&source)
+            .await
+            .expect("source lookup should succeed");
+        let target_id = Repo::<ItLookupTarget>::find_unique_id_for(&target)
+            .await
+            .expect("target lookup should succeed");
+
+        let outs = ItFollowsRel::out_ids(&source, "it_lookup_target")
+            .await
+            .expect("out_ids should succeed");
+        assert!(outs.iter().any(|id| id == &target_id));
+
+        source
+            .unrelate::<ItFollowsRel, _>(&target)
+            .await
+            .expect("instance unrelate should resolve record ids");
+
+        let outs_after = ItFollowsRel::out_ids(&source, "it_lookup_target")
+            .await
+            .expect("out_ids after unrelate should succeed");
+        assert!(!outs_after.iter().any(|id| id == &target_id));
+
+        let _ = source_id;
+    });
+}
+
+#[test]
+fn relation_type_api_accepts_store_models_without_has_id() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItLookupSource>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItLookupTarget>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let source = Repo::<ItLookupSource>::create(ItLookupSource {
+            name: "source-type".to_owned(),
+        })
+        .await
+        .expect("source create should succeed");
+        let target = Repo::<ItLookupTarget>::create(ItLookupTarget {
+            code: "target-type".to_owned(),
+        })
+        .await
+        .expect("target create should succeed");
+
+        ItFollowsRel::relate(&source, &target)
+            .await
+            .expect("type relate should resolve record ids");
+
+        let target_id = Repo::<ItLookupTarget>::find_unique_id_for(&target)
+            .await
+            .expect("target lookup should succeed");
+
+        let outs = ItFollowsRel::out_ids(&source, "it_lookup_target")
+            .await
+            .expect("type out_ids should succeed");
+        assert!(outs.iter().any(|id| id == &target_id));
     });
 }
 
