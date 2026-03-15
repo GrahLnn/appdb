@@ -9,7 +9,7 @@ use surrealdb::types::{RecordId, RecordIdKey, Table, Value as SurrealDbValue};
 
 use crate::connection::get_db;
 use crate::error::DBError;
-use crate::model::meta::{HasId, ModelMeta};
+use crate::model::meta::{HasId, ModelMeta, UniqueLookupMeta};
 use crate::query::builder::QueryKind;
 
 fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
@@ -123,6 +123,42 @@ where
         ))
         .into()),
     }
+}
+
+fn collect_lookup_parts<T>(data: &T) -> Result<Vec<(String, Value)>>
+where
+    T: UniqueLookupMeta + Serialize,
+{
+    let value = serde_json::to_value(data)?;
+    let Value::Object(map) = value else {
+        return Err(DBError::InvalidModel(format!(
+            "model `{}` must serialize to an object",
+            std::any::type_name::<T>()
+        ))
+        .into());
+    };
+
+    let fields = T::lookup_fields();
+    if fields.is_empty() {
+        return Err(DBError::InvalidModel(format!(
+            "model `{}` has no fields available for automatic unique lookup",
+            std::any::type_name::<T>()
+        ))
+        .into());
+    }
+
+    let mut parts = Vec::with_capacity(fields.len());
+    for field in fields {
+        let value = map.get(*field).cloned().ok_or_else(|| {
+            DBError::InvalidModel(format!(
+                "model `{}` is missing lookup field `{field}` during automatic unique lookup",
+                std::any::type_name::<T>()
+            ))
+        })?;
+        parts.push(((*field).to_owned(), value));
+    }
+
+    Ok(parts)
 }
 
 /// Generic repository over a model type registered with [`ModelMeta`].
@@ -342,6 +378,40 @@ where
             .check()?;
         let ids: Vec<RecordId> = result.take(0)?;
         Ok(ids)
+    }
+
+    /// Finds exactly one record id by the model's automatic lookup fields.
+    pub async fn find_unique_id_for(data: &T) -> Result<RecordId>
+    where
+        T: UniqueLookupMeta,
+    {
+        let db = get_db()?;
+        let lookup_parts = collect_lookup_parts(data)?;
+        let fields = lookup_parts
+            .iter()
+            .map(|(field, _)| field.clone())
+            .collect::<Vec<_>>();
+        let mut query = db
+            .query(QueryKind::select_id_by_fields(&fields))
+            .bind(("table", Table::from(T::table_name())));
+
+        for (idx, (field, value)) in lookup_parts.into_iter().enumerate() {
+            query = query
+                .bind((format!("field_{idx}"), field))
+                .bind((format!("value_{idx}"), value));
+        }
+
+        let mut result = query.await?.check()?;
+        let ids: Vec<RecordId> = result.take(0)?;
+
+        match ids.len() {
+            1 => Ok(ids.into_iter().next().expect("one id must exist")),
+            0 => Err(DBError::NotFound.into()),
+            _ => Err(DBError::InvalidModel(
+                "automatic unique lookup matched multiple records".to_owned(),
+            )
+            .into()),
+        }
     }
 }
 

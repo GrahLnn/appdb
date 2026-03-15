@@ -35,6 +35,12 @@ pub trait ModelMeta:
     }
 }
 
+/// Metadata used to re-identify one stored record from model field values.
+pub trait UniqueLookupMeta {
+    /// Field names used for automatic unique lookup.
+    fn lookup_fields() -> &'static [&'static str];
+}
+
 /// Registers a stable table name for a model type.
 pub fn register_table(model: &'static str, table: &'static str) -> &'static str {
     let mut registry = TABLE_REGISTRY.lock().unwrap_or_else(|err| err.into_inner());
