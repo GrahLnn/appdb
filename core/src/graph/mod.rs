@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 
 use crate::connection::get_db;
-use crate::model::meta::HasId;
+use crate::model::meta::ResolveRecordId;
 use crate::model::relation::RelationMeta;
 use crate::query::builder::QueryKind;
 
@@ -96,29 +96,29 @@ impl GraphRepo {
     }
 }
 
-/// Convenience graph methods for models that already expose a record id.
+/// Convenience graph methods for values that can resolve to one record id.
 #[async_trait]
-pub trait GraphCrud: HasId + Send + Sync {
+pub trait GraphCrud: ResolveRecordId + Send + Sync {
     /// Creates a relation from `self` to `target`.
     async fn relate<R, T>(&self, target: &T) -> Result<()>
     where
         R: RelationMeta + Send + Sync,
-        T: HasId + Send + Sync,
+        T: ResolveRecordId + Send + Sync,
     {
-        GraphRepo::relate_at(self.id(), target.id(), R::relation_name()).await
+        GraphRepo::relate_at(self.resolve_record_id().await?, target.resolve_record_id().await?, R::relation_name()).await
     }
 
     /// Deletes a relation from `self` to `target`.
     async fn unrelate<R, T>(&self, target: &T) -> Result<()>
     where
         R: RelationMeta + Send + Sync,
-        T: HasId + Send + Sync,
+        T: ResolveRecordId + Send + Sync,
     {
-        GraphRepo::unrelate_at(self.id(), target.id(), R::relation_name()).await
+        GraphRepo::unrelate_at(self.resolve_record_id().await?, target.resolve_record_id().await?, R::relation_name()).await
     }
 }
 
-impl<T> GraphCrud for T where T: HasId + Send + Sync {}
+impl<T> GraphCrud for T where T: ResolveRecordId + Send + Sync {}
 
 /// Free-function wrapper for [`GraphRepo::relate_at`].
 pub async fn relate_at(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<()> {

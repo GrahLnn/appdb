@@ -82,6 +82,29 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
     });
 
+    let resolve_record_id_impl = if let Some(field) = id_fields.first() {
+        quote! {
+            #[::async_trait::async_trait]
+            impl ::appdb::model::meta::ResolveRecordId for #struct_ident {
+                async fn resolve_record_id(&self) -> ::anyhow::Result<::surrealdb::types::RecordId> {
+                    Ok(::surrealdb::types::RecordId::new(
+                        <Self as ::appdb::model::meta::ModelMeta>::table_name(),
+                        self.#field.clone(),
+                    ))
+                }
+            }
+        }
+    } else {
+        quote! {
+            #[::async_trait::async_trait]
+            impl ::appdb::model::meta::ResolveRecordId for #struct_ident {
+                async fn resolve_record_id(&self) -> ::anyhow::Result<::surrealdb::types::RecordId> {
+                    ::appdb::repository::Repo::<Self>::find_unique_id_for(self).await
+                }
+            }
+        }
+    };
+
     let unique_schema_impls = unique_fields.iter().map(|field| {
         let field_name = field.to_string();
         let index_name = format!("{}_{}_unique", to_snake_case(&struct_ident.to_string()), field_name);
@@ -134,6 +157,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
 
         #auto_has_id_impl
+        #resolve_record_id_impl
 
         #( #unique_schema_impls )*
 
@@ -237,32 +261,32 @@ fn derive_relation_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStr
         impl #struct_ident {
             pub async fn relate<A, B>(a: &A, b: &B) -> ::anyhow::Result<()>
             where
-                A: ::appdb::model::meta::HasId + Send + Sync,
-                B: ::appdb::model::meta::HasId + Send + Sync,
+                A: ::appdb::model::meta::ResolveRecordId + Send + Sync,
+                B: ::appdb::model::meta::ResolveRecordId + Send + Sync,
             {
-                ::appdb::graph::relate_at(a.id(), b.id(), <Self as ::appdb::model::relation::RelationMeta>::relation_name()).await
+                ::appdb::graph::relate_at(a.resolve_record_id().await?, b.resolve_record_id().await?, <Self as ::appdb::model::relation::RelationMeta>::relation_name()).await
             }
 
             pub async fn unrelate<A, B>(a: &A, b: &B) -> ::anyhow::Result<()>
             where
-                A: ::appdb::model::meta::HasId + Send + Sync,
-                B: ::appdb::model::meta::HasId + Send + Sync,
+                A: ::appdb::model::meta::ResolveRecordId + Send + Sync,
+                B: ::appdb::model::meta::ResolveRecordId + Send + Sync,
             {
-                ::appdb::graph::unrelate_at(a.id(), b.id(), <Self as ::appdb::model::relation::RelationMeta>::relation_name()).await
+                ::appdb::graph::unrelate_at(a.resolve_record_id().await?, b.resolve_record_id().await?, <Self as ::appdb::model::relation::RelationMeta>::relation_name()).await
             }
 
             pub async fn out_ids<A>(a: &A, out_table: &str) -> ::anyhow::Result<::std::vec::Vec<::surrealdb::types::RecordId>>
             where
-                A: ::appdb::model::meta::HasId + Send + Sync,
+                A: ::appdb::model::meta::ResolveRecordId + Send + Sync,
             {
-                ::appdb::graph::out_ids(a.id(), <Self as ::appdb::model::relation::RelationMeta>::relation_name(), out_table).await
+                ::appdb::graph::out_ids(a.resolve_record_id().await?, <Self as ::appdb::model::relation::RelationMeta>::relation_name(), out_table).await
             }
 
             pub async fn in_ids<B>(b: &B, in_table: &str) -> ::anyhow::Result<::std::vec::Vec<::surrealdb::types::RecordId>>
             where
-                B: ::appdb::model::meta::HasId + Send + Sync,
+                B: ::appdb::model::meta::ResolveRecordId + Send + Sync,
             {
-                ::appdb::graph::in_ids(b.id(), <Self as ::appdb::model::relation::RelationMeta>::relation_name(), in_table).await
+                ::appdb::graph::in_ids(b.resolve_record_id().await?, <Self as ::appdb::model::relation::RelationMeta>::relation_name(), in_table).await
             }
         }
     })
