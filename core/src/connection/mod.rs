@@ -4,7 +4,9 @@ use anyhow::Result;
 use std::borrow::Cow;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::{Arc, LazyLock, RwLock};
+use std::thread;
 use std::time::Duration;
 use surrealdb::engine::local::{Db, SurrealKv};
 use surrealdb::opt::Config;
@@ -13,7 +15,7 @@ use surrealdb::Surreal;
 /// Shared SurrealDB handle used by the runtime and global facade.
 pub type DbHandle = Arc<Surreal<Db>>;
 
-static DB: LazyLock<RwLock<Option<DbHandle>>> = LazyLock::new(|| RwLock::new(None));
+static DB: LazyLock<RwLock<Option<DbRuntime>>> = LazyLock::new(|| RwLock::new(None));
 
 /// Options used when opening the embedded SurrealDB runtime.
 #[derive(Debug, Clone, Default)]
@@ -74,6 +76,7 @@ impl InitDbOptions {
 #[derive(Debug, Clone)]
 pub struct DbRuntime {
     db: DbHandle,
+    worker: Arc<DbWorker>,
 }
 
 impl DbRuntime {
@@ -85,20 +88,25 @@ impl DbRuntime {
     /// Opens a runtime with explicit options and applies registered schema.
     pub async fn open_with_options(path: PathBuf, options: InitDbOptions) -> Result<Self> {
         fs::create_dir_all(&path)?;
-        let db = open_db(path, &options).await?;
-        db.use_ns("app").use_db("app").await?;
-        let runtime = Self { db: Arc::new(db) };
-        apply_schema(&runtime.db).await?;
+        let worker = Arc::new(DbWorker::spawn(path, options)?);
+        let runtime = Self {
+            db: worker.handle(),
+            worker,
+        };
         Ok(runtime)
     }
 
     /// Wraps an existing SurrealDB handle.
     pub fn from_handle(db: DbHandle) -> Self {
-        Self { db }
+        Self {
+            worker: Arc::new(DbWorker::detached(db.clone())),
+            db,
+        }
     }
 
     /// Returns a clone of the underlying database handle.
     pub fn handle(&self) -> DbHandle {
+        let _ = &self.worker;
         self.db.clone()
     }
 
@@ -109,14 +117,102 @@ impl DbRuntime {
             return Err(DBError::AlreadyInitialized.into());
         }
 
-        *db = Some(self.db.clone());
+        *db = Some(self.clone());
         Ok(())
     }
 
     #[doc(hidden)]
     pub fn reinstall_global_for_tests(&self) {
         let mut db = DB.write().expect("global database lock should not be poisoned");
-        *db = Some(self.db.clone());
+        *db = Some(self.clone());
+    }
+}
+
+#[derive(Debug)]
+struct DbWorker {
+    db: DbHandle,
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl DbWorker {
+    fn spawn(path: PathBuf, options: InitDbOptions) -> Result<Self> {
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+
+        let thread = thread::spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(err) => {
+                    let _ = ready_tx.send(Err(err.into()));
+                    return;
+                }
+            };
+
+            runtime.block_on(async move {
+                let db = match open_db(path, &options).await {
+                    Ok(db) => db,
+                    Err(err) => {
+                        let _ = ready_tx.send(Err(err));
+                        return;
+                    }
+                };
+
+                if let Err(err) = db.use_ns("app").use_db("app").await {
+                    let _ = ready_tx.send(Err(err.into()));
+                    return;
+                }
+
+                let db = Arc::new(db);
+                if let Err(err) = apply_schema(&db).await {
+                    let _ = ready_tx.send(Err(err));
+                    return;
+                }
+
+                if ready_tx.send(Ok(db)).is_err() {
+                    return;
+                }
+
+                let _ = shutdown_rx.await;
+            });
+        });
+
+        let db = ready_rx
+            .recv()
+            .map_err(|err| anyhow::anyhow!("database worker failed before initialization: {err}"))??;
+
+        Ok(Self {
+            db,
+            shutdown_tx: Some(shutdown_tx),
+            thread: Some(thread),
+        })
+    }
+
+    fn detached(db: DbHandle) -> Self {
+        Self {
+            db,
+            shutdown_tx: None,
+            thread: None,
+        }
+    }
+
+    fn handle(&self) -> DbHandle {
+        self.db.clone()
+    }
+}
+
+impl Drop for DbWorker {
+    fn drop(&mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
@@ -213,7 +309,7 @@ pub async fn init_db_with_options(path: PathBuf, options: InitDbOptions) -> Resu
 pub async fn reinit_db_with_options(path: PathBuf, options: InitDbOptions) -> Result<()> {
     let runtime = DbRuntime::open_with_options(path, options).await?;
     let mut db = DB.write().expect("global database lock should not be poisoned");
-    *db = Some(runtime.handle());
+    *db = Some(runtime);
     Ok(())
 }
 
@@ -226,7 +322,8 @@ pub async fn reinit_db(path: PathBuf) -> Result<()> {
 pub fn get_db() -> Result<DbHandle> {
     DB.read()
         .expect("global database lock should not be poisoned")
-        .clone()
+        .as_ref()
+        .map(DbRuntime::handle)
         .ok_or(DBError::NotInitialized.into())
 }
 
@@ -353,6 +450,71 @@ mod tests {
         assert!(err.to_string().contains("not initialized"));
     }
 
+    #[test]
+    fn reinit_db_survives_sequential_runtime_teardown() {
+        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        reset_db();
+
+        fn temp_path() -> PathBuf {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before epoch")
+                .as_nanos();
+            std::env::temp_dir().join(format!(
+                "appdb_connection_runtime_teardown_{}_{}",
+                std::process::id(),
+                nanos
+            ))
+        }
+
+        fn open_and_reinstall(path: PathBuf) -> anyhow::Result<()> {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+
+            runtime.block_on(async {
+                reinit_db(path).await?;
+                let db = get_db()?;
+                db.query("RETURN 1;").await?;
+                Ok(())
+            })
+        }
+
+        let first_path = temp_path();
+        open_and_reinstall(first_path.clone()).expect("first runtime cycle should succeed");
+
+        let stale = get_db().expect("first db should remain globally installed");
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime should build")
+            .block_on(async {
+                stale
+                    .query("RETURN 1;")
+                    .await
+                    .expect("stale handle should stay usable while its worker is still alive");
+            });
+
+        let second_path = temp_path();
+        open_and_reinstall(second_path.clone()).expect("second runtime cycle should succeed");
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime should build")
+            .block_on(async {
+                let db = get_db().expect("second db should be installed");
+                db.query("RETURN 2;")
+                    .await
+                    .expect("fresh handle should succeed on a new runtime");
+            });
+
+        reset_db();
+        drop(stale);
+        let _ = std::fs::remove_dir_all(first_path);
+        let _ = std::fs::remove_dir_all(second_path);
+    }
+
     #[tokio::test]
     async fn reinit_db_replaces_a_closed_runtime() {
         let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
@@ -390,6 +552,55 @@ mod tests {
         let second = get_db().expect("second db should be installed");
         second
             .query("RETURN 2;")
+            .await
+            .expect("second query should succeed");
+
+        reset_db();
+        let _ = std::fs::remove_dir_all(first_path);
+        let _ = std::fs::remove_dir_all(second_path);
+    }
+
+    #[tokio::test]
+    async fn repeated_reinit_keeps_cleanup_queries_usable() {
+        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        reset_db();
+
+        fn temp_path() -> PathBuf {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before epoch")
+                .as_nanos();
+            std::env::temp_dir().join(format!(
+                "appdb_connection_repeat_{}_{}",
+                std::process::id(),
+                nanos
+            ))
+        }
+
+        let first_path = temp_path();
+        reinit_db(first_path.clone())
+            .await
+            .expect("first init should succeed");
+        let first = get_db().expect("first db should be installed");
+        first
+            .query("DEFINE TABLE temp_test; DELETE temp_test;")
+            .await
+            .expect("first cleanup should succeed");
+
+        reset_db();
+        drop(first);
+
+        let second_path = temp_path();
+        reinit_db(second_path.clone())
+            .await
+            .expect("second init should succeed");
+        let second = get_db().expect("second db should be installed");
+        second
+            .query("DEFINE TABLE temp_test; DELETE temp_test;")
+            .await
+            .expect("second cleanup should succeed");
+        second
+            .query("RETURN 1;")
             .await
             .expect("second query should succeed");
 
