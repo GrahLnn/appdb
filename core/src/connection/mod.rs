@@ -4,17 +4,16 @@ use anyhow::Result;
 use std::borrow::Cow;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Duration;
 use surrealdb::engine::local::{Db, SurrealKv};
 use surrealdb::opt::Config;
 use surrealdb::Surreal;
-use tokio::sync::OnceCell;
 
 /// Shared SurrealDB handle used by the runtime and global facade.
 pub type DbHandle = Arc<Surreal<Db>>;
 
-static DB: LazyLock<OnceCell<DbHandle>> = LazyLock::new(OnceCell::new);
+static DB: LazyLock<RwLock<Option<DbHandle>>> = LazyLock::new(|| RwLock::new(None));
 
 /// Options used when opening the embedded SurrealDB runtime.
 #[derive(Debug, Clone, Default)]
@@ -105,9 +104,19 @@ impl DbRuntime {
 
     /// Installs this runtime into the global singleton used by facade helpers.
     pub fn install_global(&self) -> Result<()> {
-        DB.set(self.db.clone())
-            .map_err(|_| DBError::AlreadyInitialized)?;
+        let mut db = DB.write().expect("global database lock should not be poisoned");
+        if db.is_some() {
+            return Err(DBError::AlreadyInitialized.into());
+        }
+
+        *db = Some(self.db.clone());
         Ok(())
+    }
+
+    #[doc(hidden)]
+    pub fn reinstall_global_for_tests(&self) {
+        let mut db = DB.write().expect("global database lock should not be poisoned");
+        *db = Some(self.db.clone());
     }
 }
 
@@ -187,6 +196,12 @@ pub async fn init_db(path: PathBuf) -> Result<()> {
     init_db_with_options(path, InitDbOptions::default()).await
 }
 
+/// Clears the installed global database handle.
+pub fn reset_db() {
+    let mut db = DB.write().expect("global database lock should not be poisoned");
+    *db = None;
+}
+
 /// Opens a database with explicit options and installs it globally.
 pub async fn init_db_with_options(path: PathBuf, options: InitDbOptions) -> Result<()> {
     let runtime = DbRuntime::open_with_options(path, options).await?;
@@ -194,17 +209,38 @@ pub async fn init_db_with_options(path: PathBuf, options: InitDbOptions) -> Resu
     Ok(())
 }
 
+/// Opens a database with explicit options and replaces any previously installed global runtime.
+pub async fn reinit_db_with_options(path: PathBuf, options: InitDbOptions) -> Result<()> {
+    let runtime = DbRuntime::open_with_options(path, options).await?;
+    let mut db = DB.write().expect("global database lock should not be poisoned");
+    *db = Some(runtime.handle());
+    Ok(())
+}
+
+/// Opens a database and replaces any previously installed global runtime.
+pub async fn reinit_db(path: PathBuf) -> Result<()> {
+    reinit_db_with_options(path, InitDbOptions::default()).await
+}
+
 /// Returns the global database handle previously installed by [`init_db`] or [`DbRuntime::install_global`].
 pub fn get_db() -> Result<DbHandle> {
-    DB.get().cloned().ok_or(DBError::NotInitialized.into())
+    DB.read()
+        .expect("global database lock should not be poisoned")
+        .clone()
+        .ok_or(DBError::NotInitialized.into())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{make_schema_ddl_idempotent, DbRuntime, InitDbOptions};
-    use std::sync::Arc;
+    use super::{
+        get_db, make_schema_ddl_idempotent, reinit_db, reset_db, DbRuntime, InitDbOptions,
+    };
+    use std::path::PathBuf;
+    use std::sync::{Arc, LazyLock, Mutex};
     use std::time::Duration;
     use surrealdb::Surreal;
+
+    static TEST_DB_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn default_init_options_are_non_versioned() {
@@ -282,5 +318,83 @@ mod tests {
         let handle = Arc::new(Surreal::init());
         let runtime = DbRuntime::from_handle(handle.clone());
         assert!(Arc::ptr_eq(&runtime.handle(), &handle));
+    }
+
+    #[test]
+    fn reinstall_global_for_tests_replaces_existing_handle() {
+        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        reset_db();
+
+        let first = DbRuntime::from_handle(Arc::new(Surreal::init()));
+        first.reinstall_global_for_tests();
+        let initial = get_db().expect("db should be installed");
+        assert!(Arc::ptr_eq(&initial, &first.handle()));
+
+        let second = DbRuntime::from_handle(Arc::new(Surreal::init()));
+        second.reinstall_global_for_tests();
+        let reinstalled = get_db().expect("db should be reinstalled");
+        assert!(Arc::ptr_eq(&reinstalled, &second.handle()));
+        assert!(!Arc::ptr_eq(&reinstalled, &first.handle()));
+
+        reset_db();
+    }
+
+    #[test]
+    fn reset_db_clears_installed_handle() {
+        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        reset_db();
+
+        let runtime = DbRuntime::from_handle(Arc::new(Surreal::init()));
+        runtime.reinstall_global_for_tests();
+
+        reset_db();
+
+        let err = get_db().expect_err("db should be reset");
+        assert!(err.to_string().contains("not initialized"));
+    }
+
+    #[tokio::test]
+    async fn reinit_db_replaces_a_closed_runtime() {
+        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        reset_db();
+
+        fn temp_path() -> PathBuf {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before epoch")
+                .as_nanos();
+            std::env::temp_dir().join(format!(
+                "appdb_connection_reinit_{}_{}",
+                std::process::id(),
+                nanos
+            ))
+        }
+
+        let first_path = temp_path();
+        reinit_db(first_path.clone())
+            .await
+            .expect("first init should succeed");
+        let first = get_db().expect("first db should be installed");
+        first
+            .query("RETURN 1;")
+            .await
+            .expect("first query should succeed");
+
+        reset_db();
+        drop(first);
+
+        let second_path = temp_path();
+        reinit_db(second_path.clone())
+            .await
+            .expect("second init should succeed");
+        let second = get_db().expect("second db should be installed");
+        second
+            .query("RETURN 2;")
+            .await
+            .expect("second query should succeed");
+
+        reset_db();
+        let _ = std::fs::remove_dir_all(first_path);
+        let _ = std::fs::remove_dir_all(second_path);
     }
 }

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use appdb::connection::{get_db, init_db, DbRuntime};
+use appdb::connection::{get_db, reinit_db, DbRuntime};
 use appdb::graph::{GraphCrud, GraphRepo};
 use appdb::model::meta::{HasId, register_table, ModelMeta};
 use appdb::model::relation::relation_name;
@@ -13,9 +13,7 @@ use appdb::{Crud, Id, Relation, Store};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
-use tokio::sync::OnceCell;
 
-static INIT: OnceCell<()> = OnceCell::const_new();
 static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static TEST_RT: LazyLock<Runtime> =
     LazyLock::new(|| Runtime::new().expect("integration runtime should be created"));
@@ -130,11 +128,9 @@ fn acquire_test_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 async fn ensure_db() {
-    INIT.get_or_init(|| async {
-        let path = test_db_path();
-        init_db(path).await.expect("database should initialize");
-    })
-    .await;
+    reinit_db(test_db_path())
+        .await
+        .expect("database should initialize");
 }
 
 #[test]
