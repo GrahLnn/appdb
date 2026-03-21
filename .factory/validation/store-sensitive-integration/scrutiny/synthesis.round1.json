@@ -1,0 +1,85 @@
+{
+  "milestone": "store-sensitive-integration",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 2,
+    "failed": 2,
+    "failedFeatures": [
+      "resolver-tag-runtime-foundation",
+      "transparent-store-sensitive-crud-path"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "resolver-tag-runtime-foundation",
+      "severity": "blocking",
+      "description": "The new coverage only exercises direct Sensitive encrypt/decrypt helpers. It never verifies a Store+Sensitive model can use the registered resolver through Store APIs without passing a CryptoContext, so VAL-RESOLVER-001's required runtime path at the Store boundary is still unproven for this feature."
+    },
+    {
+      "featureId": "resolver-tag-runtime-foundation",
+      "severity": "blocking",
+      "description": "The multi-field scoping test bypasses the generated field-tag types by registering raw CryptoTag string literals (\"number\"/\"cvv\") instead of the generated metadata path. That leaves the feature's claimed generated secure-field-tag runtime path only partially exercised and weakens confidence that callers can rely on the emitted field-tag types."
+    },
+    {
+      "featureId": "transparent-store-sensitive-crud-path",
+      "severity": "blocking",
+      "description": "Crud::create_return_id remains publicly available for all Store models by delegating to Repo::<Self>::create_return_id(self.clone()).await, yet the mission architecture notes explicitly excluded transparent secure-field handling for create_return_id and the grouped store_sensitive_* acceptance tests do not cover it. Because Store + Sensitive callers can still invoke this method on the plaintext type, the feature does not fully uphold the promised single consistent caller-facing contract for Store APIs; the method should be hidden/blocked for sensitive models or explicitly implemented and covered."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Documented that Crud::create_return_id remains a public Store + Sensitive API gap until it is either guarded for sensitive models or fully implemented and covered.",
+      "sourceFeature": "transparent-store-sensitive-crud-path"
+    },
+    {
+      "target": "library",
+      "description": "Documented UniqueLookupMeta::lookup_fields() as the concrete testing seam for proving secure fields are excluded from fallback lookup metadata.",
+      "sourceFeature": "secure-lookup-compile-guards"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Update rust-library-worker guidance so Windows workers do not rely on a POSIX-only init path and do not assume the installed GitNexus CLI exposes detect_changes exactly as documented.",
+      "evidence": "Multiple reviews reported that worker sessions could not follow the literal procedure because .factory/init.sh is POSIX-shell-oriented on Windows and the available GitNexus CLI lacked the documented detect_changes command.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "Clarify the rust-library-worker testing guidance so features with focused runtime coverage outside integration_db.rs are still considered compliant when the requested integration filter would match zero tests.",
+      "evidence": "The resolver foundation review found the worker's requested `cargo test -p appdb --test integration_db resolver -- --nocapture` command matched zero tests while the real runtime coverage lived in core/tests/sensitive_roundtrip.rs.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Mission guidance around whether this foundation feature must already prove Store API wiring is ambiguous and should be captured in shared knowledge, because the worker explicitly surfaced that ambiguity while handing off the feature.",
+      "reason": "ambiguous mission-boundary interpretation; escalated through synthesis instead of storing as factual library guidance"
+    },
+    {
+      "observation": "The worker ran the repository init script even though mission guidance says services/commands should come from .factory/services.yaml, and that file contains no init command.",
+      "reason": "ambiguous: this reflects worker behavior, not a concrete additive services.yaml fact to apply"
+    }
+  ],
+  "previousRound": null
+}

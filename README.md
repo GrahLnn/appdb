@@ -55,6 +55,57 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+## `Store` + `Sensitive` 联动
+
+```rust
+use appdb::prelude::*;
+use appdb::{Sensitive, Store};
+use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+struct Profile {
+    id: Id,
+    alias: String,
+    #[secure]
+    secret: String,
+}
+```
+
+对这种模型，业务代码仍然直接使用 `Profile` 调 `save` / `get` / `list` 等 Store API；`#[secure]` 字段会在仓储边界自动加密落库、读回时自动解密。第一版里 `create_return_id` 不支持敏感模型，且 `#[secure]` 字段不能参与 `#[unique]` 或自动 lookup。
+
+## `#[store(ref)]` 嵌套引用
+
+`Store` 现在支持显式嵌套引用字段：
+
+```rust
+use appdb::prelude::*;
+use appdb::Store;
+use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct Child {
+    #[unique]
+    code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct Parent {
+    id: Id,
+    #[store(ref)]
+    child: Child,
+}
+```
+
+当前语义：
+
+- 只有显式标注 `#[store(ref)]` 的字段才走嵌套引用路径
+- 首版支持 `Child`、`Option<Child>`、`Vec<Child>`
+- 保存父对象时，会先按子对象的 `id` 或现有 lookup 规则解析子记录；找不到时自动创建子记录
+- 父表里只保存子记录的 `RecordId`（或其数组），读取父对象时会自动 hydrate 回完整子对象
+- 这一层不会扩展到 `merge` / `patch` / 原始 query helper，也不承诺父子写入事务原子性
+
 ## 图关系示例
 
 ```rust

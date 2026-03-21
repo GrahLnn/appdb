@@ -1,0 +1,33 @@
+{
+  "featureId": "transparent-store-sensitive-crud-path",
+  "reviewedAt": "2026-03-17T07:30:21.365113+00:00",
+  "commitId": "4ada3aa0fed5fd65f3cd1d9e4d0ca3a184a19c69",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The main Store/Repo conversion seam matches the feature intent and the grouped store_sensitive_* tests cover the approved CRUD APIs, but the implementation still leaves create_return_id on the public Crud surface without any sensitive-model guard or acceptance coverage. That leaves a Store API reachable by #[derive(Store, Sensitive)] callers outside the milestone’s explicit consistent-contract matrix.",
+    "issues": [
+      {
+        "file": "core/src/repository/mod.rs",
+        "line": 740,
+        "severity": "blocking",
+        "description": "Crud::create_return_id remains publicly available for all Store models by delegating to Repo::<Self>::create_return_id(self.clone()).await, yet the mission architecture notes explicitly excluded transparent secure-field handling for create_return_id and the grouped store_sensitive_* acceptance tests do not cover it. Because Store + Sensitive callers can still invoke this method on the plaintext type, the feature does not fully uphold the promised single consistent caller-facing contract for Store APIs; the method should be hidden/blocked for sensitive models or explicitly implemented and covered."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The shared architecture notes already say create_return_id is out of scope for this milestone, but the feature leaves the method publicly reachable through Crud for all Store models and the transcript/handoff do not call out this remaining API gap.",
+      "evidence": ".factory/library/architecture.md excludes transparent secure-field handling for create_return_id; core/src/repository/mod.rs:740-741 exposes Crud::create_return_id via Repo::<Self>::create_return_id(self.clone()).await; core/tests/integration_db.rs has no store_sensitive_* coverage for that method."
+    },
+    {
+      "area": "services",
+      "observation": "The worker ran the repository init script even though mission guidance says services/commands should come from .factory/services.yaml, and that file contains no init command.",
+      "evidence": "Transcript skeleton shows Execute pwsh -NoLogo -Command invoking C:\\Users\\admin\\appdb\\.factory\\init.sh; .factory/services.yaml only defines Cargo commands and no init step."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature handoff, transcript skeleton, commit 4ada3aa0fed5fd65f3cd1d9e4d0ca3a184a19c69, relevant repo files, and mission shared-state docs. The transparent CRUD storage seam and grouped store_sensitive_* coverage are present, but the review fails because create_return_id remains publicly exposed to Store + Sensitive callers without a sensitive-model guard or explicit acceptance coverage."
+}

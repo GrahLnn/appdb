@@ -1,0 +1,28 @@
+{
+  "featureId": "nested-store-macro-contract",
+  "reviewedAt": "2026-03-21T06:58:27.165465+00:00",
+  "commitId": "d2df10e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The macro contract feature covers the accepted direct/optional/vector shapes and preserves opt-in inline storage coverage, but its compile-fail contract for non-Store children is not stable or focused: the stderr snapshot currently depends on downstream runtime helper bounds and emits many extra diagnostics beyond the promised accepted-shapes/clear Store-child contract.",
+    "issues": [
+      {
+        "file": "core/tests/ui/store/nested_ref_non_store_child.stderr",
+        "line": 1,
+        "severity": "blocking",
+        "description": "The non-Store-child compile-fail snapshot is unstable and over-coupled to runtime implementation details. Instead of a single clear derive-time diagnostic about #[store(ref)] requiring a Store child, the snapshot now includes repeated errors about ResolveRecordId, Crud, Repo::<PlainChild>::get_record, NestedStoreRefs, and helper function bounds coming from generated persistence code. That violates the feature requirement for stable diagnostics for rejected shapes and will churn whenever runtime helper bounds change, even if the macro contract itself is unchanged."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker followed the rust-library-worker procedure, but the skill does not explicitly warn that compile-fail diagnostics for macro-contract features should avoid coupling snapshots to downstream runtime helper bounds. This feature ended with a brittle stderr snapshot tied to resolve_store_ref_record_id and Repo::get_record internals instead of a focused derive-time contract error.",
+      "evidence": "Feature handoff says stable diagnostics were added, but core/tests/ui/store/nested_ref_non_store_child.stderr:1-120 shows multiple runtime-bound errors (Crud, ResolveRecordId, NestedStoreRefs, Repo::<PlainChild>::get_record) rather than a single clear macro-contract diagnostic."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit d2df10e and the worker transcript/handoff. The feature correctly adds opt-in #[store(ref)] parsing, accepted-shape coverage, and inline-storage regression coverage, but it fails the rejected-shape diagnostic requirement because the non-Store-child compile-fail output is noisy and implementation-coupled rather than stable and focused."
+}

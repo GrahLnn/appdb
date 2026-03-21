@@ -1,0 +1,39 @@
+{
+  "featureId": "resolver-tag-runtime-foundation",
+  "reviewedAt": "2026-03-17T07:30:34Z",
+  "commitId": "ad1082a24e1dc4b03f76e3f0c906bfd35e0a3e5f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The runtime resolver/tag substrate is implemented, but the feature does not provide the required Store-facing registration path or targeted Store API coverage promised by the feature description and validation contract.",
+    "issues": [
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\tests\\sensitive_roundtrip.rs",
+        "line": 67,
+        "severity": "blocking",
+        "description": "The new coverage only exercises direct Sensitive encrypt/decrypt helpers. It never verifies a Store+Sensitive model can use the registered resolver through Store APIs without passing a CryptoContext, so VAL-RESOLVER-001's required runtime path at the Store boundary is still unproven for this feature."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\tests\\sensitive_roundtrip.rs",
+        "line": 131,
+        "severity": "blocking",
+        "description": "The multi-field scoping test bypasses the generated field-tag types by registering raw CryptoTag string literals (\"number\"/\"cvv\") instead of the generated metadata path. That leaves the feature's claimed generated secure-field-tag runtime path only partially exercised and weakens confidence that callers can rely on the emitted field-tag types."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill says to add integration/runtime coverage in core/tests/integration_db.rs for feature acceptance criteria, but this worker validated resolver behavior only in core/tests/sensitive_roundtrip.rs and the requested integration filter matched zero tests.",
+      "evidence": "Skill file .factory/skills/rust-library-worker/SKILL.md steps 3-4 require targeted integration/runtime tests; handoff verification records `cargo test -p appdb --test integration_db resolver -- --nocapture` with 0 matching tests, and the added assertions live in core/tests/sensitive_roundtrip.rs:67-184."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Mission guidance around whether this foundation feature must already prove Store API wiring is ambiguous and should be captured in shared knowledge, because the worker explicitly surfaced that ambiguity while handing off the feature.",
+      "evidence": "Mission AGENTS.md emphasizes keeping plaintext-model-first usage on the public path, while the worker handoff skillFeedback suggests clarifying whether this feature should wire into Store APIs immediately or only establish substrate for the later CRUD feature."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail: resolver registration and generated tag metadata were added, but this review found the required Store-boundary behavior and targeted Store-facing evidence missing. The implementation appears to serve as substrate for later CRUD integration rather than fully meeting this feature's stated acceptance on its own."
+}

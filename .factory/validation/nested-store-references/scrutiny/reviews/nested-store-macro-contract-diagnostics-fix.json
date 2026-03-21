@@ -1,0 +1,39 @@
+{
+  "featureId": "nested-store-macro-contract-diagnostics-fix",
+  "reviewedAt": "2026-03-21T07:24:05.875583+00:00",
+  "commitId": "cde03d7b43edc6b0de6fa5557664e63750fe27f3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The fix does not satisfy the original blocking requirement. It removes the derive-emitted helper guard and adds a heuristic uppercase-name check, but the non-Store-child contract still fails through downstream runtime bounds and helper APIs instead of one stable derive-time diagnostic. That means the original failure remains, and the new heuristic also risks rejecting valid Store children whose type names are lowercase or type-aliased.",
+    "issues": [
+      {
+        "file": "core/tests/ui/store/nested_ref_non_store_child.stderr",
+        "line": 1,
+        "severity": "blocking",
+        "description": "The refreshed snapshot is still dominated by downstream `ResolveRecordId`, `Crud`, and `Repo::<PlainChild>::get_record` trait-bound errors rather than a single focused derive-time diagnostic about accepted `#[store(ref)]` shapes and Store-child requirements. This does not resolve the original scrutiny failure."
+      },
+      {
+        "file": "macros/src/lib.rs",
+        "line": 778,
+        "severity": "blocking",
+        "description": "`looks_like_store_model_type` decides whether a nested-ref child \u2018must derive Store\u2019 purely by checking whether the last path segment starts with an uppercase ASCII letter. That is not a semantic Store check: valid Store models referenced through lowercase type aliases or modules can be rejected, while non-Store uppercase types still pass through to downstream bounds. The fix therefore introduces an unsound heuristic instead of the allowed canonical marker-trait seam."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill now says derive-time validation should keep compile-fail stderr focused on the derive contract, but this fix handoff still reported success after landing a snapshot that remains downstream-bound-heavy. The procedure should explicitly require reviewers/workers to inspect the final stderr text against the feature requirement, not just that trybuild passes.",
+      "evidence": "Skill: C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md step 4; handoff C:\\Users\\admin\\.factory\\missions\\802cdcc2-45d2-48bc-8766-b8d7e8118a35\\handoffs\\2026-03-21T07-12-24-129Z__nested-store-macro-contract-diagnostics-fix__d5830981-887c-48f5-9948-d197784e7a35.json marks success, but core/tests/ui/store/nested_ref_non_store_child.stderr still shows downstream `ResolveRecordId`, `Crud`, and `Repo` errors."
+    },
+    {
+      "area": "conventions",
+      "observation": "Mission/library guidance already says a narrow exported or `#[doc(hidden)]` Store marker trait is allowed as the canonical diagnostic seam for nested refs, but the worker substituted a name-shape heuristic instead. That suggests the convention should stress that semantic marker seams are preferred over lexical heuristics whenever the requirement is to prove a derive contract.",
+      "evidence": "C:\\Users\\admin\\appdb\\.factory\\library\\nested-store.md explicitly allows a marker-trait seam; macros/src/lib.rs:778-786 implements `looks_like_store_model_type` using uppercase-name detection instead."
+    }
+  ],
+  "addressesFailureFrom": "C:\\Users\\admin\\appdb\\.factory\\validation\\nested-store-references\\scrutiny\\reviews\\nested-store-macro-contract.json",
+  "summary": "Reviewed the original failing feature commit `d2df10e` and the fix commit `cde03d7b43edc6b0de6fa5557664e63750fe27f3`, along with both fix handoffs, transcript skeleton, mission guidance, and current code. The fix does not adequately address the original failure: the compile-fail contract is still noisy and downstream-coupled, and the new uppercase-name heuristic is a new blocking correctness risk. Report remains fail."
+}

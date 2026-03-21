@@ -1,0 +1,21 @@
+{
+  "featureId": "nested-store-runtime-vectors-and-collections",
+  "reviewedAt": "2026-03-21T06:58:14.840492+00:00",
+  "commitId": "5f01f139",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Repository list/list_limit now route nested-ref models through raw-row decoding plus hydration, and the added integration coverage exercises mixed Vec persistence, FK-array raw storage, and eager hydration across save/get/list/list_limit. I did not find a feature-scoped correctness issue in the reviewed diff.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker could not follow the required GitNexus impact/detect_changes procedure because the documented commands were unavailable in this Windows worker environment, and had to fall back to git diff plus manual inspection.",
+      "evidence": "worker-transcripts.jsonl skeleton and handoff.skillFeedback show an attempted gitnexus_impact --help, followed by a recorded deviation stating that gitnexus_impact / gitnexus_detect_changes were not available as runnable commands."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit 5f01f139 for nested-store-runtime-vectors-and-collections. The runtime change correctly adds raw-row decode/hydration for nested-ref models in list/list_limit, and the regression test covers mixed Vec reuse/create behavior, RecordId-array storage, and eager hydration for direct, optional, and vector nested references. No blocking or non-blocking code issues were identified in scope."
+}

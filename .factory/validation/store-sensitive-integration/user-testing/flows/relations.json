@@ -1,0 +1,37 @@
+{
+  "surface": "cargo",
+  "group": "relations",
+  "assertions": [
+    {
+      "id": "VAL-CROSS-002",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/relations/relations-notes.txt"
+      ]
+    },
+    {
+      "id": "VAL-CROSS-003",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/relations/relations-notes.txt"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": "cargo test --test integration_db mixed_sensitive_models_resolve_unique_ids_through_non_secure_fields -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Finished test target and ran 1 test; mixed_sensitive_models_resolve_unique_ids_through_non_secure_fields passed with 0 failed and 41 filtered out."
+    },
+    {
+      "command": "cargo test --test integration_db relation_type_api_accepts_mixed_sensitive_store_models_without_exposing_encrypted_types -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Finished test target and ran 1 test; relation_type_api_accepts_mixed_sensitive_store_models_without_exposing_encrypted_types passed with 0 failed and 41 filtered out."
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "cargo"
+  ]
+}

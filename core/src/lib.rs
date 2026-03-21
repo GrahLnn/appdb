@@ -49,4 +49,100 @@ pub trait Sensitive: Sized {
         encrypted: &Self::Encrypted,
         context: &crate::crypto::CryptoContext,
     ) -> Result<Self, crate::crypto::CryptoError>;
+
+    /// Encrypts using generated runtime tag resolution rather than a caller-supplied context.
+    fn encrypt_with_runtime_resolver(&self) -> Result<Self::Encrypted, crate::crypto::CryptoError>;
+
+    /// Decrypts using generated runtime tag resolution rather than a caller-supplied context.
+    fn decrypt_with_runtime_resolver(
+        encrypted: &Self::Encrypted,
+    ) -> Result<Self, crate::crypto::CryptoError>;
+}
+
+/// Runtime conversion seam between the caller-facing model and the stored representation.
+pub trait StoredModel: Sized {
+    /// The serialized representation that should be persisted at rest.
+    type Stored: Clone
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + surrealdb::types::SurrealValue
+        + Send;
+
+    /// Converts a caller-facing value into its stored representation.
+    fn into_stored(self) -> anyhow::Result<Self::Stored>;
+
+    /// Converts a stored representation back into the caller-facing value.
+    fn from_stored(stored: Self::Stored) -> anyhow::Result<Self>;
+
+    /// Whether `create_return_id` is supported for this model's stored representation path.
+    fn supports_create_return_id() -> bool {
+        true
+    }
+}
+
+/// Runtime seam for explicit nested `#[store(ref)]` persistence and hydration.
+pub trait NestedStoreRefs: StoredModel {
+    /// Rewrites a caller-facing value into a stored representation where nested refs become record ids.
+    fn persist_nested_refs(
+        value: Self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self::Stored>> + Send;
+
+    /// Rehydrates nested refs in a stored representation back into the caller-facing value.
+    fn hydrate_nested_refs(
+        stored: Self::Stored,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self>> + Send;
+    fn has_nested_store_refs() -> bool {
+        false
+    }
+
+    /// Decodes a raw row returned by SurrealDB into the stored representation for this model.
+    fn decode_stored_row(row: surrealdb::types::Value) -> anyhow::Result<Self::Stored>
+    where
+        Self::Stored: serde::de::DeserializeOwned,
+    {
+        Ok(serde_json::from_value(row.into_json_value())?)
+    }
+}
+
+/// Converts nested store-ref JSON shapes like `{ id: ... }` into raw record-id JSON values.
+pub fn rewrite_store_ref_json_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(id) = map.get("id") {
+                *value = id.clone();
+                return;
+            }
+
+            for nested in map.values_mut() {
+                rewrite_store_ref_json_value(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for nested in items {
+                rewrite_store_ref_json_value(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Saves or resolves one nested child model and returns its record id.
+pub async fn resolve_store_ref_record_id<T>(value: T) -> anyhow::Result<surrealdb::types::RecordId>
+where
+    T: model::meta::ModelMeta
+        + model::meta::ResolveRecordId
+        + repository::Crud
+        + NestedStoreRefs
+        + Clone
+        + Send
+        + Sync,
+{
+    match value.resolve_record_id().await {
+        Ok(record_id) => Ok(record_id),
+        Err(err) if err.to_string().contains("Record not found") => {
+            let saved = repository::Repo::<T>::create(value).await?;
+            saved.resolve_record_id().await
+        }
+        Err(err) => Err(err),
+    }
 }

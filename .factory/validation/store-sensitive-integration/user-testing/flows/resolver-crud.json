@@ -1,0 +1,169 @@
+{
+  "surface": "cargo",
+  "group": "resolver-crud",
+  "assertions": [
+    {
+      "id": "VAL-RESOLVER-001",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "cargo test confirmed generated resolver-tag Store save/get path succeeds without manual CryptoContext at the API boundary."
+    },
+    {
+      "id": "VAL-RESOLVER-002",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "multi-model resolver test passed, including wrong-context decrypt failure and correct-context success."
+    },
+    {
+      "id": "VAL-RESOLVER-003",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "multi-field resolver test passed, showing field-specific ciphertext and wrong-field context decrypt failure."
+    },
+    {
+      "id": "VAL-RESOLVER-004",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "negative resolver tests passed for both missing mapping and wrong-context decryption failure before plaintext corruption."
+    },
+    {
+      "id": "VAL-CRUD-001",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "save/get roundtrip test passed and raw-row assertions verified secure fields remain encrypted at rest."
+    },
+    {
+      "id": "VAL-CRUD-002",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "list and list_limit test passed with plaintext models returned and encrypted raw storage asserted."
+    },
+    {
+      "id": "VAL-CRUD-003",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "create/create_at test passed with plaintext return values and encrypted-at-rest raw rows."
+    },
+    {
+      "id": "VAL-CRUD-004",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "upsert/upsert_at/update_at test passed with updated plaintext returns and changed ciphertext on secure-field update."
+    },
+    {
+      "id": "VAL-CRUD-005",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "save_many/insert test passed with plaintext batch returns and encrypted raw storage."
+    },
+    {
+      "id": "VAL-CRUD-006",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "insert_ignore/insert_or_replace test passed, preserving expected duplicate semantics with plaintext reads and encrypted storage."
+    },
+    {
+      "id": "VAL-CROSS-001",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "success-path coverage uses only plaintext model types in Store and relation APIs; no explicit Encrypted* usage was needed."
+    },
+    {
+      "id": "VAL-CROSS-004",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/resolver-crud/resolver-crud-notes.txt"
+      ],
+      "reason": "targeted integration suite explicitly covered every approved API in the contract with the same plaintext/encrypted-at-rest contract."
+    }
+  ],
+  "commands": [
+    {
+      "command": "cargo test -p appdb --test sensitive_roundtrip sensitive_runtime_resolver_supports_multi_model_scoping -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; validates model-tag scoped resolver behavior and wrong-context failure path."
+    },
+    {
+      "command": "cargo test -p appdb --test sensitive_roundtrip sensitive_runtime_resolver_supports_multi_field_scoping -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; validates field-tag scoped resolver behavior and wrong-field decrypt failure."
+    },
+    {
+      "command": "cargo test -p appdb --test sensitive_roundtrip sensitive_runtime_resolver_reports_missing_mapping -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; missing resolver mapping returns ResolverNotFound."
+    },
+    {
+      "command": "cargo test -p appdb --test integration_db store_sensitive_save_get_roundtrip_encrypts_at_rest -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; save/get returned plaintext and raw row assertions confirmed encrypted secure fields."
+    },
+    {
+      "command": "cargo test -p appdb --test integration_db store_sensitive_save_get_uses_generated_resolver_tags_without_call_site_context -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; generated resolver tags worked without manual CryptoContext at Store call site."
+    },
+    {
+      "command": "cargo test -p appdb --test integration_db store_sensitive_list_and_list_limit_return_plaintext_models -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; list/list_limit returned plaintext models and raw rows remained encrypted."
+    },
+    {
+      "command": "cargo test -p appdb --test integration_db store_sensitive_create_and_create_at_keep_plaintext_surface -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; create/create_at preserved plaintext return surface with encrypted raw rows."
+    },
+    {
+      "command": "cargo test -p appdb --test integration_db store_sensitive_upsert_and_update_paths_replace_ciphertext -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; upsert/upsert_at/update_at returned plaintext updates and secure ciphertext changed."
+    },
+    {
+      "command": "cargo test -p appdb --test integration_db store_sensitive_save_many_and_insert_return_plaintext_models -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; save_many/insert returned plaintext rows and encrypted raw storage."
+    },
+    {
+      "command": "cargo test -p appdb --test integration_db store_sensitive_insert_ignore_and_insert_or_replace_preserve_plaintext_semantics -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; insert_ignore and insert_or_replace preserved duplicate handling semantics with plaintext reads."
+    },
+    {
+      "command": "cargo test -p appdb --test integration_db relation_type_api_accepts_mixed_sensitive_store_models_without_exposing_encrypted_types -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; cross-flow relation API succeeded using plaintext sensitive Store models only."
+    },
+    {
+      "command": "cargo test -p appdb --test integration_db sensitive_store_lookup_metadata_excludes_secure_fields_from_fallback -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "Passed: 1 passed; 0 failed; confirms secure fields are excluded from fallback lookup metadata supporting plaintext-only contract."
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "cargo"
+  ]
+}

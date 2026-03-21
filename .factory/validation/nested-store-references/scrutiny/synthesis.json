@@ -1,0 +1,75 @@
+{
+  "milestone": "nested-store-references",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 2,
+    "failed": 2,
+    "failedFeatures": [
+      "nested-store-macro-contract",
+      "nested-store-runtime-single-and-option"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "nested-store-macro-contract",
+      "severity": "blocking",
+      "description": "The compile-fail snapshot for non-Store children is noisy and coupled to downstream runtime helper bounds instead of a stable derive-time diagnostic about accepted #[store(ref)] shapes and Store-child requirements."
+    },
+    {
+      "featureId": "nested-store-runtime-single-and-option",
+      "severity": "blocking",
+      "description": "The runtime feature commit leaves an eprintln! side effect in child-resolution code and mixes macro-contract changes from a separate feature, so the implementation scope and runtime surface are not cleanly isolated."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skill",
+      "suggestion": "Update rust-library-worker guidance to require macro-contract compile-fail reviews to keep diagnostics focused on the derive contract rather than downstream helper trait bounds, so stderr snapshots stay stable when runtime internals evolve.",
+      "evidence": "nested-store-macro-contract review found core/tests/ui/store/nested_ref_non_store_child.stderr dominated by Crud/ResolveRecordId/Repo helper errors instead of one clear #[store(ref)] contract diagnostic.",
+      "isSystemic": false
+    },
+    {
+      "target": "skill",
+      "suggestion": "Add an explicit commit-isolation check before finalizing a feature so resumed workers do not commit changes that belong to already-completed sibling features.",
+      "evidence": "nested-store-runtime-single-and-option review found commit 08a62275 included broad macros/src/lib.rs contract changes even though features.json tracks nested-store-macro-contract as a separate completed feature.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Clarify the approved fallback when GitNexus impact or detect-changes commands are unavailable in worker environments, including how to satisfy required impact analysis expectations without the documented tooling.",
+      "evidence": "Multiple reviews recorded that Windows workers could not run the documented GitNexus commands and fell back to git diff/manual inspection, but mission guidance only partially documents that fallback.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Add a generic note that runtime code should avoid debug stderr output on normal persistence paths.",
+      "reason": "Too ambiguous and not clearly systemic beyond the single eprintln! instance already captured as a blocking feature issue."
+    },
+    {
+      "observation": "Document in library/environment that Windows workers cannot use GitNexus commands.",
+      "reason": "The problem is normative tooling guidance mismatch, which belongs in orchestrator guidance/skills rather than factual library knowledge."
+    }
+  ],
+  "previousRound": null
+}

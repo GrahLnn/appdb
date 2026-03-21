@@ -1,0 +1,5 @@
+error: Store requires an `Id` field or at least one non-secure lookup field for automatic record resolution
+ --> tests/ui/sensitive/no_legal_non_secure_lookup.rs:6:8
+  |
+6 | struct NoLegalLookupPath {
+  |        ^^^^^^^^^^^^^^^^^

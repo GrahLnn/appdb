@@ -1,0 +1,5 @@
+error: #[store(ref)] supports only Child, Option<Child>, and Vec<Child> where Child derives Store
+  --> tests/ui/store/nested_ref_unsupported_box.rs:15:12
+   |
+15 |     child: Box<ChildModel>,
+   |            ^^^^^^^^^^^^^^^

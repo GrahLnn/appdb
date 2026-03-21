@@ -1,0 +1,21 @@
+{
+  "featureId": "mixed-model-resolution-and-relation-regression",
+  "reviewedAt": "2026-03-17T15:29:52.4420027+08:00",
+  "commitId": "5c3244f1f5469018fadd411e12d824d05acfced9",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature adds targeted regression coverage for mixed Store+Sensitive lookup and relation flows. The tests directly verify that secure fields remain excluded from lookup metadata, record resolution still succeeds through legal non-secure unique fields, and relation APIs continue to work entirely through plaintext model types.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker documented that the repo guidance requires `gitnexus_detect_changes()`, but the GitNexus CLI available in worker sessions exposes no `detect_changes` subcommand, so the documented procedure cannot be followed literally.",
+      "evidence": "Mission AGENTS/CLAUDE guidance requires `gitnexus_detect_changes()` before commit; transcript shows `gitnexus detect_changes --scope all --repo appdb` failed, followed by `gitnexus --help` and fallback `git diff -- core/tests/integration_db.rs`."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit `5c3244f1f5469018fadd411e12d824d05acfced9` and found the feature implementation correct for the assigned scope. The added tests in `core/tests/integration_db.rs` cover both required regressions: mixed sensitive models resolve through non-secure lookup fields and relation flows succeed without exposing encrypted storage types. No blocking or non-blocking code issues were found."
+}

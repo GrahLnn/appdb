@@ -1,0 +1,21 @@
+{
+  "featureId": "resolver-store-boundary-proof",
+  "reviewedAt": "2026-03-17T07:49:56Z",
+  "commitId": "955153f79ee8a08e277ba70fb297629719c5c559",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix closes the prior scrutiny gaps. It adds explicit Store-facing plaintext save/get coverage that relies on generated field-tag registration rather than caller-supplied CryptoContext, and it updates the multi-field runtime test to use generated field-tag marker types instead of raw CryptoTag string literals.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "GitNexus availability and staleness handling for test-only review work is still undocumented in mission shared state even though the worker had to fall back to source inspection.",
+      "evidence": "resolver-store-boundary-proof handoff.discoveredIssues notes the GitNexus index was stale and test functions were not resolvable symbols, while mission AGENTS.md only gives generic GitNexus requirements."
+    }
+  ],
+  "addressesFailureFrom": "C:\\Users\\admin\\appdb\\.factory\\validation\\store-sensitive-integration\\scrutiny\\reviews\\resolver-tag-runtime-foundation.json",
+  "summary": "Pass: compared against the original failed feature diff and review, this fix adds the missing Store-boundary proof in core/tests/integration_db.rs:1374 and replaces raw string-tag registration with generated field-tag types in core/tests/sensitive_roundtrip.rs:131. The original blockers are addressed without introducing a parallel API path."
+}

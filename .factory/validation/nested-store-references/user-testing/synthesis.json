@@ -1,0 +1,37 @@
+{
+  "milestone": "nested-store-references",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 20,
+    "passed": 20,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-MACRO-001",
+    "VAL-MACRO-002",
+    "VAL-MACRO-003",
+    "VAL-MACRO-004",
+    "VAL-MACRO-005",
+    "VAL-MACRO-006",
+    "VAL-MACRO-007",
+    "VAL-NESTED-001",
+    "VAL-NESTED-002",
+    "VAL-NESTED-003",
+    "VAL-NESTED-004",
+    "VAL-NESTED-005",
+    "VAL-NESTED-006",
+    "VAL-NESTED-007",
+    "VAL-NESTED-008",
+    "VAL-CROSS-001",
+    "VAL-CROSS-002",
+    "VAL-CROSS-003",
+    "VAL-CROSS-004",
+    "VAL-CROSS-005"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}

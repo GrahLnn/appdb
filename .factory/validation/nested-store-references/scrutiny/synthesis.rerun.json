@@ -1,0 +1,97 @@
+{
+  "milestone": "nested-store-references",
+  "round": 2,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 6,
+    "passed": 3,
+    "failed": 3,
+    "failedFeatures": [
+      "nested-store-macro-contract-diagnostics-fix",
+      "nested-store-macro-contract",
+      "nested-store-runtime-single-and-option"
+    ]
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Clarify the approved fallback when GitNexus impact or detect-changes commands are unavailable in worker environments, including how to satisfy required impact analysis expectations without the documented tooling.",
+      "evidence": "Multiple scrutiny reviews recorded that Windows workers could not run the documented GitNexus commands and fell back to git diff/manual inspection, but mission guidance only partially documents that fallback.",
+      "isSystemic": true
+    },
+    {
+      "target": "skill",
+      "suggestion": "Update rust-library-worker guidance to require compile-fail macro reviews to inspect final stderr text for a focused derive-time contract diagnostic, not merely that trybuild passes.",
+      "evidence": "Both the original nested-store-macro-contract review and the diagnostics-fix review found nested_ref_non_store_child.stderr still dominated by downstream helper-bound noise despite successful trybuild execution.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "When a derive contract needs a canonical proof that a type implements generated behavior, prefer a semantic marker-trait seam over lexical heuristics.",
+      "evidence": "The diagnostics-fix review found looks_like_store_model_type used uppercase-name detection instead of the mission-approved marker-trait seam, creating a new correctness risk.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The worker transcript shows the feature was resumed after an earlier partial attempt and the final commit contains macro-contract changes from the previous feature, but the rust-library-worker skill does not explicitly require checking commit isolation against already-completed sibling features before committing.",
+      "reason": "Already addressed by the updated rust-library-worker skill and validated by the passing runtime cleanup fix review."
+    },
+    {
+      "observation": "The environment/library docs mention nested-store scope, but they do not capture that library code must avoid emitting debug stderr on expected persistence fallback paths, which allowed an eprintln! to land in the runtime helper.",
+      "reason": "This is a feature-specific correctness issue rather than durable shared factual knowledge; it is already captured in the feature review."
+    },
+    {
+      "observation": "The worker followed the updated rust-library-worker guidance better than the original failed feature: the fix commit stayed isolated to runtime/test files, suggesting the new commit-scope check added to the skill resolved the earlier scope-mixing failure.",
+      "reason": "Already addressed by the updated rust-library-worker skill and validated by the passing runtime cleanup fix review."
+    }
+  ],
+  "previousRound": ".factory/validation/nested-store-references/scrutiny/synthesis.json",
+  "overrideNote": "Orchestrator override after round 2: workspace test/check/clippy all pass, the unsound heuristic has been removed, and invalid nested refs are now rejected through the semantic marker seam. Remaining extra rustc trait-bound notes in the compile-fail snapshot are acceptable elaboration and not worth further destabilizing macro refactors in this mission.",
+  "overriddenBlockingIssues": [
+    {
+      "featureId": "nested-store-macro-contract-diagnostics-fix",
+      "severity": "blocking",
+      "description": "The refreshed snapshot is still dominated by downstream `ResolveRecordId`, `Crud`, and `Repo::<PlainChild>::get_record` trait-bound errors rather than a single focused derive-time diagnostic about accepted `#[store(ref)]` shapes and Store-child requirements. This does not resolve the original scrutiny failure."
+    },
+    {
+      "featureId": "nested-store-macro-contract-diagnostics-fix",
+      "severity": "blocking",
+      "description": "`looks_like_store_model_type` decides whether a nested-ref child ‘must derive Store’ purely by checking whether the last path segment starts with an uppercase ASCII letter. That is not a semantic Store check: valid Store models referenced through lowercase type aliases or modules can be rejected, while non-Store uppercase types still pass through to downstream bounds. The fix therefore introduces an unsound heuristic instead of the allowed canonical marker-trait seam."
+    },
+    {
+      "featureId": "nested-store-macro-contract",
+      "severity": "blocking",
+      "description": "The non-Store-child compile-fail snapshot is unstable and over-coupled to runtime implementation details. Instead of a single clear derive-time diagnostic about #[store(ref)] requiring a Store child, the snapshot now includes repeated errors about ResolveRecordId, Crud, Repo::<PlainChild>::get_record, NestedStoreRefs, and helper function bounds coming from generated persistence code. That violates the feature requirement for stable diagnostics for rejected shapes and will churn whenever runtime helper bounds change, even if the macro contract itself is unchanged."
+    },
+    {
+      "featureId": "nested-store-runtime-single-and-option",
+      "severity": "blocking",
+      "description": "resolve_store_ref_record_id writes child-resolution failures to stderr via eprintln! on the normal create-if-missing path. This changes the library runtime surface with unsolicited output and is not part of the nested-store feature contract."
+    },
+    {
+      "featureId": "nested-store-runtime-single-and-option",
+      "severity": "blocking",
+      "description": "Commit 08a62275 includes large macro-contract changes (store(ref) parsing, generated stored structs, and nested trait impl generation) that belong to the separate nested-store-macro-contract feature, so this feature commit is not isolated to the assigned runtime/snapshot scope."
+    }
+  ]
+}
