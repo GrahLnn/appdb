@@ -1,0 +1,26 @@
+{
+  "featureId": "secure-lookup-compile-guards",
+  "reviewedAt": "2026-03-17T00:00:00Z",
+  "commitId": "e27f9d51b554052575161ee65c4a3e3ac63108ac",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature implementation matches the compile-guard requirements: Store derive now rejects secure+unique combinations in either attribute order, excludes secure fields from fallback lookup metadata, and emits a compile-time error when no Id or legal non-secure fallback lookup path remains. Regression coverage preserves the prior Sensitive and Store diagnostics and adds the requested metadata-level assertion.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill still instructs workers to run a failing-test-first workflow and GitNexus detect_changes, but the reviewed worker could not follow those steps exactly on this Windows mission because .factory/init.sh is POSIX-shell-only and the installed GitNexus CLI lacked the documented detect_changes command.",
+      "evidence": "Handoff skillFeedback.deviations for session b7e06aa8-cc22-47a3-87b1-88ceaf0c471d; mission AGENTS.md notes GitNexus tooling is unavailable in worker sessions; skill file C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md still assumes the procedure is directly executable."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Mission shared state documents the secure-lookup rule and general architecture, but does not capture that the Store derive now accepts the secure helper attribute directly and that fallback lookup metadata should be asserted through UniqueLookupMeta::lookup_fields() in integration tests.",
+      "evidence": "Implementation in macros/src/lib.rs adds #[proc_macro_derive(Store, attributes(unique, secure))] plus secure-field filtering for lookup_fields; coverage in core/tests/integration_db.rs uses ItSensitiveFallbackLookup::lookup_fields() to assert [alias, note]; .factory/library/architecture.md mentions the rule at a high level but not the concrete testing seam."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit e27f9d51b554052575161ee65c4a3e3ac63108ac for secure-lookup compile guards. The macro changes and added tests satisfy the feature description and validation contract, and I found no blocking or non-blocking code issues."
+}

@@ -4,9 +4,11 @@ use aes_gcm::{
 };
 use keyring::{Entry, Error as KeyringError};
 use rand::RngExt;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, RwLock};
 use thiserror::Error;
 #[cfg(target_os = "windows")]
 use windows::core::PCWSTR;
@@ -41,6 +43,90 @@ pub enum CryptoError {
     SecretStore(String),
     #[error("protected backup store error: {0}")]
     ProtectedBackup(String),
+    #[error("no crypto resolver mapping registered for model tag `{model_tag}` and field tag `{field_tag}`")]
+    ResolverNotFound {
+        model_tag: &'static str,
+        field_tag: &'static str,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Stable generated tags used to resolve crypto contexts at runtime.
+pub struct CryptoTag {
+    pub model: &'static str,
+    pub field: &'static str,
+}
+
+impl CryptoTag {
+    /// Creates a model/field tag pair.
+    pub const fn new(model: &'static str, field: &'static str) -> Self {
+        Self { model, field }
+    }
+}
+
+/// Generated metadata for a `Sensitive` plaintext/encrypted pair.
+pub trait SensitiveModelTag {
+    /// Stable tag identifying this sensitive model.
+    fn model_tag() -> &'static str;
+}
+
+/// Generated metadata for a secure field on a `Sensitive` model.
+pub trait SensitiveFieldTag {
+    /// Stable model tag for the owning sensitive type.
+    fn model_tag() -> &'static str;
+
+    /// Stable field tag for the secure field.
+    fn field_tag() -> &'static str;
+}
+
+type ResolverKey = (&'static str, &'static str);
+
+static CRYPTO_RESOLVER_REGISTRY: LazyLock<RwLock<HashMap<ResolverKey, Arc<CryptoContext>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Registers a crypto context for the generated tag of one secure field.
+pub fn register_crypto_context_for<Tag>(context: CryptoContext)
+where
+    Tag: SensitiveFieldTag,
+{
+    register_crypto_context(CryptoTag::new(Tag::model_tag(), Tag::field_tag()), context);
+}
+
+/// Registers a crypto context for a concrete model/field tag pair.
+pub fn register_crypto_context(tag: CryptoTag, context: CryptoContext) {
+    CRYPTO_RESOLVER_REGISTRY
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert((tag.model, tag.field), Arc::new(context));
+}
+
+/// Removes all registered crypto contexts. Intended for test isolation.
+pub fn clear_crypto_context_registry() {
+    CRYPTO_RESOLVER_REGISTRY
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+}
+
+/// Resolves a previously registered crypto context by generated field tag.
+pub fn resolve_crypto_context_for<Tag>() -> Result<Arc<CryptoContext>, CryptoError>
+where
+    Tag: SensitiveFieldTag,
+{
+    resolve_crypto_context(CryptoTag::new(Tag::model_tag(), Tag::field_tag()))
+}
+
+/// Resolves a previously registered crypto context by explicit model/field tag pair.
+pub fn resolve_crypto_context(tag: CryptoTag) -> Result<Arc<CryptoContext>, CryptoError> {
+    CRYPTO_RESOLVER_REGISTRY
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&(tag.model, tag.field))
+        .cloned()
+        .ok_or(CryptoError::ResolverNotFound {
+            model_tag: tag.model,
+            field_tag: tag.field,
+        })
 }
 
 /// Source of a symmetric encryption key for [`CryptoContext`].
@@ -542,5 +628,51 @@ mod tests {
             backup.read_key().expect("backup should be populated"),
             loaded
         );
+    }
+
+    #[test]
+    fn crypto_context_registry_is_model_and_field_scoped() {
+        struct ModelAField;
+        struct ModelBField;
+
+        impl SensitiveFieldTag for ModelAField {
+            fn model_tag() -> &'static str {
+                "model-a"
+            }
+
+            fn field_tag() -> &'static str {
+                "secret"
+            }
+        }
+
+        impl SensitiveFieldTag for ModelBField {
+            fn model_tag() -> &'static str {
+                "model-b"
+            }
+
+            fn field_tag() -> &'static str {
+                "secret"
+            }
+        }
+
+        clear_crypto_context_registry();
+        let a = CryptoContext::new([1_u8; KEY_LEN]).expect("context should build");
+        let b = CryptoContext::new([2_u8; KEY_LEN]).expect("context should build");
+
+        register_crypto_context_for::<ModelAField>(a.clone());
+        register_crypto_context_for::<ModelBField>(b.clone());
+
+        let resolved_a =
+            resolve_crypto_context_for::<ModelAField>().expect("model a mapping should resolve");
+        let resolved_b =
+            resolve_crypto_context_for::<ModelBField>().expect("model b mapping should resolve");
+
+        let ciphertext = encrypt_string("value", &resolved_a).expect("encrypt should work");
+        let err = decrypt_string(&ciphertext, &resolved_b).expect_err("wrong context should fail");
+
+        assert_eq!(resolved_a.clone().key, a.key);
+        assert_eq!(resolved_b.clone().key, b.key);
+        assert!(matches!(err, CryptoError::Decrypt));
+        clear_crypto_context_registry();
     }
 }

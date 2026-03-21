@@ -1,0 +1,11 @@
+commands:
+  install: cargo fetch
+  format: cargo fmt --all -- --check
+  typecheck: cargo check --workspace --all-targets
+  lint: cargo clippy --workspace --all-targets -- -D warnings
+  build: cargo build --workspace
+  test_integration: cargo test -p appdb --test integration_db -- --test-threads 1
+  test_compile: cargo test -p appdb --test sensitive_compile -- --nocapture
+  test: cargo test --workspace -- --test-threads 8
+
+services: {}

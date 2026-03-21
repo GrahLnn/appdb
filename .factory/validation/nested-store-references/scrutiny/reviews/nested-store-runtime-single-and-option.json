@@ -1,0 +1,45 @@
+{
+  "featureId": "nested-store-runtime-single-and-option",
+  "reviewedAt": "2026-03-21T06:58:33.269049Z",
+  "commitId": "08a62275cc63006820429d59bdbe596580ca0705",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature commit mixes the earlier macro-contract work into this feature commit and introduces debug stderr logging in the library runtime. The targeted nested single/optional path appears covered, but the implementation scope and runtime side effects do not cleanly match the assigned feature contract.",
+    "issues": [
+      {
+        "file": "C:/Users/admin/appdb/core/src/lib.rs",
+        "line": 60,
+        "severity": "blocking",
+        "description": "resolve_store_ref_record_id writes child-resolution failures to stderr via eprintln! on the normal create-if-missing path. This changes the library runtime surface with unsolicited output and is not part of the nested-store feature contract."
+      },
+      {
+        "file": "C:/Users/admin/appdb/macros/src/lib.rs",
+        "line": 95,
+        "severity": "blocking",
+        "description": "Commit 08a62275 includes large macro-contract changes (store(ref) parsing, generated stored structs, and nested trait impl generation) that belong to the separate nested-store-macro-contract feature, so this feature commit is not isolated to the assigned runtime/snapshot scope."
+      },
+      {
+        "file": "C:/Users/admin/appdb/core/tests/integration_db.rs",
+        "line": 622,
+        "severity": "non_blocking",
+        "description": "The direct-child branch of nested_ref_single_and_option_paths pre-creates the child row before saving the parent, so the test does not prove the required create-if-missing behavior for direct #[store(ref)] Child fields; only the optional lookup-backed branch covers create-if-missing."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker transcript shows the feature was resumed after an earlier partial attempt and the final commit contains macro-contract changes from the previous feature, but the rust-library-worker skill does not explicitly require checking commit isolation against already-completed sibling features before committing.",
+      "evidence": "features.json marks nested-store-macro-contract complete separately, while git show 08a62275 still modifies macros/src/lib.rs, macros/Cargo.toml, core/src/lib.rs, and core/tests/integration_db.rs beyond the runtime decode fix."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The environment/library docs mention nested-store scope, but they do not capture that library code must avoid emitting debug stderr on expected persistence fallback paths, which allowed an eprintln! to land in the runtime helper.",
+      "evidence": "core/src/lib.rs:60 prints a create-if-missing message during ordinary child resolution; neither mission AGENTS nor .factory/library/nested-store.md calls out the no-debug-output expectation."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: the committed feature is not cleanly scoped to the assigned runtime work because it includes prior macro-contract implementation changes, and it leaves a runtime eprintln! side effect in the library. The targeted nested single/optional behavior is mostly covered, but direct-child create-if-missing is not explicitly exercised by the integration test."
+}

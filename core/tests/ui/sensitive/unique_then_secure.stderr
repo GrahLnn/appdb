@@ -1,0 +1,5 @@
+error: #[secure] fields cannot be used as #[unique] lookup keys
+ --> tests/ui/sensitive/unique_then_secure.rs:9:5
+  |
+9 |     secret: String,
+  |     ^^^^^^

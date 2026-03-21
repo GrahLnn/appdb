@@ -136,7 +136,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "appdb"
-version = "0.1.7"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -158,10 +158,11 @@ dependencies = [
 
 [[package]]
 name = "appdb-macros"
-version = "0.1.7"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
+ "serde_json",
  "syn 2.0.117",
 ]
 

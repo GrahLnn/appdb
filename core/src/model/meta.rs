@@ -1,7 +1,7 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
-use anyhow::Result;
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue};
 
 static TABLE_REGISTRY: LazyLock<Mutex<HashMap<&'static str, &'static str>>> =
@@ -41,6 +41,10 @@ pub trait UniqueLookupMeta {
     /// Field names used for automatic unique lookup.
     fn lookup_fields() -> &'static [&'static str];
 }
+
+/// Narrow marker seam proving a type participates in `#[derive(Store)]`.
+#[doc(hidden)]
+pub trait StoreModelMarker {}
 
 /// Trait for values that can be resolved to exactly one SurrealDB record id.
 #[async_trait::async_trait]

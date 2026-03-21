@@ -1,0 +1,21 @@
+{
+  "featureId": "sensitive-create-return-id-guard",
+  "reviewedAt": "2026-03-17T07:50:30Z",
+  "commitId": "8c59d3d5f58726699270c3b9247d56b35239d536",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix closes the create_return_id scrutiny gap by intentionally guarding Store+Sensitive models while leaving plain Store behavior intact, with explicit integration coverage for both branches.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "GitNexus detect_changes fallback behavior remains undocumented even though the worker had to use git diff/git status because the installed CLI lacks that subcommand.",
+      "evidence": "sensitive-create-return-id-guard handoff verification records npx gitnexus detect_changes --scope all --repo appdb failing with unknown command detect_changes, then uses git diff and git status for scope verification."
+    }
+  ],
+  "addressesFailureFrom": "C:\\Users\\admin\\appdb\\.factory\\validation\\store-sensitive-integration\\scrutiny\\reviews\\transparent-store-sensitive-crud-path.json",
+  "summary": "Pass: compared against the original failed feature review, this fix adds the missing guard and targeted test coverage so create_return_id is no longer an uncovered Store + Sensitive API path. Plain Store create_return_id behavior is preserved and the sensitive path now fails clearly before persistence."
+}

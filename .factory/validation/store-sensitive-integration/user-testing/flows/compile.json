@@ -1,0 +1,71 @@
+{
+  "surface": "cargo",
+  "group": "compile",
+  "assertions": [
+    {
+      "id": "VAL-COMPILE-001",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/compile/compile-notes.txt"
+      ],
+      "reason": "trybuild fixture tests/ui/sensitive/no_secure_fields.rs matched stderr requiring at least one #[secure] field and the sensitive_compile suite passed."
+    },
+    {
+      "id": "VAL-COMPILE-002",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/compile/compile-notes.txt"
+      ],
+      "reason": "trybuild fixture tests/ui/sensitive/unsupported_secure_type.rs matched stderr limiting #[secure] to String and Option<String>, and the sensitive_compile suite passed."
+    },
+    {
+      "id": "VAL-COMPILE-003",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/compile/compile-notes.txt"
+      ],
+      "reason": "trybuild fixture tests/ui/store/multiple_id_fields.rs matched stderr rejecting more than one Id field, and the sensitive_compile suite passed."
+    },
+    {
+      "id": "VAL-COMPILE-004",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/compile/compile-notes.txt"
+      ],
+      "reason": "trybuild fixtures for both attribute orders (secure_then_unique and unique_then_secure) matched stderr stating secure fields cannot be unique lookup keys, and the sensitive_compile suite passed."
+    },
+    {
+      "id": "VAL-COMPILE-005",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/compile/compile-notes.txt"
+      ],
+      "reason": "integration test sensitive_store_lookup_metadata_excludes_secure_fields_from_fallback passed and observed ItSensitiveFallbackLookup::lookup_fields() == ['alias', 'note'], excluding secure fields."
+    },
+    {
+      "id": "VAL-COMPILE-006",
+      "status": "pass",
+      "evidence": [
+        "C:/Users/admin/.factory/missions/8bc99baa-4f13-416a-b923-a9744e58890e/evidence/store-sensitive-integration/compile/compile-notes.txt"
+      ],
+      "reason": "trybuild fixture tests/ui/sensitive/no_legal_non_secure_lookup.rs matched stderr requiring an Id field or non-secure lookup field for automatic record resolution, and the sensitive_compile suite passed."
+    }
+  ],
+  "commands": [
+    {
+      "command": "cargo test -p appdb --test sensitive_compile -- --nocapture",
+      "exitCode": 0,
+      "observation": "trybuild compile-fail suite passed for no_secure_fields, unsupported_secure_type, secure_then_unique, unique_then_secure, no_legal_non_secure_lookup, and multiple_id_fields."
+    },
+    {
+      "command": "cargo test -p appdb sensitive_store_lookup_metadata_excludes_secure_fields_from_fallback -- --exact --nocapture",
+      "exitCode": 0,
+      "observation": "integration_db target test passed and confirmed secure fields are omitted from fallback lookup metadata via ItSensitiveFallbackLookup::lookup_fields() == ['alias', 'note']."
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "cargo"
+  ]
+}

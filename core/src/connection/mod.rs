@@ -112,7 +112,9 @@ impl DbRuntime {
 
     /// Installs this runtime into the global singleton used by facade helpers.
     pub fn install_global(&self) -> Result<()> {
-        let mut db = DB.write().expect("global database lock should not be poisoned");
+        let mut db = DB
+            .write()
+            .expect("global database lock should not be poisoned");
         if db.is_some() {
             return Err(DBError::AlreadyInitialized.into());
         }
@@ -123,7 +125,9 @@ impl DbRuntime {
 
     #[doc(hidden)]
     pub fn reinstall_global_for_tests(&self) {
-        let mut db = DB.write().expect("global database lock should not be poisoned");
+        let mut db = DB
+            .write()
+            .expect("global database lock should not be poisoned");
         *db = Some(self.clone());
     }
 }
@@ -180,9 +184,9 @@ impl DbWorker {
             });
         });
 
-        let db = ready_rx
-            .recv()
-            .map_err(|err| anyhow::anyhow!("database worker failed before initialization: {err}"))??;
+        let db = ready_rx.recv().map_err(|err| {
+            anyhow::anyhow!("database worker failed before initialization: {err}")
+        })??;
 
         Ok(Self {
             db,
@@ -294,7 +298,9 @@ pub async fn init_db(path: PathBuf) -> Result<()> {
 
 /// Clears the installed global database handle.
 pub fn reset_db() {
-    let mut db = DB.write().expect("global database lock should not be poisoned");
+    let mut db = DB
+        .write()
+        .expect("global database lock should not be poisoned");
     *db = None;
 }
 
@@ -308,7 +314,9 @@ pub async fn init_db_with_options(path: PathBuf, options: InitDbOptions) -> Resu
 /// Opens a database with explicit options and replaces any previously installed global runtime.
 pub async fn reinit_db_with_options(path: PathBuf, options: InitDbOptions) -> Result<()> {
     let runtime = DbRuntime::open_with_options(path, options).await?;
-    let mut db = DB.write().expect("global database lock should not be poisoned");
+    let mut db = DB
+        .write()
+        .expect("global database lock should not be poisoned");
     *db = Some(runtime);
     Ok(())
 }
@@ -419,7 +427,9 @@ mod tests {
 
     #[test]
     fn reinstall_global_for_tests_replaces_existing_handle() {
-        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        let _guard = TEST_DB_LOCK
+            .lock()
+            .expect("test db lock should not be poisoned");
         reset_db();
 
         let first = DbRuntime::from_handle(Arc::new(Surreal::init()));
@@ -438,7 +448,9 @@ mod tests {
 
     #[test]
     fn reset_db_clears_installed_handle() {
-        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        let _guard = TEST_DB_LOCK
+            .lock()
+            .expect("test db lock should not be poisoned");
         reset_db();
 
         let runtime = DbRuntime::from_handle(Arc::new(Surreal::init()));
@@ -452,7 +464,9 @@ mod tests {
 
     #[test]
     fn reinit_db_survives_sequential_runtime_teardown() {
-        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        let _guard = TEST_DB_LOCK
+            .lock()
+            .expect("test db lock should not be poisoned");
         reset_db();
 
         fn temp_path() -> PathBuf {
@@ -515,9 +529,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(second_path);
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn reinit_db_replaces_a_closed_runtime() {
-        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        let _guard = TEST_DB_LOCK
+            .lock()
+            .expect("test db lock should not be poisoned");
         reset_db();
 
         fn temp_path() -> PathBuf {
@@ -560,9 +577,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(second_path);
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn repeated_reinit_keeps_cleanup_queries_usable() {
-        let _guard = TEST_DB_LOCK.lock().expect("test db lock should not be poisoned");
+        let _guard = TEST_DB_LOCK
+            .lock()
+            .expect("test db lock should not be poisoned");
         reset_db();
 
         fn temp_path() -> PathBuf {

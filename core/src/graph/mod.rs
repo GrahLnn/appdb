@@ -105,7 +105,12 @@ pub trait GraphCrud: ResolveRecordId + Send + Sync {
         R: RelationMeta + Send + Sync,
         T: ResolveRecordId + Send + Sync,
     {
-        GraphRepo::relate_at(self.resolve_record_id().await?, target.resolve_record_id().await?, R::relation_name()).await
+        GraphRepo::relate_at(
+            self.resolve_record_id().await?,
+            target.resolve_record_id().await?,
+            R::relation_name(),
+        )
+        .await
     }
 
     /// Deletes a relation from `self` to `target`.
@@ -114,7 +119,12 @@ pub trait GraphCrud: ResolveRecordId + Send + Sync {
         R: RelationMeta + Send + Sync,
         T: ResolveRecordId + Send + Sync,
     {
-        GraphRepo::unrelate_at(self.resolve_record_id().await?, target.resolve_record_id().await?, R::relation_name()).await
+        GraphRepo::unrelate_at(
+            self.resolve_record_id().await?,
+            target.resolve_record_id().await?,
+            R::relation_name(),
+        )
+        .await
     }
 }
 

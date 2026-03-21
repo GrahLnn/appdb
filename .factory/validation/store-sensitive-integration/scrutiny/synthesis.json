@@ -1,0 +1,51 @@
+{
+  "milestone": "store-sensitive-integration",
+  "round": 2,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Update rust-library-worker guidance so Windows workers do not rely on a POSIX-only init path and do not assume the installed GitNexus CLI exposes detect_changes exactly as documented.",
+      "evidence": "Multiple reviews reported that worker sessions could not follow the literal procedure because .factory/init.sh is POSIX-shell-oriented on Windows and the available GitNexus CLI lacked the documented detect_changes command.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "Clarify Windows startup guidance for library-only missions so workers can skip .factory/init.sh when baseline Cargo validation already proves setup is healthy and no services are required.",
+      "evidence": "The resolver-store-boundary-proof worker noted `.factory/init.sh` was unnecessary on this Windows library mission because baseline workspace tests already passed without extra setup.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Store stale-GitNexus handling for test-only review work in shared library knowledge.",
+      "reason": "rejected as too procedural and reviewer-specific for library knowledge; better handled in worker skill guidance"
+    }
+  ],
+  "previousRound": ".factory/validation/store-sensitive-integration/scrutiny/synthesis.round1.json"
+}
