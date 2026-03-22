@@ -12,5 +12,7 @@ pub use crate::query::sql::{
 pub use crate::repository::Crud;
 pub use crate::serde_utils::id::Id;
 pub use crate::tx::{run_tx, TxResults, TxStmt};
+pub use crate::Bridge;
 pub use crate::Relation;
+pub use crate::Store;
 pub use surrealdb::types::{RecordId, Table};

@@ -24,9 +24,14 @@ Architectural decisions, discovered patterns, and mission-specific integration g
   - `core/tests/sensitive_roundtrip.rs` for encryption behavior
   - `core/tests/sensitive_compile.rs` plus `core/tests/ui/**` for compile-fail coverage
 - Nested-store-references mission guidance:
-  - `#[store(ref)]` is explicit opt-in only; do not infer nested-reference behavior from child type alone.
-  - First-version supported nested shapes are exactly `Child`, `Option<Child>`, and `Vec<Child>`.
+  - `#[bindref]` is explicit opt-in only; do not infer nested-reference behavior from child type alone.
+  - Introduce a public `Bridge` seam in `core/src/lib.rs`; bindref fields persist by calling `persist_bindref` and hydrate by calling `hydrate_bindref`.
+  - Provide the default concrete-model path through a blanket `Bridge` impl for Store children that already satisfy the existing `ModelMeta + ResolveRecordId + Crud + NestedStoreRefs` requirements.
+  - First-version supported nested shapes are exactly `Child`, `Option<Child>`, and `Vec<Child>`, where `Child: Bridge`.
+  - Add `#[derive(Bridge)]` for enum dispatcher types in this scope, but keep the supported shape narrow: each variant must be a single-field tuple variant whose payload already implements `Bridge`.
+  - `#[derive(Bridge)]` should auto-generate `From<Payload>` conversions and table-name-based hydrate dispatch; reject unsupported enum shapes with focused derive-time diagnostics.
   - Parent-facing API values remain domain models; raw parent rows for nested refs must store only child `RecordId` values (or arrays thereof).
-  - Child resolution order is: explicit child id first, otherwise existing `UniqueLookupMeta` lookup semantics; if no existing child matches, create exactly one child row.
+  - The default concrete-model bindref path keeps the current child resolution order: explicit child id first, otherwise existing `UniqueLookupMeta` lookup semantics; if no existing child matches, create exactly one child row.
   - Default read behavior is eager hydration for `get`, `list`, and `list_limit`.
+  - Bindref fields should be excluded from automatic lookup metadata, and `#[unique]` must not be allowed on bindref fields.
   - First version does not promise transactional parent/child writes and does not expand nested semantics to `merge`, `patch`, or raw query helpers.

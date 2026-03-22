@@ -40,6 +40,11 @@ pub trait ModelMeta:
 pub trait UniqueLookupMeta {
     /// Field names used for automatic unique lookup.
     fn lookup_fields() -> &'static [&'static str];
+
+    /// Field names that are explicit bindrefs and must be excluded from automatic lookup.
+    fn bindref_fields() -> &'static [&'static str] {
+        &[]
+    }
 }
 
 /// Narrow marker seam proving a type participates in `#[derive(Store)]`.

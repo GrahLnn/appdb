@@ -1,0 +1,5 @@
+error: Bridge variants must be single-field tuple variants
+  --> tests/ui/store/derive_bridge_multi_field_variant.rs:13:5
+   |
+13 |     Pair(Child, Child),
+   |     ^^^^

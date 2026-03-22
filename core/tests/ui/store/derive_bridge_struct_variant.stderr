@@ -1,0 +1,5 @@
+error: Bridge does not support struct variants
+  --> tests/ui/store/derive_bridge_struct_variant.rs:13:5
+   |
+13 |     Child { value: Child },
+   |     ^^^^^

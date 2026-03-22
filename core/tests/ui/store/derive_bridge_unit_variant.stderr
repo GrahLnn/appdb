@@ -1,0 +1,5 @@
+error: Bridge does not support unit variants
+ --> tests/ui/store/derive_bridge_unit_variant.rs:5:5
+  |
+5 |     Empty,
+  |     ^^^^^
