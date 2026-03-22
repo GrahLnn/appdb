@@ -8,11 +8,14 @@ struct ChildModel {
     name: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+struct Wrapper(ChildModel);
+
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ParentModel {
     id: Id,
     #[bindref]
-    children: Option<Vec<ChildModel>>,
+    children: Vec<Wrapper>,
 }
 
 fn main() {}
