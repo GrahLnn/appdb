@@ -1,0 +1,5 @@
+error: #[store(ref)] is no longer supported; use #[bindref] for explicit nested references
+  --> tests/ui/store/nested_ref_legacy_attr_rejected.rs:14:5
+   |
+14 |     #[store(ref)]
+   |     ^^^^^^^^^^^^^

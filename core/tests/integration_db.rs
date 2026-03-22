@@ -86,14 +86,14 @@ struct ItNestedLookupChild {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNestedParent {
     id: Id,
-    #[store(ref)]
+    #[bindref]
     child: ItNestedIdChild,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNestedOptionalParent {
     id: Id,
-    #[store(ref)]
+    #[bindref]
     child: Option<ItNestedLookupChild>,
 }
 
@@ -112,7 +112,7 @@ struct StoredNestedOptionalParentRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNestedVecParent {
     id: Id,
-    #[store(ref)]
+    #[bindref]
     children: Vec<ItNestedLookupChild>,
 }
 

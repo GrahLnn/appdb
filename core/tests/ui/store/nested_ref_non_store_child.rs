@@ -10,7 +10,7 @@ struct PlainChild {
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ParentModel {
     id: Id,
-    #[store(ref)]
+    #[bindref]
     child: PlainChild,
 }
 

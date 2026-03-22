@@ -11,11 +11,11 @@ struct ChildModel {
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ParentModel {
     id: Id,
-    #[store(ref)]
+    #[bindref]
     child: ChildModel,
-    #[store(ref)]
+    #[bindref]
     maybe_child: Option<ChildModel>,
-    #[store(ref)]
+    #[bindref]
     children: Vec<ChildModel>,
     inline_child: ChildModel,
 }
