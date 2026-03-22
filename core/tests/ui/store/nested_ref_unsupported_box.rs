@@ -11,7 +11,7 @@ struct ChildModel {
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ParentModel {
     id: Id,
-    #[bindref]
+    #[foreign]
     child: Box<ChildModel>,
 }
 

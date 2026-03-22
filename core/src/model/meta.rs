@@ -41,8 +41,8 @@ pub trait UniqueLookupMeta {
     /// Field names used for automatic unique lookup.
     fn lookup_fields() -> &'static [&'static str];
 
-    /// Field names that are explicit bindrefs and must be excluded from automatic lookup.
-    fn bindref_fields() -> &'static [&'static str] {
+    /// Field names that are explicit foreigns and must be excluded from automatic lookup.
+    fn foreign_fields() -> &'static [&'static str] {
         &[]
     }
 }

@@ -1,4 +1,4 @@
-use appdb::{Id, Store};
+use appdb::{Bridge, Id, Store};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::SurrealValue;
 
@@ -8,11 +8,15 @@ enum PolyChild {
     VariantB { code: String },
 }
 
+fn assert_bridge<T: Bridge>() {}
+
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ParentModel {
     id: Id,
-    #[bindref]
+    #[foreign]
     child: PolyChild,
 }
 
-fn main() {}
+fn main() {
+    assert_bridge::<PolyChild>();
+}

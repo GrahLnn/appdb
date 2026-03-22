@@ -1,5 +1,0 @@
-error: #[bindref] fields cannot be used as #[unique] lookup keys
-  --> tests/ui/store/nested_ref_bindref_unique_rejected.rs:15:5
-   |
-15 |     child: ChildModel,
-   |     ^^^^^

@@ -14,7 +14,7 @@ struct Wrapper(ChildModel);
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ParentModel {
     id: Id,
-    #[bindref]
+    #[foreign]
     children: Vec<Wrapper>,
 }
 

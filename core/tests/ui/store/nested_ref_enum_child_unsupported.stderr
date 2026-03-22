@@ -1,8 +1,8 @@
-error[E0277]: the trait bound `PolyChild: ResolveRecordId` is not satisfied
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:15:12
+error[E0277]: the trait bound `PolyChild: Bridge` is not satisfied
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:13:62
    |
-15 |     child: PolyChild,
-   |            ^^^^^^^^^ unsatisfied trait bound
+13 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+   |                                                              ^^^^^ unsatisfied trait bound
    |
 help: the trait `ResolveRecordId` is not implemented for `PolyChild`
   --> tests/ui/store/nested_ref_enum_child_unsupported.rs:6:1
@@ -10,9 +10,9 @@ help: the trait `ResolveRecordId` is not implemented for `PolyChild`
  6 | enum PolyChild {
    | ^^^^^^^^^^^^^^
 help: the following other types implement trait `ResolveRecordId`
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:62
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:13:62
    |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+13 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
    |                                                              ^^^^^ `ParentModel`
    |
   ::: src/model/meta.rs
@@ -22,21 +22,15 @@ help: the following other types implement trait `ResolveRecordId`
 ...
    | impl ResolveRecordId for &RecordId {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `&appdb::prelude::RecordId`
-note: required by a bound in `resolve_store_ref_record_id`
-  --> src/lib.rs
-   |
-   | pub async fn resolve_store_ref_record_id<T>(value: T) -> anyhow::Result<surrealdb::types::RecordId>
-   |              --------------------------- required by a bound in this function
-...
-   |         + model::meta::ResolveRecordId
-   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `resolve_store_ref_record_id`
+   = note: required for `PolyChild` to implement `Bridge`
+   = note: required for `PolyChild` to implement `ForeignShape`
    = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0277]: the trait bound `PolyChild: Crud` is not satisfied
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:15:12
+error[E0277]: the trait bound `PolyChild: Bridge` is not satisfied
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:13:62
    |
-15 |     child: PolyChild,
-   |            ^^^^^^^^^ unsatisfied trait bound
+13 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+   |                                                              ^^^^^ unsatisfied trait bound
    |
 help: the trait `Crud` is not implemented for `PolyChild`
   --> tests/ui/store/nested_ref_enum_child_unsupported.rs:6:1
@@ -44,25 +38,19 @@ help: the trait `Crud` is not implemented for `PolyChild`
  6 | enum PolyChild {
    | ^^^^^^^^^^^^^^
 help: the trait `Crud` is implemented for `ParentModel`
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:62
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:13:62
    |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+13 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
    |                                                              ^^^^^
-note: required by a bound in `resolve_store_ref_record_id`
-  --> src/lib.rs
-   |
-   | pub async fn resolve_store_ref_record_id<T>(value: T) -> anyhow::Result<surrealdb::types::RecordId>
-   |              --------------------------- required by a bound in this function
-...
-   |         + repository::Crud
-   |           ^^^^^^^^^^^^^^^^ required by this bound in `resolve_store_ref_record_id`
+   = note: required for `PolyChild` to implement `Bridge`
+   = note: required for `PolyChild` to implement `ForeignShape`
    = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0277]: the trait bound `PolyChild: ResolveRecordId` is not satisfied
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:62
+error[E0277]: the trait bound `PolyChild: Bridge` is not satisfied
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:21:21
    |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
-   |                                                              ^^^^^ unsatisfied trait bound
+21 |     assert_bridge::<PolyChild>();
+   |                     ^^^^^^^^^ unsatisfied trait bound
    |
 help: the trait `ResolveRecordId` is not implemented for `PolyChild`
   --> tests/ui/store/nested_ref_enum_child_unsupported.rs:6:1
@@ -70,9 +58,9 @@ help: the trait `ResolveRecordId` is not implemented for `PolyChild`
  6 | enum PolyChild {
    | ^^^^^^^^^^^^^^
 help: the following other types implement trait `ResolveRecordId`
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:62
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:13:62
    |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+13 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
    |                                                              ^^^^^ `ParentModel`
    |
   ::: src/model/meta.rs
@@ -82,21 +70,19 @@ help: the following other types implement trait `ResolveRecordId`
 ...
    | impl ResolveRecordId for &RecordId {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `&appdb::prelude::RecordId`
-note: required by a bound in `resolve_store_ref_record_id`
-  --> src/lib.rs
+   = note: required for `PolyChild` to implement `Bridge`
+note: required by a bound in `assert_bridge`
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:21
    |
-   | pub async fn resolve_store_ref_record_id<T>(value: T) -> anyhow::Result<surrealdb::types::RecordId>
-   |              --------------------------- required by a bound in this function
-...
-   |         + model::meta::ResolveRecordId
-   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `resolve_store_ref_record_id`
+11 | fn assert_bridge<T: Bridge>() {}
+   |                     ^^^^^^ required by this bound in `assert_bridge`
    = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0277]: the trait bound `PolyChild: Crud` is not satisfied
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:62
+error[E0277]: the trait bound `PolyChild: Bridge` is not satisfied
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:21:21
    |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
-   |                                                              ^^^^^ unsatisfied trait bound
+21 |     assert_bridge::<PolyChild>();
+   |                     ^^^^^^^^^ unsatisfied trait bound
    |
 help: the trait `Crud` is not implemented for `PolyChild`
   --> tests/ui/store/nested_ref_enum_child_unsupported.rs:6:1
@@ -104,76 +90,14 @@ help: the trait `Crud` is not implemented for `PolyChild`
  6 | enum PolyChild {
    | ^^^^^^^^^^^^^^
 help: the trait `Crud` is implemented for `ParentModel`
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:62
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:13:62
    |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+13 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
    |                                                              ^^^^^
-note: required by a bound in `resolve_store_ref_record_id`
-  --> src/lib.rs
+   = note: required for `PolyChild` to implement `Bridge`
+note: required by a bound in `assert_bridge`
+  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:21
    |
-   | pub async fn resolve_store_ref_record_id<T>(value: T) -> anyhow::Result<surrealdb::types::RecordId>
-   |              --------------------------- required by a bound in this function
-...
-   |         + repository::Crud
-   |           ^^^^^^^^^^^^^^^^ required by this bound in `resolve_store_ref_record_id`
-   = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
-
-error[E0599]: the function or associated item `get_record` exists for struct `Repo<PolyChild>`, but its trait bounds were not satisfied
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:62
-   |
- 6 | enum PolyChild {
-   | -------------- doesn't satisfy `PolyChild: ModelMeta`, `PolyChild: NestedStoreRefs` or `PolyChild: StoredModel`
-...
-11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
-   |                                                              ^^^^^ function or associated item cannot be called on `Repo<PolyChild>` due to unsatisfied trait bounds
-   |
-   = note: the following trait bounds were not satisfied:
-           `PolyChild: ModelMeta`
-           `PolyChild: StoredModel`
-           `PolyChild: NestedStoreRefs`
-note: the traits `ModelMeta`, `NestedStoreRefs`,  and `StoredModel` must be implemented
-  --> src/lib.rs
-   |
-   |   pub trait StoredModel: Sized {
-   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-...
-   |   pub trait NestedStoreRefs: StoredModel {
-   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-  ::: src/model/meta.rs
-   |
-   | / pub trait ModelMeta:
-   | |     Serialize
-   | |     + for<'de> Deserialize<'de>
-   | |     + SurrealValue
-...  |
-   | |     + Send
-   | |     + Sync
-   | |__________^
-   = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
-
-error[E0277]: the trait bound `PolyChild: StoreModelMarker` is not satisfied
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:15:12
-   |
-15 |     child: PolyChild,
-   |            ^^^^^^^^^ unsatisfied trait bound
-   |
-help: the trait `StoreModelMarker` is not implemented for `PolyChild`
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:6:1
-   |
- 6 | enum PolyChild {
-   | ^^^^^^^^^^^^^^
-help: the following other types implement trait `StoreModelMarker`
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:62
-   |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
-   |                                                              ^^^^^
-   |                                                              |
-   |                                                              `AppdbStoreMarkerParentModel`
-   |                                                              `ParentModel`
-note: required by a bound in `assert_store_child`
-  --> tests/ui/store/nested_ref_enum_child_unsupported.rs:11:62
-   |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
-   |                                                              ^^^^^ required by this bound in `assert_store_child`
+11 | fn assert_bridge<T: Bridge>() {}
+   |                     ^^^^^^ required by this bound in `assert_bridge`
    = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)

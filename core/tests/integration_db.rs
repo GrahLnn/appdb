@@ -52,6 +52,40 @@ struct ItProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItAliasedPost {
+    id: Id,
+    #[unique]
+    slug: String,
+    title: String,
+    body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+#[table_as(ItAliasedPost)]
+struct ItAliasedPostBase {
+    id: Id,
+    #[unique]
+    slug: String,
+    title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItAliasedForeignParent {
+    id: Id,
+    #[foreign]
+    featured: Option<ItAliasedPostBase>,
+    #[foreign]
+    nested: Option<Vec<Vec<ItAliasedPostBase>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredAliasedForeignParentRow {
+    id: Id,
+    featured: Option<RecordId>,
+    nested: Option<Vec<Vec<RecordId>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItInlineChild {
     id: Id,
     name: String,
@@ -86,14 +120,14 @@ struct ItNestedLookupChild {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNestedParent {
     id: Id,
-    #[bindref]
+    #[foreign]
     child: ItNestedIdChild,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNestedOptionalParent {
     id: Id,
-    #[bindref]
+    #[foreign]
     child: Option<ItNestedLookupChild>,
 }
 
@@ -112,7 +146,7 @@ struct StoredNestedOptionalParentRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNestedVecParent {
     id: Id,
-    #[bindref]
+    #[foreign]
     children: Vec<ItNestedLookupChild>,
 }
 
@@ -123,47 +157,47 @@ struct StoredNestedVecParentRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
-struct ItRecursiveBindrefParent {
+struct ItRecursiveForeignParent {
     id: Id,
-    #[bindref]
+    #[foreign]
     children: Option<Vec<Vec<ItNestedLookupChild>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
-struct StoredRecursiveBindrefParentRow {
+struct StoredRecursiveForeignParentRow {
     id: Id,
     children: Option<Vec<Vec<RecordId>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
-struct ItManualBindRefAlphaChild {
+struct ItManualForeignAlphaChild {
     id: Id,
     #[unique]
     name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
-struct ItManualBindRefBetaChild {
+struct ItManualForeignBetaChild {
     #[unique]
     code: String,
     note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Bridge)]
-enum ItManualBindRefChild {
-    Alpha(ItManualBindRefAlphaChild),
-    Beta(ItManualBindRefBetaChild),
+enum ItManualForeignChild {
+    Alpha(ItManualForeignAlphaChild),
+    Beta(ItManualForeignBetaChild),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
-struct ItManualBindRefParent {
+struct ItManualForeignParent {
     id: Id,
-    #[bindref]
-    child: ItManualBindRefChild,
+    #[foreign]
+    child: ItManualForeignChild,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
-struct StoredManualBindRefParentRow {
+struct StoredManualForeignParentRow {
     id: Id,
     child: RecordId,
 }
@@ -261,12 +295,12 @@ impl StoredModel for ItRecordUser {
     }
 }
 
-impl appdb::NestedStoreRefs for ItRecordUser {
-    async fn persist_nested_refs(value: Self) -> anyhow::Result<Self::Stored> {
+impl appdb::ForeignModel for ItRecordUser {
+    async fn persist_foreign(value: Self) -> anyhow::Result<Self::Stored> {
         Ok(value)
     }
 
-    async fn hydrate_nested_refs(stored: Self::Stored) -> anyhow::Result<Self> {
+    async fn hydrate_foreign(stored: Self::Stored) -> anyhow::Result<Self> {
         Ok(stored)
     }
 }
@@ -343,6 +377,39 @@ async fn load_sensitive_profile_raw(id: &str) -> StoredSensitiveProfileRow {
         .await
         .expect("raw row query should succeed")
         .expect("raw row should exist")
+}
+
+async fn load_aliased_foreign_parent_raw(id: &str) -> StoredAliasedForeignParentRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItAliasedForeignParent::table_name())
+        .bind("id", id.to_owned());
+
+    let value = query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("aliased foreign raw parent query should succeed")
+        .expect("aliased foreign raw parent should exist");
+
+    let mut map = value
+        .as_object()
+        .cloned()
+        .expect("aliased foreign raw row should be an object");
+    let featured = map
+        .remove("featured")
+        .map(serde_json::from_value::<Option<RecordId>>)
+        .transpose()
+        .expect("aliased foreign featured should decode as optional record id")
+        .flatten();
+    let nested = map
+        .remove("nested")
+        .map(serde_json::from_value::<Option<Vec<Vec<RecordId>>>>)
+        .transpose()
+        .expect("aliased foreign nested should decode as nested optional record ids")
+        .flatten();
+    StoredAliasedForeignParentRow {
+        id: Id::from(id),
+        featured,
+        nested,
+    }
 }
 
 async fn load_inline_parent_raw(id: &str) -> StoredInlineParentRow {
@@ -443,15 +510,15 @@ async fn load_nested_vec_parent_raw(id: &str) -> StoredNestedVecParentRow {
     }
 }
 
-async fn load_recursive_bindref_parent_raw(id: &str) -> StoredRecursiveBindrefParentRow {
+async fn load_recursive_foreign_parent_raw(id: &str) -> StoredRecursiveForeignParentRow {
     let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
-        .bind("table", ItRecursiveBindrefParent::table_name())
+        .bind("table", ItRecursiveForeignParent::table_name())
         .bind("id", id.to_owned());
 
     let value = query_bound_return::<serde_json::Value>(stmt)
         .await
-        .expect("recursive bindref parent raw row query should succeed")
-        .expect("recursive bindref parent raw row should exist");
+        .expect("recursive foreign parent raw row query should succeed")
+        .expect("recursive foreign parent raw row should exist");
     let id = value
         .get("id")
         .and_then(serde_json::Value::as_str)
@@ -459,29 +526,29 @@ async fn load_recursive_bindref_parent_raw(id: &str) -> StoredRecursiveBindrefPa
             raw.split_once(':')
                 .map(|(_, key)| key.trim_matches('`').to_owned())
         })
-        .expect("recursive bindref parent raw row should contain normalized string id");
+        .expect("recursive foreign parent raw row should contain normalized string id");
     let children = value
         .get("children")
         .cloned()
         .map(serde_json::from_value::<Option<Vec<Vec<RecordId>>>>)
         .transpose()
-        .expect("recursive bindref children should decode as nested optional record ids")
+        .expect("recursive foreign children should decode as nested optional record ids")
         .flatten();
-    StoredRecursiveBindrefParentRow {
+    StoredRecursiveForeignParentRow {
         id: Id::from(id),
         children,
     }
 }
 
-async fn load_manual_bindref_parent_raw(id: &str) -> StoredManualBindRefParentRow {
+async fn load_manual_foreign_parent_raw(id: &str) -> StoredManualForeignParentRow {
     let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
-        .bind("table", ItManualBindRefParent::table_name())
+        .bind("table", ItManualForeignParent::table_name())
         .bind("id", id.to_owned());
 
     let value = query_bound_return::<serde_json::Value>(stmt)
         .await
-        .expect("manual bindref parent raw row query should succeed")
-        .expect("manual bindref parent raw row should exist");
+        .expect("manual foreign parent raw row query should succeed")
+        .expect("manual foreign parent raw row should exist");
     let id = value
         .get("id")
         .and_then(serde_json::Value::as_str)
@@ -489,14 +556,14 @@ async fn load_manual_bindref_parent_raw(id: &str) -> StoredManualBindRefParentRo
             raw.split_once(':')
                 .map(|(_, key)| key.trim_matches('`').to_owned())
         })
-        .expect("manual bindref parent raw row should contain normalized string id");
+        .expect("manual foreign parent raw row should contain normalized string id");
     let child = value
         .get("child")
         .cloned()
         .map(serde_json::from_value::<RecordId>)
-        .expect("manual bindref parent raw row should contain child")
-        .expect("manual bindref child should decode as record id");
-    StoredManualBindRefParentRow {
+        .expect("manual foreign parent raw row should contain child")
+        .expect("manual foreign child should decode as record id");
+    StoredManualForeignParentRow {
         id: Id::from(id),
         child,
     }
@@ -1081,15 +1148,15 @@ fn nested_ref_recursive_option_vec_shapes_roundtrip() {
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItRecursiveBindrefParent>::delete_all()
+        Repo::<ItRecursiveForeignParent>::delete_all()
             .await
             .expect("delete_all should succeed");
         Repo::<ItNestedLookupChild>::delete_all()
             .await
             .expect("delete_all should succeed");
 
-        let parent = ItRecursiveBindrefParent {
-            id: Id::from("recursive-bindref-parent"),
+        let parent = ItRecursiveForeignParent {
+            id: Id::from("recursive-foreign-parent"),
             children: Some(vec![
                 vec![
                     ItNestedLookupChild {
@@ -1108,16 +1175,16 @@ fn nested_ref_recursive_option_vec_shapes_roundtrip() {
             ]),
         };
 
-        let saved = ItRecursiveBindrefParent::save(parent.clone())
+        let saved = ItRecursiveForeignParent::save(parent.clone())
             .await
-            .expect("recursive bindref save should succeed");
-        let loaded = ItRecursiveBindrefParent::get("recursive-bindref-parent")
+            .expect("recursive foreign save should succeed");
+        let loaded = ItRecursiveForeignParent::get("recursive-foreign-parent")
             .await
-            .expect("recursive bindref get should succeed");
-        let listed = ItRecursiveBindrefParent::list()
+            .expect("recursive foreign get should succeed");
+        let listed = ItRecursiveForeignParent::list()
             .await
-            .expect("recursive bindref list should succeed");
-        let raw = load_recursive_bindref_parent_raw("recursive-bindref-parent").await;
+            .expect("recursive foreign list should succeed");
+        let raw = load_recursive_foreign_parent_raw("recursive-foreign-parent").await;
 
         let expected_ids = parent
             .children
@@ -1149,77 +1216,77 @@ fn nested_ref_recursive_option_vec_shapes_roundtrip() {
 }
 
 #[test]
-fn manual_bindref_enum_dispatcher_roundtrip_passes() {
+fn manual_foreign_enum_dispatcher_roundtrip_passes() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItManualBindRefParent>::delete_all()
+        Repo::<ItManualForeignParent>::delete_all()
             .await
             .expect("delete_all should succeed");
-        Repo::<ItManualBindRefAlphaChild>::delete_all()
+        Repo::<ItManualForeignAlphaChild>::delete_all()
             .await
             .expect("delete_all should succeed");
-        Repo::<ItManualBindRefBetaChild>::delete_all()
+        Repo::<ItManualForeignBetaChild>::delete_all()
             .await
             .expect("delete_all should succeed");
 
-        let alpha_parent = ItManualBindRefParent {
-            id: Id::from("manual-bindref-alpha-parent"),
-            child: ItManualBindRefChild::Alpha(ItManualBindRefAlphaChild {
-                id: Id::from("manual-bindref-alpha-child"),
+        let alpha_parent = ItManualForeignParent {
+            id: Id::from("manual-foreign-alpha-parent"),
+            child: ItManualForeignChild::Alpha(ItManualForeignAlphaChild {
+                id: Id::from("manual-foreign-alpha-child"),
                 name: "alpha".to_owned(),
             }),
         };
 
         let alpha_child = match &alpha_parent.child {
-            ItManualBindRefChild::Alpha(child) => child.clone(),
-            ItManualBindRefChild::Beta(_) => {
+            ItManualForeignChild::Alpha(child) => child.clone(),
+            ItManualForeignChild::Beta(_) => {
                 unreachable!("alpha parent should contain alpha child")
             }
         };
 
-        Repo::<ItManualBindRefAlphaChild>::create(alpha_child)
+        Repo::<ItManualForeignAlphaChild>::create(alpha_child)
             .await
             .expect("alpha child seed should succeed");
 
-        let saved_alpha = ItManualBindRefParent::save(alpha_parent.clone())
+        let saved_alpha = ItManualForeignParent::save(alpha_parent.clone())
             .await
-            .expect("alpha bindref save should succeed");
-        let loaded_alpha = ItManualBindRefParent::get("manual-bindref-alpha-parent")
+            .expect("alpha foreign save should succeed");
+        let loaded_alpha = ItManualForeignParent::get("manual-foreign-alpha-parent")
             .await
-            .expect("alpha bindref get should succeed");
-        let raw_alpha = load_manual_bindref_parent_raw("manual-bindref-alpha-parent").await;
+            .expect("alpha foreign get should succeed");
+        let raw_alpha = load_manual_foreign_parent_raw("manual-foreign-alpha-parent").await;
 
         assert_eq!(saved_alpha, alpha_parent);
         assert_eq!(loaded_alpha, alpha_parent);
         assert_eq!(
             raw_alpha.child,
             RecordId::new(
-                ItManualBindRefAlphaChild::table_name(),
-                "manual-bindref-alpha-child"
+                ItManualForeignAlphaChild::table_name(),
+                "manual-foreign-alpha-child"
             )
         );
 
-        let beta_parent = ItManualBindRefParent {
-            id: Id::from("manual-bindref-beta-parent"),
-            child: ItManualBindRefChild::Beta(ItManualBindRefBetaChild {
-                code: "manual-bindref-beta-child".to_owned(),
+        let beta_parent = ItManualForeignParent {
+            id: Id::from("manual-foreign-beta-parent"),
+            child: ItManualForeignChild::Beta(ItManualForeignBetaChild {
+                code: "manual-foreign-beta-child".to_owned(),
                 note: Some("beta-note".to_owned()),
             }),
         };
 
-        let saved_beta = ItManualBindRefParent::save(beta_parent.clone())
+        let saved_beta = ItManualForeignParent::save(beta_parent.clone())
             .await
-            .expect("beta bindref save should succeed");
-        let loaded_beta = ItManualBindRefParent::get("manual-bindref-beta-parent")
+            .expect("beta foreign save should succeed");
+        let loaded_beta = ItManualForeignParent::get("manual-foreign-beta-parent")
             .await
-            .expect("beta bindref get should succeed");
-        let raw_beta = load_manual_bindref_parent_raw("manual-bindref-beta-parent").await;
+            .expect("beta foreign get should succeed");
+        let raw_beta = load_manual_foreign_parent_raw("manual-foreign-beta-parent").await;
         let beta_child_id =
-            Repo::<ItManualBindRefBetaChild>::find_unique_id_for(match &beta_parent.child {
-                ItManualBindRefChild::Beta(child) => child,
-                ItManualBindRefChild::Alpha(_) => {
+            Repo::<ItManualForeignBetaChild>::find_unique_id_for(match &beta_parent.child {
+                ItManualForeignChild::Beta(child) => child,
+                ItManualForeignChild::Alpha(_) => {
                     unreachable!("beta parent should contain beta child")
                 }
             })
@@ -1244,6 +1311,91 @@ fn store_unique_field_registers_schema_index() {
             && ddl.contains("ON it_profile")
             && ddl.contains("FIELDS name UNIQUE")
     }));
+
+    assert!(ddls.iter().any(|ddl| {
+        ddl.contains("DEFINE INDEX IF NOT EXISTS it_aliased_post_slug_unique")
+            && ddl.contains("ON it_aliased_post")
+            && ddl.contains("FIELDS slug UNIQUE")
+    }));
+}
+
+#[test]
+fn table_as_reuses_target_table_name_and_lookup_metadata() {
+    assert_eq!(ItAliasedPost::table_name(), ItAliasedPostBase::table_name());
+    assert_eq!(ItAliasedPostBase::lookup_fields(), &["slug"]);
+}
+
+#[test]
+fn table_as_roundtrip_and_foreign_paths_share_target_table() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItAliasedForeignParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItAliasedPost>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let post = ItAliasedPost {
+            id: Id::from("aliased-post"),
+            slug: "post-slug".to_owned(),
+            title: "Full title".to_owned(),
+            body: "Full body".to_owned(),
+        };
+
+        let saved_post = ItAliasedPost::save(post.clone())
+            .await
+            .expect("target save should succeed");
+        let post_base = ItAliasedPostBase::get("aliased-post")
+            .await
+            .expect("alias get should succeed on target table");
+        assert_eq!(saved_post.id, post_base.id);
+        assert_eq!(saved_post.slug, post_base.slug);
+        assert_eq!(saved_post.title, post_base.title);
+
+        let alias_lookup = Repo::<ItAliasedPostBase>::find_unique_id_for(&ItAliasedPostBase {
+            id: Id::from("ignored"),
+            slug: "post-slug".to_owned(),
+            title: "Different title ignored by lookup".to_owned(),
+        })
+        .await
+        .expect("alias lookup should resolve on shared table");
+        assert_eq!(
+            alias_lookup,
+            RecordId::new(ItAliasedPost::table_name(), "aliased-post")
+        );
+
+        let parent = ItAliasedForeignParent {
+            id: Id::from("aliased-parent"),
+            featured: Some(ItAliasedPostBase {
+                id: Id::from("aliased-post"),
+                slug: "post-slug".to_owned(),
+                title: "Full title".to_owned(),
+            }),
+            nested: Some(vec![vec![ItAliasedPostBase {
+                id: Id::from("aliased-post"),
+                slug: "post-slug".to_owned(),
+                title: "Full title".to_owned(),
+            }]]),
+        };
+
+        let saved_parent = ItAliasedForeignParent::save(parent.clone())
+            .await
+            .expect("aliased foreign parent save should succeed");
+        let loaded_parent = ItAliasedForeignParent::get("aliased-parent")
+            .await
+            .expect("aliased foreign parent get should succeed");
+        let raw_parent = load_aliased_foreign_parent_raw("aliased-parent").await;
+
+        assert_eq!(saved_parent, parent);
+        assert_eq!(loaded_parent, parent);
+
+        let expected_record = RecordId::new(ItAliasedPost::table_name(), "aliased-post");
+        assert_eq!(raw_parent.featured, Some(expected_record.clone()));
+        assert_eq!(raw_parent.nested, Some(vec![vec![expected_record]]));
+    });
 }
 
 #[test]

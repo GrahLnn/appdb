@@ -23,7 +23,7 @@ help: the following other types implement trait `ResolveRecordId`
    | impl ResolveRecordId for &RecordId {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `&appdb::prelude::RecordId`
    = note: required for `PlainChild` to implement `Bridge`
-   = note: required for `PlainChild` to implement `BindrefShape`
+   = note: required for `PlainChild` to implement `ForeignShape`
    = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `PlainChild: Bridge` is not satisfied
@@ -43,5 +43,5 @@ help: the trait `Crud` is implemented for `ParentModel`
 10 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
    |                                                              ^^^^^
    = note: required for `PlainChild` to implement `Bridge`
-   = note: required for `PlainChild` to implement `BindrefShape`
+   = note: required for `PlainChild` to implement `ForeignShape`
    = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)

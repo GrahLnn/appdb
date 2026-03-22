@@ -1,0 +1,5 @@
+error: #[table_as(...)] requires exactly one target type
+ --> tests/ui/store/table_as_invalid_target_rejected.rs:6:1
+  |
+6 | #[table_as("post")]
+  | ^^^^^^^^^^^^^^^^^^^
