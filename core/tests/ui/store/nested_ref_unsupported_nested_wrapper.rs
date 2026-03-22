@@ -11,7 +11,7 @@ struct ChildModel {
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ParentModel {
     id: Id,
-    #[store(ref)]
+    #[bindref]
     children: Option<Vec<ChildModel>>,
 }
 

@@ -1,4 +1,4 @@
-error: #[store(ref)] supports only Child, Option<Child>, and Vec<Child> where Child derives Store
+error: #[bindref] supports only Child, Option<Child>, and Vec<Child> where Child derives Store
   --> tests/ui/store/nested_ref_unsupported_nested_wrapper.rs:15:15
    |
 15 |     children: Option<Vec<ChildModel>>,
