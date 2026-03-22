@@ -13,7 +13,7 @@ use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
-use appdb::{Crud, Id, Relation, Sensitive, Store, StoredModel};
+use appdb::{Bridge, Crud, Id, Relation, Sensitive, Store, StoredModel};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
@@ -120,6 +120,39 @@ struct ItNestedVecParent {
 struct StoredNestedVecParentRow {
     id: Id,
     children: Vec<RecordId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItManualBindRefAlphaChild {
+    id: Id,
+    #[unique]
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItManualBindRefBetaChild {
+    #[unique]
+    code: String,
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Bridge)]
+enum ItManualBindRefChild {
+    Alpha(ItManualBindRefAlphaChild),
+    Beta(ItManualBindRefBetaChild),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItManualBindRefParent {
+    id: Id,
+    #[bindref]
+    child: ItManualBindRefChild,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredManualBindRefParentRow {
+    id: Id,
+    child: RecordId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
@@ -394,6 +427,35 @@ async fn load_nested_vec_parent_raw(id: &str) -> StoredNestedVecParentRow {
     StoredNestedVecParentRow {
         id: Id::from(id),
         children,
+    }
+}
+
+async fn load_manual_bindref_parent_raw(id: &str) -> StoredManualBindRefParentRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItManualBindRefParent::table_name())
+        .bind("id", id.to_owned());
+
+    let value = query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("manual bindref parent raw row query should succeed")
+        .expect("manual bindref parent raw row should exist");
+    let id = value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|raw| {
+            raw.split_once(':')
+                .map(|(_, key)| key.trim_matches('`').to_owned())
+        })
+        .expect("manual bindref parent raw row should contain normalized string id");
+    let child = value
+        .get("child")
+        .cloned()
+        .map(serde_json::from_value::<RecordId>)
+        .expect("manual bindref parent raw row should contain child")
+        .expect("manual bindref child should decode as record id");
+    StoredManualBindRefParentRow {
+        id: Id::from(id),
+        child,
     }
 }
 
@@ -967,6 +1029,90 @@ fn nested_ref_vec_and_collection_hydration() {
             .await
             .expect("optional nested list_limit should succeed");
         assert_eq!(optional_limited, vec![optional_parent]);
+    });
+}
+
+#[test]
+fn manual_bindref_enum_dispatcher_roundtrip_passes() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItManualBindRefParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItManualBindRefAlphaChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItManualBindRefBetaChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let alpha_parent = ItManualBindRefParent {
+            id: Id::from("manual-bindref-alpha-parent"),
+            child: ItManualBindRefChild::Alpha(ItManualBindRefAlphaChild {
+                id: Id::from("manual-bindref-alpha-child"),
+                name: "alpha".to_owned(),
+            }),
+        };
+
+        let alpha_child = match &alpha_parent.child {
+            ItManualBindRefChild::Alpha(child) => child.clone(),
+            ItManualBindRefChild::Beta(_) => {
+                unreachable!("alpha parent should contain alpha child")
+            }
+        };
+
+        Repo::<ItManualBindRefAlphaChild>::create(alpha_child)
+            .await
+            .expect("alpha child seed should succeed");
+
+        let saved_alpha = ItManualBindRefParent::save(alpha_parent.clone())
+            .await
+            .expect("alpha bindref save should succeed");
+        let loaded_alpha = ItManualBindRefParent::get("manual-bindref-alpha-parent")
+            .await
+            .expect("alpha bindref get should succeed");
+        let raw_alpha = load_manual_bindref_parent_raw("manual-bindref-alpha-parent").await;
+
+        assert_eq!(saved_alpha, alpha_parent);
+        assert_eq!(loaded_alpha, alpha_parent);
+        assert_eq!(
+            raw_alpha.child,
+            RecordId::new(
+                ItManualBindRefAlphaChild::table_name(),
+                "manual-bindref-alpha-child"
+            )
+        );
+
+        let beta_parent = ItManualBindRefParent {
+            id: Id::from("manual-bindref-beta-parent"),
+            child: ItManualBindRefChild::Beta(ItManualBindRefBetaChild {
+                code: "manual-bindref-beta-child".to_owned(),
+                note: Some("beta-note".to_owned()),
+            }),
+        };
+
+        let saved_beta = ItManualBindRefParent::save(beta_parent.clone())
+            .await
+            .expect("beta bindref save should succeed");
+        let loaded_beta = ItManualBindRefParent::get("manual-bindref-beta-parent")
+            .await
+            .expect("beta bindref get should succeed");
+        let raw_beta = load_manual_bindref_parent_raw("manual-bindref-beta-parent").await;
+        let beta_child_id =
+            Repo::<ItManualBindRefBetaChild>::find_unique_id_for(match &beta_parent.child {
+                ItManualBindRefChild::Beta(child) => child,
+                ItManualBindRefChild::Alpha(_) => {
+                    unreachable!("beta parent should contain beta child")
+                }
+            })
+            .await
+            .expect("beta child id should resolve");
+
+        assert_eq!(saved_beta, beta_parent);
+        assert_eq!(loaded_beta, beta_parent);
+        assert_eq!(raw_beta.child, beta_child_id);
     });
 }
 
