@@ -35,3 +35,5 @@ Validation surfaces, setup expectations, and concurrency guidance for user-testi
 - New derive syntax such as `#[bindref]` needs compile-pass and compile-fail evidence; do not rely on runtime tests alone for macro acceptance or diagnostics.
 - For enum/manual `Bridge` support, add one compile-pass or runtime roundtrip proving a dispatcher type can persist to a concrete child record id and hydrate back to the original variant, plus compile-fail coverage that illegal bindref+lookup combinations are rejected.
 - For `#[derive(Bridge)]`, add compile-pass coverage for single-field tuple enums and compile-fail coverage for unit variants, struct variants, multi-field tuple variants, and payloads that do not implement `Bridge`.
+- For recursive bindref containers, add runtime evidence for at least one deep `Option/Vec` shape and at least one `Box` / `HashMap` / `Result` shape, proving raw rows preserve the same container structure with `RecordId` leaves and that hydration restores the original nested values.
+- After this expansion, compile-fail coverage should move to wrappers still outside the allowed family rather than `Box` / `HashMap` / `Result` themselves.

@@ -27,11 +27,13 @@ Architectural decisions, discovered patterns, and mission-specific integration g
   - `#[bindref]` is explicit opt-in only; do not infer nested-reference behavior from child type alone.
   - Introduce a public `Bridge` seam in `core/src/lib.rs`; bindref fields persist by calling `persist_bindref` and hydrate by calling `hydrate_bindref`.
   - Provide the default concrete-model path through a blanket `Bridge` impl for Store children that already satisfy the existing `ModelMeta + ResolveRecordId + Crud + NestedStoreRefs` requirements.
-  - First-version supported nested shapes are exactly `Child`, `Option<Child>`, and `Vec<Child>`, where `Child: Bridge`.
+  - Bindref field shapes should support arbitrary recursive combinations of `Option<_>`, `Vec<_>`, `Box<_>`, `HashMap<K, V>`, and `Result<T, E>`, where the leaf types implement `Bridge`.
   - Add `#[derive(Bridge)]` for enum dispatcher types in this scope, but keep the supported shape narrow: each variant must be a single-field tuple variant whose payload already implements `Bridge`.
   - `#[derive(Bridge)]` should auto-generate `From<Payload>` conversions and table-name-based hydrate dispatch; reject unsupported enum shapes with focused derive-time diagnostics.
   - Parent-facing API values remain domain models; raw parent rows for nested refs must store only child `RecordId` values (or arrays thereof).
   - The default concrete-model bindref path keeps the current child resolution order: explicit child id first, otherwise existing `UniqueLookupMeta` lookup semantics; if no existing child matches, create exactly one child row.
   - Default read behavior is eager hydration for `get`, `list`, and `list_limit`.
   - Bindref fields should be excluded from automatic lookup metadata, and `#[unique]` must not be allowed on bindref fields.
+  - Recursive bindref support should live in a runtime helper trait adjacent to `Bridge`, not by hard-coding every container depth in the macro. Macros should validate only the allowed wrapper family (`Option`, `Vec`, `Box`, `HashMap`, `Result`) and generate recursive persist/hydrate calls.
+  - Stored field types for bindref containers must preserve the same wrapper shape while recursively replacing only the leaf type with `RecordId`.
   - First version does not promise transactional parent/child writes and does not expand nested semantics to `merge`, `patch`, or raw query helpers.

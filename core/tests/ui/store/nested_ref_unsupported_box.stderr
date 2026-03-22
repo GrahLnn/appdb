@@ -1,4 +1,4 @@
-error: #[bindref] supports only Child, Option<Child>, and Vec<Child> where Child derives Store
+error: #[bindref] supports recursive Option<_> / Vec<_> shapes whose leaf type implements appdb::Bridge
   --> tests/ui/store/nested_ref_unsupported_box.rs:15:12
    |
 15 |     child: Box<ChildModel>,

@@ -17,6 +17,12 @@ struct ParentModel {
     maybe_child: Option<ChildModel>,
     #[bindref]
     children: Vec<ChildModel>,
+    #[bindref]
+    maybe_children: Option<Vec<ChildModel>>,
+    #[bindref]
+    deeply_nested_children: Option<Vec<Vec<ChildModel>>>,
+    #[bindref]
+    nested_maybe_children: Vec<Option<ChildModel>>,
     inline_child: ChildModel,
 }
 
@@ -29,6 +35,15 @@ fn main() {
         },
         maybe_child: None,
         children: Vec::new(),
+        maybe_children: Some(Vec::new()),
+        deeply_nested_children: Some(vec![vec![ChildModel {
+            id: Id::from("deep-child"),
+            name: "gamma".to_owned(),
+        }]]),
+        nested_maybe_children: vec![Some(ChildModel {
+            id: Id::from("nested-child"),
+            name: "delta".to_owned(),
+        })],
         inline_child: ChildModel {
             id: Id::from("inline"),
             name: "beta".to_owned(),

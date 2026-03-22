@@ -123,6 +123,19 @@ struct StoredNestedVecParentRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItRecursiveBindrefParent {
+    id: Id,
+    #[bindref]
+    children: Option<Vec<Vec<ItNestedLookupChild>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredRecursiveBindrefParentRow {
+    id: Id,
+    children: Option<Vec<Vec<RecordId>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItManualBindRefAlphaChild {
     id: Id,
     #[unique]
@@ -425,6 +438,36 @@ async fn load_nested_vec_parent_raw(id: &str) -> StoredNestedVecParentRow {
         .expect("nested vec parent raw row should contain children")
         .expect("nested vec children should decode as record ids");
     StoredNestedVecParentRow {
+        id: Id::from(id),
+        children,
+    }
+}
+
+async fn load_recursive_bindref_parent_raw(id: &str) -> StoredRecursiveBindrefParentRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItRecursiveBindrefParent::table_name())
+        .bind("id", id.to_owned());
+
+    let value = query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("recursive bindref parent raw row query should succeed")
+        .expect("recursive bindref parent raw row should exist");
+    let id = value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|raw| {
+            raw.split_once(':')
+                .map(|(_, key)| key.trim_matches('`').to_owned())
+        })
+        .expect("recursive bindref parent raw row should contain normalized string id");
+    let children = value
+        .get("children")
+        .cloned()
+        .map(serde_json::from_value::<Option<Vec<Vec<RecordId>>>>)
+        .transpose()
+        .expect("recursive bindref children should decode as nested optional record ids")
+        .flatten();
+    StoredRecursiveBindrefParentRow {
         id: Id::from(id),
         children,
     }
@@ -1029,6 +1072,79 @@ fn nested_ref_vec_and_collection_hydration() {
             .await
             .expect("optional nested list_limit should succeed");
         assert_eq!(optional_limited, vec![optional_parent]);
+    });
+}
+
+#[test]
+fn nested_ref_recursive_option_vec_shapes_roundtrip() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecursiveBindrefParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedLookupChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let parent = ItRecursiveBindrefParent {
+            id: Id::from("recursive-bindref-parent"),
+            children: Some(vec![
+                vec![
+                    ItNestedLookupChild {
+                        code: "recursive-a".to_owned(),
+                        note: Some("note-a".to_owned()),
+                    },
+                    ItNestedLookupChild {
+                        code: "recursive-b".to_owned(),
+                        note: None,
+                    },
+                ],
+                vec![ItNestedLookupChild {
+                    code: "recursive-c".to_owned(),
+                    note: Some("note-c".to_owned()),
+                }],
+            ]),
+        };
+
+        let saved = ItRecursiveBindrefParent::save(parent.clone())
+            .await
+            .expect("recursive bindref save should succeed");
+        let loaded = ItRecursiveBindrefParent::get("recursive-bindref-parent")
+            .await
+            .expect("recursive bindref get should succeed");
+        let listed = ItRecursiveBindrefParent::list()
+            .await
+            .expect("recursive bindref list should succeed");
+        let raw = load_recursive_bindref_parent_raw("recursive-bindref-parent").await;
+
+        let expected_ids = parent
+            .children
+            .as_ref()
+            .expect("children should be present")
+            .iter()
+            .map(|row| async move {
+                let mut ids = Vec::with_capacity(row.len());
+                for child in row {
+                    ids.push(
+                        Repo::<ItNestedLookupChild>::find_unique_id_for(child)
+                            .await
+                            .expect("recursive child should resolve"),
+                    );
+                }
+                ids
+            });
+
+        let mut resolved_nested_ids = Vec::new();
+        for future in expected_ids {
+            resolved_nested_ids.push(future.await);
+        }
+
+        assert_eq!(saved, parent);
+        assert_eq!(loaded, parent);
+        assert_eq!(listed, vec![parent.clone()]);
+        assert_eq!(raw.children, Some(resolved_nested_ids));
     });
 }
 

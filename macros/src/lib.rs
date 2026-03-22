@@ -104,6 +104,16 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         })
         .collect::<syn::Result<Vec<_>>>()?;
 
+    if let Some(non_store_child) = store_ref_fields
+        .iter()
+        .find_map(|field| invalid_bindref_leaf_type(&field.kind.original_ty))
+    {
+        return Err(Error::new_spanned(
+            non_store_child,
+            BINDREF_BRIDGE_STORE_ONLY,
+        ));
+    }
+
     if let Some(invalid_field) = named_fields.iter().find(|field| {
         field_bindref_attr(field).ok().flatten().is_some() && has_unique_attr(&field.attrs)
     }) {
@@ -112,18 +122,6 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             ident,
             "#[bindref] fields cannot be used as #[unique] lookup keys",
         ));
-    }
-
-    let invalid_store_ref_child =
-        store_ref_fields
-            .iter()
-            .find_map(|field| match field.child_type() {
-                Type::Path(_) => None,
-                child_ty => Some(child_ty),
-            });
-
-    if let Some(non_store_child) = invalid_store_ref_child {
-        return Err(Error::new_spanned(non_store_child, BINDREF_ACCEPTED_SHAPES));
     }
 
     let auto_has_id_impl = id_fields.first().map(|field| {
@@ -266,25 +264,8 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
     let into_stored_assignments = named_fields.iter().map(|field| {
         let ident = field.ident.clone().expect("named field");
         match store_ref_field_kind(&ident, &store_ref_fields) {
-            Some(StoreRefKind::Direct(child_ty)) => quote! {
-                #ident: <#child_ty as ::appdb::Bridge>::persist_bindref(value.#ident).await?
-            },
-            Some(StoreRefKind::Option(child_ty)) => quote! {
-                #ident: match value.#ident {
-                    ::std::option::Option::Some(value) => ::std::option::Option::Some(
-                        <#child_ty as ::appdb::Bridge>::persist_bindref(value).await?
-                    ),
-                    ::std::option::Option::None => ::std::option::Option::None,
-                }
-            },
-            Some(StoreRefKind::Vec(child_ty)) => quote! {
-                #ident: {
-                    let mut items = ::std::vec::Vec::with_capacity(value.#ident.len());
-                    for value in value.#ident {
-                        items.push(<#child_ty as ::appdb::Bridge>::persist_bindref(value).await?);
-                    }
-                    items
-                }
+            Some(StoreRefKind { original_ty, .. }) => quote! {
+                #ident: <#original_ty as ::appdb::BindrefShape>::persist_bindref_shape(value.#ident).await?
             },
             None => quote! { #ident: value.#ident },
         }
@@ -293,25 +274,8 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
     let from_stored_assignments = named_fields.iter().map(|field| {
         let ident = field.ident.clone().expect("named field");
         match store_ref_field_kind(&ident, &store_ref_fields) {
-            Some(StoreRefKind::Direct(child_ty)) => quote! {
-                #ident: <#child_ty as ::appdb::Bridge>::hydrate_bindref(stored.#ident).await?
-            },
-            Some(StoreRefKind::Option(child_ty)) => quote! {
-                #ident: match stored.#ident {
-                    ::std::option::Option::Some(record_id) => {
-                        ::std::option::Option::Some(<#child_ty as ::appdb::Bridge>::hydrate_bindref(record_id).await?)
-                    }
-                    ::std::option::Option::None => ::std::option::Option::None,
-                }
-            },
-            Some(StoreRefKind::Vec(child_ty)) => quote! {
-                #ident: {
-                    let mut items = ::std::vec::Vec::with_capacity(stored.#ident.len());
-                    for record_id in stored.#ident {
-                        items.push(<#child_ty as ::appdb::Bridge>::hydrate_bindref(record_id).await?);
-                    }
-                    items
-                }
+            Some(StoreRefKind { original_ty, .. }) => quote! {
+                #ident: <#original_ty as ::appdb::BindrefShape>::hydrate_bindref_shape(stored.#ident).await?
             },
             None => quote! { #ident: stored.#ident },
         }
@@ -906,7 +870,7 @@ fn field_bindref_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
 
 fn validate_store_ref_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
     if attr.path().is_ident("bindref") {
-        return store_ref_child_type(&field.ty)
+        return bindref_leaf_type(&field.ty)
             .ok_or_else(|| Error::new_spanned(&field.ty, BINDREF_ACCEPTED_SHAPES));
     }
 
@@ -936,7 +900,10 @@ fn validate_store_ref_field(field: &Field, attr: &Attribute) -> syn::Result<Type
 }
 
 const BINDREF_ACCEPTED_SHAPES: &str =
-    "#[bindref] supports only Child, Option<Child>, and Vec<Child> where Child derives Store";
+    "#[bindref] supports recursive Option<_> / Vec<_> shapes whose leaf type implements appdb::Bridge";
+
+const BINDREF_BRIDGE_STORE_ONLY: &str =
+    "#[bindref] leaf types must derive Store or #[derive(Bridge)] dispatcher enums";
 
 const STORE_REF_LEGACY_REJECTED: &str =
     "#[store(ref)] is no longer supported; use #[bindref] for explicit nested references";
@@ -944,38 +911,25 @@ const STORE_REF_LEGACY_REJECTED: &str =
 const STORE_REF_UNSUPPORTED_ATTRIBUTE: &str = "unsupported nested-ref attribute; use #[bindref]";
 
 #[derive(Clone)]
-enum StoreRefKind {
-    Direct(Type),
-    Option(Type),
-    Vec(Type),
-}
-
-#[derive(Clone)]
 struct StoreRefField {
     ident: syn::Ident,
     kind: StoreRefKind,
 }
 
-impl StoreRefField {
-    fn child_type(&self) -> Type {
-        match &self.kind {
-            StoreRefKind::Direct(ty) | StoreRefKind::Option(ty) | StoreRefKind::Vec(ty) => {
-                ty.clone()
-            }
-        }
-    }
+#[derive(Clone)]
+struct StoreRefKind {
+    original_ty: Type,
+    stored_ty: Type,
 }
 
 fn parse_store_ref_field(field: &Field, attr: &Attribute) -> syn::Result<StoreRefField> {
     validate_store_ref_field(field, attr)?;
     let ident = field.ident.clone().expect("named field");
 
-    let kind = if let Some(inner) = option_inner_type(&field.ty) {
-        StoreRefKind::Option(inner.clone())
-    } else if let Some(inner) = vec_inner_type(&field.ty) {
-        StoreRefKind::Vec(inner.clone())
-    } else {
-        StoreRefKind::Direct(field.ty.clone())
+    let kind = StoreRefKind {
+        original_ty: field.ty.clone(),
+        stored_ty: bindref_stored_type(&field.ty)
+            .ok_or_else(|| Error::new_spanned(&field.ty, BINDREF_ACCEPTED_SHAPES))?,
     };
 
     Ok(StoreRefField { ident, kind })
@@ -994,27 +948,52 @@ fn store_ref_field_kind<'a>(
 fn stored_field_type(field: &Field, store_ref_fields: &[StoreRefField]) -> Type {
     let ident = field.ident.as_ref().expect("named field");
     match store_ref_field_kind(ident, store_ref_fields) {
-        Some(StoreRefKind::Direct(_)) => syn::parse_quote!(::surrealdb::types::RecordId),
-        Some(StoreRefKind::Option(_)) => {
-            syn::parse_quote!(::std::option::Option<::surrealdb::types::RecordId>)
-        }
-        Some(StoreRefKind::Vec(_)) => {
-            syn::parse_quote!(::std::vec::Vec<::surrealdb::types::RecordId>)
-        }
+        Some(StoreRefKind { stored_ty, .. }) => stored_ty.clone(),
         None => field.ty.clone(),
     }
 }
 
-fn store_ref_child_type(ty: &Type) -> Option<Type> {
+fn bindref_stored_type(ty: &Type) -> Option<Type> {
     if let Some(inner) = option_inner_type(ty) {
-        return direct_store_child_type(inner).cloned().map(Type::Path);
+        let inner = bindref_stored_type(inner)?;
+        return Some(syn::parse_quote!(::std::option::Option<#inner>));
     }
 
     if let Some(inner) = vec_inner_type(ty) {
-        return direct_store_child_type(inner).cloned().map(Type::Path);
+        let inner = bindref_stored_type(inner)?;
+        return Some(syn::parse_quote!(::std::vec::Vec<#inner>));
+    }
+
+    direct_store_child_type(ty)
+        .cloned()
+        .map(|_| syn::parse_quote!(::surrealdb::types::RecordId))
+}
+
+fn bindref_leaf_type(ty: &Type) -> Option<Type> {
+    if let Some(inner) = option_inner_type(ty) {
+        return bindref_leaf_type(inner);
+    }
+
+    if let Some(inner) = vec_inner_type(ty) {
+        return bindref_leaf_type(inner);
     }
 
     direct_store_child_type(ty).cloned().map(Type::Path)
+}
+
+fn invalid_bindref_leaf_type(ty: &Type) -> Option<Type> {
+    let leaf = bindref_leaf_type(ty)?;
+    match &leaf {
+        Type::Path(type_path) => {
+            let segment = type_path.path.segments.last()?;
+            if matches!(segment.arguments, PathArguments::None) {
+                None
+            } else {
+                Some(leaf)
+            }
+        }
+        _ => Some(leaf),
+    }
 }
 
 fn direct_store_child_type(ty: &Type) -> Option<&TypePath> {
