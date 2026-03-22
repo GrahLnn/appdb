@@ -3,16 +3,15 @@ use serde::{Deserialize, Serialize};
 use surrealdb::types::SurrealValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
-struct ChildModel {
+struct Post {
     id: Id,
-    name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
-struct ParentModel {
+#[table_as(Post)]
+#[table_as(Post)]
+struct PostBase {
     id: Id,
-    #[store(ref)]
-    child: ChildModel,
 }
 
 fn main() {}

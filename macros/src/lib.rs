@@ -13,7 +13,7 @@ pub fn derive_sensitive(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(Store, attributes(unique, secure, store, bindref))]
+#[proc_macro_derive(Store, attributes(unique, secure, foreign, table_as))]
 pub fn derive_store(input: TokenStream) -> TokenStream {
     match derive_store_impl(parse_macro_input!(input as DeriveInput)) {
         Ok(tokens) => tokens.into(),
@@ -40,6 +40,7 @@ pub fn derive_bridge(input: TokenStream) -> TokenStream {
 fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let struct_ident = input.ident;
     let vis = input.vis.clone();
+    let table_alias = table_alias_target(&input.attrs)?;
 
     let named_fields = match input.data {
         Data::Struct(data) => match data.fields {
@@ -95,18 +96,18 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         ));
     }
 
-    let store_ref_fields = named_fields
+    let foreign_fields = named_fields
         .iter()
-        .filter_map(|field| match field_bindref_attr(field) {
-            Ok(Some(attr)) => Some(parse_store_ref_field(field, attr)),
+        .filter_map(|field| match field_foreign_attr(field) {
+            Ok(Some(attr)) => Some(parse_foreign_field(field, attr)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
         })
         .collect::<syn::Result<Vec<_>>>()?;
 
-    if let Some(non_store_child) = store_ref_fields
+    if let Some(non_store_child) = foreign_fields
         .iter()
-        .find_map(|field| invalid_bindref_leaf_type(&field.kind.original_ty))
+        .find_map(|field| invalid_foreign_leaf_type(&field.kind.original_ty))
     {
         return Err(Error::new_spanned(
             non_store_child,
@@ -115,12 +116,12 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
     }
 
     if let Some(invalid_field) = named_fields.iter().find(|field| {
-        field_bindref_attr(field).ok().flatten().is_some() && has_unique_attr(&field.attrs)
+        field_foreign_attr(field).ok().flatten().is_some() && has_unique_attr(&field.attrs)
     }) {
         let ident = invalid_field.ident.as_ref().expect("named field");
         return Err(Error::new_spanned(
             ident,
-            "#[bindref] fields cannot be used as #[unique] lookup keys",
+            "#[foreign] fields cannot be used as #[unique] lookup keys",
         ));
     }
 
@@ -160,16 +161,27 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
     };
 
+    let resolved_table_name_expr = if let Some(target_ty) = &table_alias {
+        quote! { <#target_ty as ::appdb::model::meta::ModelMeta>::table_name() }
+    } else {
+        quote! {
+            {
+                let table = ::appdb::model::meta::default_table_name(stringify!(#struct_ident));
+                ::appdb::model::meta::register_table(stringify!(#struct_ident), table)
+            }
+        }
+    };
+
     let unique_schema_impls = unique_fields.iter().map(|field| {
         let field_name = field.to_string();
         let index_name = format!(
             "{}_{}_unique",
-            to_snake_case(&struct_ident.to_string()),
+            resolved_schema_table_name(&struct_ident, table_alias.as_ref()),
             field_name
         );
         let ddl = format!(
             "DEFINE INDEX IF NOT EXISTS {index_name} ON {} FIELDS {field_name} UNIQUE;",
-            to_snake_case(&struct_ident.to_string())
+            resolved_schema_table_name(&struct_ident, table_alias.as_ref())
         );
 
         quote! {
@@ -188,9 +200,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 let ident = field.ident.as_ref()?;
                 if ident == "id"
                     || secure_fields.iter().any(|secure| secure == ident)
-                    || store_ref_fields
-                        .iter()
-                        .any(|bindref| bindref.ident == *ident)
+                    || foreign_fields.iter().any(|foreign| foreign.ident == *ident)
                 {
                     None
                 } else {
@@ -205,7 +215,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             .collect::<Vec<_>>()
     };
 
-    let bindref_field_literals = store_ref_fields
+    let foreign_field_literals = foreign_fields
         .iter()
         .map(|field| field.ident.to_string())
         .map(|field| quote! { #field });
@@ -217,7 +227,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
     }
     let lookup_field_literals = lookup_fields.iter().map(|field| quote! { #field });
 
-    let stored_model_impl = if !store_ref_fields.is_empty() {
+    let stored_model_impl = if !foreign_fields.is_empty() {
         quote! {}
     } else if secure_field_count(&named_fields) > 0 {
         quote! {
@@ -257,15 +267,15 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 
     let stored_fields = named_fields.iter().map(|field| {
         let ident = field.ident.clone().expect("named field");
-        let ty = stored_field_type(field, &store_ref_fields);
+        let ty = stored_field_type(field, &foreign_fields);
         quote! { #ident: #ty }
     });
 
     let into_stored_assignments = named_fields.iter().map(|field| {
         let ident = field.ident.clone().expect("named field");
-        match store_ref_field_kind(&ident, &store_ref_fields) {
-            Some(StoreRefKind { original_ty, .. }) => quote! {
-                #ident: <#original_ty as ::appdb::BindrefShape>::persist_bindref_shape(value.#ident).await?
+        match foreign_field_kind(&ident, &foreign_fields) {
+            Some(ForeignFieldKind { original_ty, .. }) => quote! {
+                #ident: <#original_ty as ::appdb::ForeignShape>::persist_foreign_shape(value.#ident).await?
             },
             None => quote! { #ident: value.#ident },
         }
@@ -273,31 +283,31 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 
     let from_stored_assignments = named_fields.iter().map(|field| {
         let ident = field.ident.clone().expect("named field");
-        match store_ref_field_kind(&ident, &store_ref_fields) {
-            Some(StoreRefKind { original_ty, .. }) => quote! {
-                #ident: <#original_ty as ::appdb::BindrefShape>::hydrate_bindref_shape(stored.#ident).await?
+        match foreign_field_kind(&ident, &foreign_fields) {
+            Some(ForeignFieldKind { original_ty, .. }) => quote! {
+                #ident: <#original_ty as ::appdb::ForeignShape>::hydrate_foreign_shape(stored.#ident).await?
             },
             None => quote! { #ident: stored.#ident },
         }
     });
 
-    let decode_store_ref_fields = store_ref_fields.iter().map(|field| {
+    let decode_foreign_fields = foreign_fields.iter().map(|field| {
         let ident = field.ident.to_string();
         quote! {
             if let ::std::option::Option::Some(value) = map.get_mut(#ident) {
-                ::appdb::rewrite_store_ref_json_value(value);
+                ::appdb::rewrite_foreign_json_value(value);
             }
         }
     });
 
-    let nested_store_impl = if store_ref_fields.is_empty() {
+    let foreign_model_impl = if foreign_fields.is_empty() {
         quote! {
-            impl ::appdb::NestedStoreRefs for #struct_ident {
-                async fn persist_nested_refs(value: Self) -> ::anyhow::Result<Self::Stored> {
+            impl ::appdb::ForeignModel for #struct_ident {
+                async fn persist_foreign(value: Self) -> ::anyhow::Result<Self::Stored> {
                     <Self as ::appdb::StoredModel>::into_stored(value)
                 }
 
-                async fn hydrate_nested_refs(stored: Self::Stored) -> ::anyhow::Result<Self> {
+                async fn hydrate_foreign(stored: Self::Stored) -> ::anyhow::Result<Self> {
                     <Self as ::appdb::StoredModel>::from_stored(stored)
                 }
 
@@ -329,29 +339,29 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 type Stored = #stored_struct_ident;
 
                 fn into_stored(self) -> ::anyhow::Result<Self::Stored> {
-                    unreachable!("nested store refs require async persist_nested_refs")
+                    unreachable!("foreign fields require async persist_foreign")
                 }
 
                 fn from_stored(_stored: Self::Stored) -> ::anyhow::Result<Self> {
-                    unreachable!("nested store refs require async hydrate_nested_refs")
+                    unreachable!("foreign fields require async hydrate_foreign")
                 }
             }
 
-            impl ::appdb::NestedStoreRefs for #struct_ident {
-                async fn persist_nested_refs(value: Self) -> ::anyhow::Result<Self::Stored> {
+            impl ::appdb::ForeignModel for #struct_ident {
+                async fn persist_foreign(value: Self) -> ::anyhow::Result<Self::Stored> {
                     let value = value;
                     Ok(#stored_struct_ident {
                         #( #into_stored_assignments, )*
                     })
                 }
 
-                async fn hydrate_nested_refs(stored: Self::Stored) -> ::anyhow::Result<Self> {
+                async fn hydrate_foreign(stored: Self::Stored) -> ::anyhow::Result<Self> {
                     Ok(Self {
                         #( #from_stored_assignments, )*
                     })
                 }
 
-                fn has_nested_store_refs() -> bool {
+                fn has_foreign_fields() -> bool {
                     true
                 }
 
@@ -363,7 +373,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 {
                     let mut row = row.into_json_value();
                     if let ::serde_json::Value::Object(map) = &mut row {
-                        #( #decode_store_ref_fields )*
+                        #( #decode_foreign_fields )*
                     }
                     Ok(::serde_json::from_value(row)?)
                 }
@@ -381,7 +391,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             fn table_name() -> &'static str {
                 static TABLE_NAME: ::std::sync::OnceLock<&'static str> = ::std::sync::OnceLock::new();
                 TABLE_NAME.get_or_init(|| {
-                    let table = ::appdb::model::meta::default_table_name(stringify!(#struct_ident));
+                    let table = #resolved_table_name_expr;
                     ::appdb::model::meta::register_table(stringify!(#struct_ident), table)
                 })
             }
@@ -395,12 +405,12 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 &[ #( #lookup_field_literals ),* ]
             }
 
-            fn bindref_fields() -> &'static [&'static str] {
-                &[ #( #bindref_field_literals ),* ]
+            fn foreign_fields() -> &'static [&'static str] {
+                &[ #( #foreign_field_literals ),* ]
             }
         }
         #stored_model_impl
-        #nested_store_impl
+        #foreign_model_impl
 
         #auto_has_id_impl
         #resolve_record_id_impl
@@ -508,7 +518,7 @@ fn derive_bridge_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStrea
         let variant_ident = &variant.variant_ident;
 
         quote! {
-            Self::#variant_ident(value) => <_ as ::appdb::Bridge>::persist_bindref(value).await,
+            Self::#variant_ident(value) => <_ as ::appdb::Bridge>::persist_foreign(value).await,
         }
     });
 
@@ -519,7 +529,7 @@ fn derive_bridge_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStrea
         quote! {
             table if table == <#payload_ty as ::appdb::model::meta::ModelMeta>::table_name() => {
                 ::std::result::Result::Ok(Self::#variant_ident(
-                    <#payload_ty as ::appdb::Bridge>::hydrate_bindref(id).await?,
+                    <#payload_ty as ::appdb::Bridge>::hydrate_foreign(id).await?,
                 ))
             }
         }
@@ -530,19 +540,19 @@ fn derive_bridge_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStrea
 
         #[::async_trait::async_trait]
         impl ::appdb::Bridge for #enum_ident {
-            async fn persist_bindref(self) -> ::anyhow::Result<::surrealdb::types::RecordId> {
+            async fn persist_foreign(self) -> ::anyhow::Result<::surrealdb::types::RecordId> {
                 match self {
                     #( #persist_match_arms )*
                 }
             }
 
-            async fn hydrate_bindref(
+            async fn hydrate_foreign(
                 id: ::surrealdb::types::RecordId,
             ) -> ::anyhow::Result<Self> {
                 match id.table.to_string().as_str() {
                     #( #hydrate_match_arms, )*
                     table => ::anyhow::bail!(
-                        "unsupported bindref table `{table}` for enum dispatcher `{}`",
+                        "unsupported foreign table `{table}` for enum dispatcher `{}`",
                         ::std::stringify!(#enum_ident)
                     ),
                 }
@@ -847,120 +857,141 @@ fn has_unique_attr(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident("unique"))
 }
 
-fn field_bindref_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
-    let mut bindref_attr = None;
+fn table_alias_target(attrs: &[Attribute]) -> syn::Result<Option<Type>> {
+    let mut target = None;
 
-    for attr in &field.attrs {
-        if !(attr.path().is_ident("bindref") || attr.path().is_ident("store")) {
+    for attr in attrs {
+        if !attr.path().is_ident("table_as") {
             continue;
         }
 
-        if bindref_attr.is_some() {
+        if target.is_some() {
+            return Err(Error::new_spanned(
+                attr,
+                "duplicate #[table_as(...)] attribute is not supported",
+            ));
+        }
+
+        let parsed: Type = attr.parse_args().map_err(|_| {
+            Error::new_spanned(attr, "#[table_as(...)] requires exactly one target type")
+        })?;
+
+        match parsed {
+            Type::Path(TypePath { ref path, .. }) if !path.segments.is_empty() => {
+                target = Some(parsed);
+            }
+            _ => {
+                return Err(Error::new_spanned(
+                    parsed,
+                    "#[table_as(...)] target must be a type path",
+                ))
+            }
+        }
+    }
+
+    Ok(target)
+}
+
+fn resolved_schema_table_name(struct_ident: &syn::Ident, table_alias: Option<&Type>) -> String {
+    match table_alias {
+        Some(Type::Path(type_path)) => type_path
+            .path
+            .segments
+            .last()
+            .map(|segment| to_snake_case(&segment.ident.to_string()))
+            .unwrap_or_else(|| to_snake_case(&struct_ident.to_string())),
+        Some(_) => to_snake_case(&struct_ident.to_string()),
+        None => to_snake_case(&struct_ident.to_string()),
+    }
+}
+
+fn field_foreign_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
+    let mut foreign_attr = None;
+
+    for attr in &field.attrs {
+        if !attr.path().is_ident("foreign") {
+            continue;
+        }
+
+        if foreign_attr.is_some() {
             return Err(Error::new_spanned(
                 attr,
                 "duplicate nested-ref attribute is not supported",
             ));
         }
 
-        bindref_attr = Some(attr);
+        foreign_attr = Some(attr);
     }
 
-    Ok(bindref_attr)
+    Ok(foreign_attr)
 }
 
-fn validate_store_ref_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
-    if attr.path().is_ident("bindref") {
-        return bindref_leaf_type(&field.ty)
+fn validate_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
+    if attr.path().is_ident("foreign") {
+        return foreign_leaf_type(&field.ty)
             .ok_or_else(|| Error::new_spanned(&field.ty, BINDREF_ACCEPTED_SHAPES));
     }
 
-    if attr.path().is_ident("store") {
-        let mut saw_ref = false;
-
-        attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("ref") {
-                if saw_ref {
-                    return Err(meta.error("duplicate `ref` store option is not supported"));
-                }
-                saw_ref = true;
-                Ok(())
-            } else {
-                Err(meta.error(STORE_REF_LEGACY_REJECTED))
-            }
-        })?;
-
-        if saw_ref {
-            return Err(Error::new_spanned(attr, STORE_REF_LEGACY_REJECTED));
-        }
-
-        return Err(Error::new_spanned(attr, STORE_REF_UNSUPPORTED_ATTRIBUTE));
-    }
-
-    Err(Error::new_spanned(attr, STORE_REF_UNSUPPORTED_ATTRIBUTE))
+    Err(Error::new_spanned(attr, "unsupported foreign attribute"))
 }
 
 const BINDREF_ACCEPTED_SHAPES: &str =
-    "#[bindref] supports recursive Option<_> / Vec<_> shapes whose leaf type implements appdb::Bridge";
+    "#[foreign] supports recursive Option<_> / Vec<_> shapes whose leaf type implements appdb::Bridge";
 
 const BINDREF_BRIDGE_STORE_ONLY: &str =
-    "#[bindref] leaf types must derive Store or #[derive(Bridge)] dispatcher enums";
-
-const STORE_REF_LEGACY_REJECTED: &str =
-    "#[store(ref)] is no longer supported; use #[bindref] for explicit nested references";
-
-const STORE_REF_UNSUPPORTED_ATTRIBUTE: &str = "unsupported nested-ref attribute; use #[bindref]";
+    "#[foreign] leaf types must derive Store or #[derive(Bridge)] dispatcher enums";
 
 #[derive(Clone)]
-struct StoreRefField {
+struct ForeignField {
     ident: syn::Ident,
-    kind: StoreRefKind,
+    kind: ForeignFieldKind,
 }
 
 #[derive(Clone)]
-struct StoreRefKind {
+struct ForeignFieldKind {
     original_ty: Type,
     stored_ty: Type,
 }
 
-fn parse_store_ref_field(field: &Field, attr: &Attribute) -> syn::Result<StoreRefField> {
-    validate_store_ref_field(field, attr)?;
+fn parse_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<ForeignField> {
+    validate_foreign_field(field, attr)?;
     let ident = field.ident.clone().expect("named field");
 
-    let kind = StoreRefKind {
+    let kind = ForeignFieldKind {
         original_ty: field.ty.clone(),
-        stored_ty: bindref_stored_type(&field.ty)
+        stored_ty: foreign_stored_type(&field.ty)
             .ok_or_else(|| Error::new_spanned(&field.ty, BINDREF_ACCEPTED_SHAPES))?,
     };
 
-    Ok(StoreRefField { ident, kind })
+    Ok(ForeignField { ident, kind })
 }
 
-fn store_ref_field_kind<'a>(
+fn foreign_field_kind<'a>(
     ident: &syn::Ident,
-    fields: &'a [StoreRefField],
-) -> Option<&'a StoreRefKind> {
+    fields: &'a [ForeignField],
+) -> Option<&'a ForeignFieldKind> {
     fields
         .iter()
         .find(|field| field.ident == *ident)
         .map(|field| &field.kind)
 }
 
-fn stored_field_type(field: &Field, store_ref_fields: &[StoreRefField]) -> Type {
+fn stored_field_type(field: &Field, foreign_fields: &[ForeignField]) -> Type {
     let ident = field.ident.as_ref().expect("named field");
-    match store_ref_field_kind(ident, store_ref_fields) {
-        Some(StoreRefKind { stored_ty, .. }) => stored_ty.clone(),
+    match foreign_field_kind(ident, foreign_fields) {
+        Some(ForeignFieldKind { stored_ty, .. }) => stored_ty.clone(),
         None => field.ty.clone(),
     }
 }
 
-fn bindref_stored_type(ty: &Type) -> Option<Type> {
+fn foreign_stored_type(ty: &Type) -> Option<Type> {
     if let Some(inner) = option_inner_type(ty) {
-        let inner = bindref_stored_type(inner)?;
+        let inner = foreign_stored_type(inner)?;
         return Some(syn::parse_quote!(::std::option::Option<#inner>));
     }
 
     if let Some(inner) = vec_inner_type(ty) {
-        let inner = bindref_stored_type(inner)?;
+        let inner = foreign_stored_type(inner)?;
         return Some(syn::parse_quote!(::std::vec::Vec<#inner>));
     }
 
@@ -969,20 +1000,20 @@ fn bindref_stored_type(ty: &Type) -> Option<Type> {
         .map(|_| syn::parse_quote!(::surrealdb::types::RecordId))
 }
 
-fn bindref_leaf_type(ty: &Type) -> Option<Type> {
+fn foreign_leaf_type(ty: &Type) -> Option<Type> {
     if let Some(inner) = option_inner_type(ty) {
-        return bindref_leaf_type(inner);
+        return foreign_leaf_type(inner);
     }
 
     if let Some(inner) = vec_inner_type(ty) {
-        return bindref_leaf_type(inner);
+        return foreign_leaf_type(inner);
     }
 
     direct_store_child_type(ty).cloned().map(Type::Path)
 }
 
-fn invalid_bindref_leaf_type(ty: &Type) -> Option<Type> {
-    let leaf = bindref_leaf_type(ty)?;
+fn invalid_foreign_leaf_type(ty: &Type) -> Option<Type> {
+    let leaf = foreign_leaf_type(ty)?;
     match &leaf {
         Type::Path(type_path) => {
             let segment = type_path.path.segments.last()?;

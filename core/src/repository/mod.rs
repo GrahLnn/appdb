@@ -11,7 +11,7 @@ use crate::connection::get_db;
 use crate::error::DBError;
 use crate::model::meta::{HasId, ModelMeta, UniqueLookupMeta};
 use crate::query::builder::QueryKind;
-use crate::{NestedStoreRefs, StoredModel};
+use crate::{ForeignModel, StoredModel};
 
 fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
     let value = serde_json::to_value(data)?;
@@ -92,14 +92,14 @@ fn record_id_key_to_json_value(key: &RecordIdKey) -> Value {
     }
 }
 
-fn normalize_store_ref_shapes(value: &mut serde_json::Value) {
-    crate::rewrite_store_ref_json_value(value);
+fn normalize_foreign_shapes(value: &mut serde_json::Value) {
+    crate::rewrite_foreign_json_value(value);
     normalize_nested_record_id_json(value);
 }
 
 async fn decode_hydrated_row<T>(mut row: serde_json::Value) -> Result<T>
 where
-    T: NestedStoreRefs,
+    T: ForeignModel,
 {
     if let serde_json::Value::Object(map) = &mut row {
         if let Some(id) = map.get_mut("id") {
@@ -113,11 +113,11 @@ where
 
         for (field, value) in map.iter_mut() {
             if field != "id" {
-                normalize_store_ref_shapes(value);
+                normalize_foreign_shapes(value);
             }
         }
     }
-    T::hydrate_nested_refs(serde_json::from_value(row)?).await
+    T::hydrate_foreign(serde_json::from_value(row)?).await
 }
 
 fn prepare_save_parts<T>(table: &str, data: T) -> Result<(RecordId, Value, Value)>
@@ -137,7 +137,7 @@ where
 
 fn decode_saved_row<T>(row: SurrealDbValue, id: Value) -> Result<T::Stored>
 where
-    T: NestedStoreRefs,
+    T: ForeignModel,
     T::Stored: serde::de::DeserializeOwned,
 {
     let mut row = row.into_json_value();
@@ -145,11 +145,11 @@ where
         map.insert("id".to_owned(), id);
     }
 
-    if T::has_nested_store_refs() {
+    if T::has_foreign_fields() {
         if let Value::Object(map) = &mut row {
             for (field, value) in map.iter_mut() {
                 if field != "id" {
-                    normalize_store_ref_shapes(value);
+                    normalize_foreign_shapes(value);
                 }
             }
         }
@@ -223,24 +223,24 @@ where
 
 async fn stored_rows_to_public_hydrated<T>(rows: Vec<T::Stored>) -> Result<Vec<T>>
 where
-    T: NestedStoreRefs,
+    T: ForeignModel,
 {
     let mut values = Vec::with_capacity(rows.len());
     for row in rows {
-        values.push(T::hydrate_nested_refs(row).await?);
+        values.push(T::hydrate_foreign(row).await?);
     }
     Ok(values)
 }
 
 async fn raw_rows_to_public_hydrated<T>(rows: Vec<SurrealDbValue>) -> Result<Vec<T>>
 where
-    T: NestedStoreRefs,
+    T: ForeignModel,
     T::Stored: serde::de::DeserializeOwned,
 {
     let mut values = Vec::with_capacity(rows.len());
     for row in rows {
         let stored = T::decode_stored_row(row)?;
-        values.push(T::hydrate_nested_refs(stored).await?);
+        values.push(T::hydrate_foreign(stored).await?);
     }
     Ok(values)
 }
@@ -251,7 +251,7 @@ pub struct Repo<T>(PhantomData<T>);
 
 impl<T> Repo<T>
 where
-    T: ModelMeta + StoredModel + NestedStoreRefs,
+    T: ModelMeta + StoredModel + ForeignModel,
 {
     /// Creates a new row in the model table.
     /// Creates a new row in the model table.
@@ -259,10 +259,10 @@ where
         let db = get_db()?;
         let created: Option<T::Stored> = db
             .create(T::table_name())
-            .content(T::persist_nested_refs(data).await?)
+            .content(T::persist_foreign(data).await?)
             .await?;
         match created {
-            Some(stored) => Ok(T::hydrate_nested_refs(stored).await?),
+            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
             None => Err(DBError::EmptyResult("create").into()),
         }
     }
@@ -279,7 +279,7 @@ where
         }
 
         let db = get_db()?;
-        let stored = T::persist_nested_refs(data).await?;
+        let stored = T::persist_foreign(data).await?;
         let created: Option<RecordId> = db
             .query(QueryKind::create_return_id(T::table_name()))
             .bind(("table", Table::from(T::table_name())))
@@ -295,10 +295,10 @@ where
         let db = get_db()?;
         let created: Option<T::Stored> = db
             .create(id)
-            .content(T::persist_nested_refs(data).await?)
+            .content(T::persist_foreign(data).await?)
             .await?;
         match created {
-            Some(stored) => Ok(T::hydrate_nested_refs(stored).await?),
+            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
             None => Err(DBError::EmptyResult("create_at").into()),
         }
     }
@@ -313,10 +313,10 @@ where
         let id = data.id();
         let updated: Option<T::Stored> = db
             .upsert(id)
-            .content(T::persist_nested_refs(data).await?)
+            .content(T::persist_foreign(data).await?)
             .await?;
         match updated {
-            Some(stored) => Ok(T::hydrate_nested_refs(stored).await?),
+            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
             None => Err(DBError::EmptyResult("upsert").into()),
         }
     }
@@ -326,10 +326,10 @@ where
         let db = get_db()?;
         let updated: Option<T::Stored> = db
             .upsert(id)
-            .content(T::persist_nested_refs(data).await?)
+            .content(T::persist_foreign(data).await?)
             .await?;
         match updated {
-            Some(stored) => Ok(T::hydrate_nested_refs(stored).await?),
+            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
             None => Err(DBError::EmptyResult("upsert_at").into()),
         }
     }
@@ -340,7 +340,7 @@ where
         let db = get_db()?;
         let record: Option<T::Stored> = db.select(record).await?;
         match record {
-            Some(stored) => Ok(T::hydrate_nested_refs(stored).await?),
+            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
             None => Err(DBError::NotFound.into()),
         }
     }
@@ -350,10 +350,10 @@ where
         let db = get_db()?;
         let updated: Option<T::Stored> = db
             .update(id)
-            .content(T::persist_nested_refs(data).await?)
+            .content(T::persist_foreign(data).await?)
             .await?;
         match updated {
-            Some(stored) => Ok(T::hydrate_nested_refs(stored).await?),
+            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
             None => Err(DBError::NotFound.into()),
         }
     }
@@ -390,7 +390,7 @@ where
         let db = get_db()?;
         let mut stored = Vec::with_capacity(data.len());
         for item in data {
-            stored.push(T::persist_nested_refs(item).await?);
+            stored.push(T::persist_foreign(item).await?);
         }
         let created: Vec<T::Stored> = db.insert(T::table_name()).content(stored).await?;
         stored_rows_to_public_hydrated::<T>(created).await
@@ -406,7 +406,7 @@ where
         for chunk in data.chunks(chunk_size) {
             let mut chunk_clone = Vec::with_capacity(chunk.len());
             for item in chunk.iter().cloned() {
-                chunk_clone.push(T::persist_nested_refs(item).await?);
+                chunk_clone.push(T::persist_foreign(item).await?);
             }
             let inserted: Vec<T::Stored> = db
                 .query(QueryKind::insert(T::table_name()))
@@ -436,7 +436,7 @@ where
         for chunk in data.chunks(chunk_size) {
             let mut chunk_clone = Vec::with_capacity(chunk.len());
             for item in chunk.iter().cloned() {
-                chunk_clone.push(T::persist_nested_refs(item).await?);
+                chunk_clone.push(T::persist_foreign(item).await?);
             }
             let inserted: Vec<T::Stored> = db
                 .query(QueryKind::insert_or_replace(T::table_name(), keys.clone()))
@@ -554,18 +554,18 @@ where
 
 impl<T> Repo<T>
 where
-    T: ModelMeta + StoredModel + NestedStoreRefs,
+    T: ModelMeta + StoredModel + ForeignModel,
 {
     /// Upserts one model using its `id` field and returns the normalized row.
     /// Saves a model by its `id` field and returns the normalized row.
     pub async fn save(data: T) -> Result<T> {
         let db = get_db()?;
-        let stored = T::persist_nested_refs(data).await?;
+        let stored = T::persist_foreign(data).await?;
         let (record, content, id) = prepare_save_parts(T::table_name(), stored)?;
         let row: Option<SurrealDbValue> = db.upsert(record).content(content).await?;
         let row = row.ok_or(DBError::EmptyResult("save"))?;
         let stored = decode_saved_row::<T>(row, id)?;
-        T::hydrate_nested_refs(stored).await
+        T::hydrate_foreign(stored).await
     }
 
     /// Fetches one model by raw id key and normalizes the returned `id`.
@@ -578,7 +578,7 @@ where
         let db = get_db()?;
         let key: RecordIdKey = id.into();
         let record = RecordId::new(T::table_name(), key.clone());
-        if T::has_nested_store_refs() {
+        if T::has_foreign_fields() {
             let stmt = crate::query::RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
                 .bind("table", T::table_name())
                 .bind("id", key);
@@ -594,7 +594,7 @@ where
             .check()?;
         let row: Option<T::Stored> = result.take(0)?;
         match row {
-            Some(stored) => Ok(T::hydrate_nested_refs(stored).await?),
+            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
             None => Err(DBError::NotFound.into()),
         }
     }
@@ -602,7 +602,7 @@ where
     /// Lists all rows with a normalized `id` field.
     /// Lists all rows with normalized `id` values.
     pub async fn list() -> Result<Vec<T>> {
-        if T::has_nested_store_refs() {
+        if T::has_foreign_fields() {
             let db = get_db()?;
             let mut result = db
                 .query(QueryKind::select_all_with_id())
@@ -626,7 +626,7 @@ where
     /// Lists up to `count` rows with a normalized `id` field.
     /// Lists up to `count` rows with normalized `id` values.
     pub async fn list_limit(count: i64) -> Result<Vec<T>> {
-        if T::has_nested_store_refs() {
+        if T::has_foreign_fields() {
             let db = get_db()?;
             let mut result = db
                 .query(QueryKind::select_limit_with_id())
@@ -666,7 +666,7 @@ where
 
             for (idx, row) in chunk.iter().cloned().enumerate() {
                 let (record, content, id) =
-                    prepare_save_parts(T::table_name(), T::persist_nested_refs(row).await?)?;
+                    prepare_save_parts(T::table_name(), T::persist_foreign(row).await?)?;
                 sql.push_str(&format!(
                     "UPSERT ONLY $record_{idx} CONTENT $data_{idx} RETURN AFTER;"
                 ));
@@ -686,7 +686,7 @@ where
                 let row: Option<SurrealDbValue> = result.take(idx)?;
                 let row = row.ok_or(DBError::EmptyResult("save_many"))?;
                 let stored = decode_saved_row::<T>(row, id)?;
-                inserted_all.push(T::hydrate_nested_refs(stored).await?);
+                inserted_all.push(T::hydrate_foreign(stored).await?);
             }
         }
 
@@ -775,22 +775,22 @@ mod tests {
         }
     }
 
-    impl crate::NestedStoreRefs for AutoTableModel {
-        async fn persist_nested_refs(value: Self) -> anyhow::Result<Self::Stored> {
+    impl crate::ForeignModel for AutoTableModel {
+        async fn persist_foreign(value: Self) -> anyhow::Result<Self::Stored> {
             Ok(value)
         }
 
-        async fn hydrate_nested_refs(stored: Self::Stored) -> anyhow::Result<Self> {
+        async fn hydrate_foreign(stored: Self::Stored) -> anyhow::Result<Self> {
             Ok(stored)
         }
     }
 
-    impl crate::NestedStoreRefs for CustomTableModel {
-        async fn persist_nested_refs(value: Self) -> anyhow::Result<Self::Stored> {
+    impl crate::ForeignModel for CustomTableModel {
+        async fn persist_foreign(value: Self) -> anyhow::Result<Self::Stored> {
             Ok(value)
         }
 
-        async fn hydrate_nested_refs(stored: Self::Stored) -> anyhow::Result<Self> {
+        async fn hydrate_foreign(stored: Self::Stored) -> anyhow::Result<Self> {
             Ok(stored)
         }
     }
@@ -864,7 +864,7 @@ mod tests {
 
 #[async_trait]
 /// Convenience trait that forwards instance-level CRUD calls to [`Repo<Self>`](Repo).
-pub trait Crud: ModelMeta + StoredModel + NestedStoreRefs {
+pub trait Crud: ModelMeta + StoredModel + ForeignModel {
     /// Builds a full record id for this model table.
     fn record_id<T>(id: T) -> RecordId
     where

@@ -1,0 +1,5 @@
+error: duplicate #[table_as(...)] attribute is not supported
+  --> tests/ui/store/table_as_duplicate_rejected.rs:12:1
+   |
+12 | #[table_as(Post)]
+   | ^^^^^^^^^^^^^^^^^

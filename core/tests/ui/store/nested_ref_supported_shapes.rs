@@ -11,17 +11,17 @@ struct ChildModel {
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct ParentModel {
     id: Id,
-    #[bindref]
+    #[foreign]
     child: ChildModel,
-    #[bindref]
+    #[foreign]
     maybe_child: Option<ChildModel>,
-    #[bindref]
+    #[foreign]
     children: Vec<ChildModel>,
-    #[bindref]
+    #[foreign]
     maybe_children: Option<Vec<ChildModel>>,
-    #[bindref]
+    #[foreign]
     deeply_nested_children: Option<Vec<Vec<ChildModel>>>,
-    #[bindref]
+    #[foreign]
     nested_maybe_children: Vec<Option<ChildModel>>,
     inline_child: ChildModel,
 }

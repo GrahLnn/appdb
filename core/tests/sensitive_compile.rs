@@ -2,10 +2,13 @@
 fn sensitive_macro_rules_are_enforced() {
     let tests = trybuild::TestCases::new();
     tests.pass("tests/ui/store/nested_ref_supported_shapes.rs");
-    tests.pass("tests/ui/store/nested_ref_public_bindref.rs");
+    tests.pass("tests/ui/store/nested_ref_public_foreign.rs");
+    tests.pass("tests/ui/store/table_as_supported.rs");
     tests.pass("tests/ui/store/derive_bridge_enum_dispatcher.rs");
     tests.compile_fail("tests/ui/store/nested_ref_legacy_attr_rejected.rs");
-    tests.compile_fail("tests/ui/store/nested_ref_bindref_unique_rejected.rs");
+    tests.compile_fail("tests/ui/store/nested_ref_foreign_unique_rejected.rs");
+    tests.compile_fail("tests/ui/store/table_as_duplicate_rejected.rs");
+    tests.compile_fail("tests/ui/store/table_as_invalid_target_rejected.rs");
     tests.compile_fail("tests/ui/store/derive_bridge_unit_variant.rs");
     tests.compile_fail("tests/ui/store/derive_bridge_struct_variant.rs");
     tests.compile_fail("tests/ui/store/derive_bridge_multi_field_variant.rs");
@@ -17,6 +20,7 @@ fn sensitive_macro_rules_are_enforced() {
     tests.compile_fail("tests/ui/sensitive/no_legal_non_secure_lookup.rs");
     tests.compile_fail("tests/ui/store/multiple_id_fields.rs");
     tests.compile_fail("tests/ui/store/nested_ref_non_store_child.rs");
+    tests.compile_fail("tests/ui/store/nested_ref_enum_child_unsupported.rs");
     tests.compile_fail("tests/ui/store/nested_ref_unsupported_box.rs");
     tests.compile_fail("tests/ui/store/nested_ref_unsupported_nested_wrapper.rs");
 }
