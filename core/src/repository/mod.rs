@@ -102,21 +102,13 @@ where
     T: ForeignModel,
 {
     if let serde_json::Value::Object(map) = &mut row {
-        if let Some(id) = map.get_mut("id") {
-            *id = match id {
-                serde_json::Value::String(_) => {
-                    serde_json::Value::String(appdb_id_from_record_string(id))
-                }
-                _ => id.clone(),
-            };
-        }
-
         for (field, value) in map.iter_mut() {
             if field != "id" {
                 normalize_foreign_shapes(value);
             }
         }
     }
+    crate::serde_utils::id::normalize_public_id_value(&mut row);
     T::hydrate_foreign(serde_json::from_value(row)?).await
 }
 
@@ -165,7 +157,6 @@ where
         }
     }
 
-    crate::decode_record_link_value(&mut row);
     Ok(serde_json::from_value(row)?)
 }
 
@@ -173,16 +164,6 @@ pub(crate) async fn record_exists(record: RecordId) -> Result<bool> {
     let db = get_db()?;
     let existing: Option<SurrealDbValue> = db.select(record).await?;
     Ok(existing.is_some())
-}
-
-fn appdb_id_from_record_string(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(text) => text
-            .split_once(':')
-            .map(|(_, id)| id.trim_matches('`').to_owned())
-            .unwrap_or_else(|| text.clone()),
-        other => other.to_string(),
-    }
 }
 
 fn collect_lookup_parts<T>(data: &T) -> Result<Vec<(String, Value)>>
@@ -342,7 +323,9 @@ where
         match record {
             Some(stored) => {
                 let stored = decode_stored_row_value::<T>(stored.into_json_value(), None)?;
-                Ok(T::hydrate_foreign(stored).await?)
+                let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
+                crate::serde_utils::id::normalize_public_id_value(&mut value);
+                Ok(serde_json::from_value(value)?)
             }
             None => Err(DBError::NotFound.into()),
         }
@@ -618,7 +601,11 @@ where
             .check()?;
         let row: Option<T::Stored> = result.take(0)?;
         match row {
-            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
+            Some(stored) => {
+                let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
+                crate::serde_utils::id::normalize_public_id_value(&mut value);
+                Ok(serde_json::from_value(value)?)
+            }
             None => Err(DBError::NotFound.into()),
         }
     }
