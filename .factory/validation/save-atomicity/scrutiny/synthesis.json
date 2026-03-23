@@ -1,6 +1,6 @@
 {
   "milestone": "save-atomicity",
-  "round": 2,
+  "round": 3,
   "status": "fail",
   "validatorsRun": {
     "test": {
@@ -20,43 +20,67 @@
     }
   },
   "reviewsSummary": {
-    "total": 2,
-    "passed": 1,
-    "failed": 1,
+    "total": 3,
+    "passed": 0,
+    "failed": 3,
     "failedFeatures": [
-      "milestone-a-atomic-save-and-retry-cleanup"
+      "milestone-a-fresh-save-and-explicit-id-foreign-persist",
+      "milestone-a-commit-boundary-single-save-atomicity",
+      "milestone-a-commit-boundary-batch-save-and-retry"
     ]
   },
   "blockingIssues": [
     {
-      "featureId": "milestone-a-atomic-save-and-retry-cleanup",
+      "featureId": "milestone-a-fresh-save-and-explicit-id-foreign-persist",
       "severity": "blocking",
-      "description": "Repo::save commits the UPSERT transaction before calling hydrate_foreign, then tries to repair failures with db.delete on the parent and tracked foreign rows. That is explicitly the forbidden post-commit compensating-delete design, so the commit boundary is not all-or-nothing as required."
+      "description": "`fresh_db_save_requires_no_manual_define_table` reuses `ensure_db()` instead of reinitializing a fresh embedded database, so it does not prove first-save behavior on a clean DB as required by VAL-SAVE-001."
     },
     {
-      "featureId": "milestone-a-atomic-save-and-retry-cleanup",
+      "featureId": "milestone-a-commit-boundary-single-save-atomicity",
       "severity": "blocking",
-      "description": "Repo::save_many likewise commits the batch before hydrate_foreign runs, and on failure it issues best-effort deletes for parents and tracked children. This leaves atomicity dependent on cleanup succeeding after commit instead of on the transaction boundary itself."
+      "description": "`Repo::save` still commits before `T::hydrate_foreign(stored).await` and repairs failures with post-commit deletes, violating the required true commit-boundary atomicity for VAL-SAVE-004."
     },
     {
-      "featureId": "milestone-a-atomic-save-and-retry-cleanup",
+      "featureId": "milestone-a-commit-boundary-single-save-atomicity",
       "severity": "blocking",
-      "description": "The new regressions only assert the database is clean after the compensating deletes complete. They do not prove the required stronger contract that the public error path never exposes already-committed residue without relying on post-commit cleanup."
+      "description": "The single-save regression only proves residue cleanup after a forced hydrate failure; it does not prove that the public error path cannot expose already-committed state without relying on repair."
+    },
+    {
+      "featureId": "milestone-a-commit-boundary-batch-save-and-retry",
+      "severity": "blocking",
+      "description": "`Repo::save_many` still commits before hydrating returned rows and then compensates by deleting parents and tracked children on failure, so batch atomicity and retry semantics still depend on post-commit cleanup instead of an authoritative transaction boundary."
+    },
+    {
+      "featureId": "milestone-a-commit-boundary-batch-save-and-retry",
+      "severity": "blocking",
+      "description": "The batch/retry feature depends on the same underlying `Repo::save` path, which still uses post-commit cleanup, so VAL-SAVE-005 and VAL-CROSS-002 remain unmet at the commit-boundary level."
     }
   ],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
+      "target": "skills",
+      "suggestion": "Clarify that fresh-DB regressions must actively reset or reinitialize the embedded database rather than reusing shared helpers like `ensure_db()` that may carry prior schema state.",
+      "evidence": "Review of `milestone-a-fresh-save-and-explicit-id-foreign-persist` found the committed fresh-db test at `core/tests/integration_db.rs:994-1013` uses `ensure_db()` and therefore does not establish a clean first-save precondition.",
+      "isSystemic": false
+    },
+    {
+      "target": "skills",
+      "suggestion": "Strengthen atomicity worker guidance to require code-level proof that commit occurs only after failure-prone hydrate/return-shaping work is no longer possible, rather than accepting residue-cleanup tests as sufficient evidence.",
+      "evidence": "Both commit-boundary reviews found `Repo::save`/`Repo::save_many` still commit before hydration and rely on compensating deletes, yet prior worker handoffs treated passing cleanup regressions as success.",
+      "isSystemic": true
+    },
+    {
       "target": "AGENTS.md / skill guidance",
       "suggestion": "Clarify shared GitNexus fallback guidance so workers may use pure `git diff`-based review when no GitNexus tooling is available at all, and distinguish that case from partial-tool fallback.",
-      "evidence": "Handoff skillFeedback for worker session d16b96e4-3c33-41db-becf-442d4d839435 says no gitnexus_* tools were available; C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md step 2 currently assumes some GitNexus impact/context commands may still be available.",
+      "evidence": "Multiple worker handoffs reported no available `gitnexus_*` commands in this environment and fell back to `git diff`/`git status` inspection.",
       "isSystemic": true
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "The worker reported the feature as already satisfying a true atomic boundary even though the reviewed commit still uses post-commit delete cleanup in save/save_many. The skill/procedure may need a sharper check that commit-boundary atomicity is evidenced in code, not inferred from passing residue-cleanup tests.",
-      "reason": "ambiguous-or-not-actioned-by-scrutiny"
+      "observation": "Mission AGENTS guidance should be updated to restate that post-commit compensating deletes are forbidden for atomicity.",
+      "reason": "already-documented"
     }
   ],
   "previousRound": "C:/Users/admin/appdb/.factory/validation/save-atomicity/scrutiny/synthesis.json"
