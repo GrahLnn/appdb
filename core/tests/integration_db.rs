@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use appdb::connection::{get_db, reinit_db, DbRuntime};
+use appdb::connection::{get_db, reinit_db, reinit_db_with_options, DbRuntime, InitDbOptions};
 use appdb::crypto::{
     clear_crypto_context_registry, register_crypto_context_for, CryptoContext, SensitiveFieldTag,
     SensitiveModelTag,
@@ -1357,6 +1357,43 @@ fn foreign_existing_child_is_reused_without_duplication() {
         assert_eq!(before_ids, vec![seeded_id.clone()]);
         assert_eq!(after_ids, vec![seeded_id.clone()]);
         assert_eq!(raw.child, seeded_id);
+    });
+}
+
+#[test]
+fn schemaless_foreign_save_bootstraps_store_child_tables() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        reinit_db_with_options(test_db_path(), InitDbOptions::default())
+            .await
+            .expect("schemaless database should initialize");
+
+        let parent = ItNestedParent {
+            id: Id::from("schemaless-parent"),
+            child: ItNestedIdChild {
+                id: Id::from("schemaless-child"),
+                name: "schemaless-created-on-save".to_owned(),
+            },
+        };
+
+        let saved = ItNestedParent::save(parent.clone())
+            .await
+            .expect("schemaless save should bootstrap parent and child store tables");
+        let loaded = ItNestedParent::get("schemaless-parent")
+            .await
+            .expect("schemaless get should hydrate saved parent");
+        let raw = load_nested_parent_raw("schemaless-parent").await;
+        let child = Repo::<ItNestedIdChild>::get("schemaless-child")
+            .await
+            .expect("schemaless foreign child should exist after save");
+
+        assert_eq!(saved, parent);
+        assert_eq!(loaded, parent);
+        assert_eq!(child, parent.child);
+        assert_eq!(
+            raw.child,
+            RecordId::new(ItNestedIdChild::table_name(), "schemaless-child")
+        );
     });
 }
 
