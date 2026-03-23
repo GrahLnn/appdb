@@ -1,21 +1,15 @@
 {
   "featureId": "milestone-c-strict-record-link-string-classification",
-  "reviewedAt": "2026-03-23T14:51:47.121398+00:00",
-  "commitId": "7c69d7a31c3886424e6bacb93dea5ef49b6f8c22",
+  "reviewedAt": "2026-03-23T16:21:32.806363+00:00",
+  "commitId": "3e529fa",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "pass",
   "codeReview": {
-    "summary": "Implementation satisfies the feature requirements: record-link parsing now only accepts explicit backtick-delimited link strings, and regression coverage proves ordinary colon payloads roundtrip unchanged while true record-link strings still hydrate foreign models.",
+    "summary": "The commit tightens global record-link rewriting to a syntax-based subset while preserving arbitrary-table string-form RecordId compatibility through the field-aware deserialize seam. The added regression coverage demonstrates both halves of VAL-HYDRATE-006: ordinary colon strings roundtrip unchanged and true string-form links still hydrate foreign models, while graph/repository RecordId flows remain intact.",
     "issues": []
   },
-  "sharedStateObservations": [
-    {
-      "area": "skills",
-      "observation": "The rust-library-worker skill still tells workers to run the full services.yaml validation suite before ending the feature, but this worker only ran targeted tests plus fmt/check/clippy and still completed successfully.",
-      "evidence": "worker-transcripts.jsonl session db16430a-8899-4afc-8058-92cd5ac6d654 shows no cargo test -p appdb --test integration_db -- --test-threads 1, cargo test -p appdb --test sensitive_compile -- --nocapture, or cargo test --workspace -- --test-threads 8 after the edit; handoff.skillFeedback.followedProcedure is false."
-    }
-  ],
+  "sharedStateObservations": [],
   "addressesFailureFrom": null,
-  "summary": "Pass. The diff cleanly tightens string classification in core/src/lib.rs and adds focused integration coverage in core/tests/integration_db.rs without weakening existing raw string-form record-link hydration."
+  "summary": "Reviewed the worker transcript skeleton, handoff, and commit 3e529fa. The implementation satisfies the feature contract and VAL-HYDRATE-006 with no blocking or non-blocking issues identified."
 }
