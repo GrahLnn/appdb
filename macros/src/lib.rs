@@ -395,6 +395,10 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         #vis struct #store_marker_ident;
 
         impl ::appdb::model::meta::ModelMeta for #struct_ident {
+            fn storage_table() -> &'static str {
+                <Self as ::appdb::model::meta::ModelMeta>::table_name()
+            }
+
             fn table_name() -> &'static str {
                 static TABLE_NAME: ::std::sync::OnceLock<&'static str> = ::std::sync::OnceLock::new();
                 TABLE_NAME.get_or_init(|| {
