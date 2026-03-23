@@ -223,6 +223,16 @@ mod tests {
     }
 
     #[test]
+    fn serializes_record_id_shape() {
+        let record = RecordId::new("user", "alice");
+        let json = serde_json::to_value(&record).expect("record id should serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({ "table": "user", "key": { "String": "alice" } })
+        );
+    }
+
+    #[test]
     fn serializes_id_string() {
         let row = OutId {
             id: "alice".to_owned(),

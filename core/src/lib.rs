@@ -229,6 +229,67 @@ pub fn rewrite_foreign_json_value(value: &mut serde_json::Value) {
     }
 }
 
+fn parse_record_link_string(text: &str) -> Option<serde_json::Value> {
+    let (table, key) = text.split_once(':')?;
+    let key = key.trim_matches('`');
+    if key.is_empty() {
+        return None;
+    }
+
+    let key = match key.parse::<i64>() {
+        Ok(number) => serde_json::json!({ "Number": number }),
+        Err(_) => serde_json::json!({ "String": key }),
+    };
+
+    Some(serde_json::json!({ "table": table, "key": key }))
+}
+
+/// Rewrites string-form record links into the canonical RecordId serde contract.
+pub fn decode_record_link_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) => {
+            if let Some(record) = parse_record_link_string(text) {
+                *value = record;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for nested in map.values_mut() {
+                decode_record_link_value(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for nested in items {
+                decode_record_link_value(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Rewrites stored foreign payloads into the canonical RecordId serde contract.
+pub fn decode_stored_record_links(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(_) => decode_record_link_value(value),
+        serde_json::Value::Object(map) => {
+            if let Some(id) = map.get("id").cloned() {
+                *value = id;
+                decode_record_link_value(value);
+                return;
+            }
+
+            for nested in map.values_mut() {
+                decode_stored_record_links(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for nested in items {
+                decode_stored_record_links(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Saves or resolves one foreign child model and returns its record id.
 pub async fn resolve_foreign_record_id<T>(value: T) -> anyhow::Result<surrealdb::types::RecordId>
 where
