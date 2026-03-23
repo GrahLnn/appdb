@@ -1,0 +1,53 @@
+{
+  "milestone": "decode-boundary-unification",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    },
+    "format": {
+      "passed": true,
+      "command": "cargo fmt --all -- --check",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 1,
+    "passed": 0,
+    "failed": 1,
+    "failedFeatures": [
+      "milestone-e-unified-raw-row-decode-boundary"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "milestone-e-unified-raw-row-decode-boundary",
+      "severity": "blocking",
+      "description": "The only code change in commit decfa02 is a new integration regression. The milestone explicitly requires runtime decode code to introduce or consolidate one canonical raw-row normalize/decode seam reused by save-return and foreign-aware reads, but diff inspection shows no production-file changes in core/src. This means the feature as delivered is test-only and does not establish the required runtime ownership."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Strengthen rust-library-worker guidance for milestone-scoped features whose descriptions explicitly forbid test-only diffs, so workers and reviewers treat runtime-code ownership requirements as mandatory acceptance criteria.",
+      "evidence": "Feature description in mission features.json says this feature is not complete with test-only changes; transcript and handoff for worker session 21831580-47f2-42bd-92a4-3a0457efc569 state no runtime code change was needed, and git show --stat decfa02 shows only core/tests/integration_db.rs changed.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}

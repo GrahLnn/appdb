@@ -1,7 +1,7 @@
 {
   "milestone": "decode-boundary-unification",
-  "round": 1,
-  "status": "fail",
+  "round": 3,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -26,28 +26,18 @@
   },
   "reviewsSummary": {
     "total": 1,
-    "passed": 0,
-    "failed": 1,
-    "failedFeatures": [
-      "milestone-e-unified-raw-row-decode-boundary"
-    ]
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "milestone-e-unified-raw-row-decode-boundary",
-      "severity": "blocking",
-      "description": "The only code change in commit decfa02 is a new integration regression. The milestone explicitly requires runtime decode code to introduce or consolidate one canonical raw-row normalize/decode seam reused by save-return and foreign-aware reads, but diff inspection shows no production-file changes in core/src. This means the feature as delivered is test-only and does not establish the required runtime ownership."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
-  "suggestedGuidanceUpdates": [
+  "suggestedGuidanceUpdates": [],
+  "rejectedObservations": [
     {
-      "target": "skills",
-      "suggestion": "Strengthen rust-library-worker guidance for milestone-scoped features whose descriptions explicitly forbid test-only diffs, so workers and reviewers treat runtime-code ownership requirements as mandatory acceptance criteria.",
-      "evidence": "Feature description in mission features.json says this feature is not complete with test-only changes; transcript and handoff for worker session 21831580-47f2-42bd-92a4-3a0457efc569 state no runtime code change was needed, and git show --stat decfa02 shows only core/tests/integration_db.rs changed.",
-      "isSystemic": false
+      "observation": "Prior round suggestion to strengthen rust-library-worker guidance for explicit non-test-only milestone features.",
+      "reason": "re-review evidence shows the current repo state now contains the required production decode-boundary ownership in core/src/repository/mod.rs, so no new shared-state guidance update is needed from this rerun."
     }
   ],
-  "rejectedObservations": [],
-  "previousRound": null
+  "previousRound": ".factory/validation/decode-boundary-unification/scrutiny/synthesis.json.round1"
 }
