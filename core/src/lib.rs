@@ -33,6 +33,8 @@ pub use repository::*;
 pub use serde_utils::id::*;
 pub use tx::*;
 
+use surrealdb::types::RecordId;
+
 #[::async_trait::async_trait]
 /// Runtime seam for values persisted by `#[foreign]` fields.
 pub trait Bridge: Sized + Send {
@@ -230,15 +232,18 @@ pub fn rewrite_foreign_json_value(value: &mut serde_json::Value) {
 }
 
 pub(crate) fn parse_record_link_string(text: &str) -> Option<serde_json::Value> {
-    let (table, key) = text.split_once(':')?;
+    let (table, raw_key) = text.split_once(':')?;
     if table.is_empty() || !is_valid_record_link_table(table) {
         return None;
     }
 
-    let key = if key.starts_with('`') && key.ends_with('`') {
-        key.trim_matches('`')
+    let key = if raw_key.starts_with('`') && raw_key.ends_with('`') {
+        raw_key.trim_matches('`')
     } else {
-        key
+        if !looks_like_plain_record_link_key(raw_key) {
+            return None;
+        }
+        raw_key
     };
 
     if key.is_empty() {
@@ -253,10 +258,34 @@ pub(crate) fn parse_record_link_string(text: &str) -> Option<serde_json::Value> 
     Some(serde_json::json!({ "table": table, "key": key }))
 }
 
+pub(crate) fn parse_record_id_compat_string(text: &str) -> Option<RecordId> {
+    let (table, raw_key) = text.split_once(':')?;
+    if table.is_empty() || !is_valid_record_link_table(table) {
+        return None;
+    }
+
+    let key = raw_key.trim_matches('`');
+    if key.is_empty() {
+        return None;
+    }
+
+    Some(match key.parse::<i64>() {
+        Ok(number) => RecordId::new(table, number),
+        Err(_) => RecordId::new(table, key),
+    })
+}
+
 fn is_valid_record_link_table(table: &str) -> bool {
     table
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn looks_like_plain_record_link_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
 fn rewrite_foreign_record_link_value(value: &mut serde_json::Value) {

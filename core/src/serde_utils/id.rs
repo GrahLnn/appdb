@@ -181,7 +181,9 @@ where
     let value = serde_json::Value::deserialize(deserializer)?;
     match value {
         serde_json::Value::String(text) => {
-            if let Ok(record) = RecordId::parse_simple(&text) {
+            if let Some(record) = crate::parse_record_id_compat_string(&text) {
+                Ok(record)
+            } else if let Ok(record) = RecordId::parse_simple(&text) {
                 Ok(record)
             } else {
                 Ok(RecordId::new("_", text.trim_matches('`').to_owned()))
@@ -241,7 +243,10 @@ pub fn normalize_public_id_value(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
-    use super::{deserialize_id_or_record_id_as_string, serialize_id_as_string, Id};
+    use super::{
+        deserialize_id_or_record_id_as_string, deserialize_record_id_or_compat_string,
+        serialize_id_as_string, Id,
+    };
     use serde::{Deserialize, Serialize};
     use surrealdb::types::RecordId;
 
@@ -260,6 +265,12 @@ mod tests {
     #[derive(Debug, Deserialize)]
     struct WrappedId {
         id: Id,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct WrappedRecordId {
+        #[serde(deserialize_with = "deserialize_record_id_or_compat_string")]
+        id: RecordId,
     }
 
     #[derive(Debug, Serialize)]
@@ -295,6 +306,13 @@ mod tests {
             json,
             serde_json::json!({ "table": "user", "key": { "String": "alice" } })
         );
+    }
+
+    #[test]
+    fn compat_record_id_accepts_table_agnostic_string_form() {
+        let row: WrappedRecordId = serde_json::from_str(r#"{"id":"custom_table:alice"}"#)
+            .expect("must deserialize string-form record id");
+        assert_eq!(row.id, RecordId::new("custom_table", "alice"));
     }
 
     #[test]

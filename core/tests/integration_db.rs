@@ -1099,6 +1099,25 @@ fn decode_record_link_value_accepts_table_agnostic_unquoted_record_ids() {
 }
 
 #[test]
+fn decode_record_link_value_accepts_table_agnostic_unquoted_string_keys() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        let mut value = serde_json::json!({
+            "id": "custom_table:compat-read",
+            "name": "compat"
+        });
+
+        appdb::decode_record_link_value(&mut value);
+
+        let loaded: ItRecordUser = serde_json::from_value(value)
+            .expect("decode_record_link_value should preserve table-agnostic string keys");
+
+        assert_eq!(loaded.id, RecordId::new("custom_table", "compat-read"));
+        assert_eq!(loaded.name, "compat");
+    });
+}
+
+#[test]
 fn nested_ref_opt_in_keeps_unannotated_fields_inline() {
     let _guard = acquire_test_lock();
     run_async(async {
