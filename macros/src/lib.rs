@@ -431,6 +431,20 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         impl ::appdb::repository::Crud for #struct_ident {}
 
         impl #struct_ident {
+            /// Saves one value through the recommended Store CRUD surface.
+            ///
+            /// Prefer these generated model methods in application code. Lower-level
+            /// `appdb::repository::Repo` helpers exist for library internals and
+            /// advanced integration seams, not as the primary public path.
+            pub async fn save(self) -> ::anyhow::Result<Self> {
+                <Self as ::appdb::repository::Crud>::save(self).await
+            }
+
+            /// Saves many values through the recommended Store CRUD surface.
+            pub async fn save_many(data: ::std::vec::Vec<Self>) -> ::anyhow::Result<::std::vec::Vec<Self>> {
+                <Self as ::appdb::repository::Crud>::save_many(data).await
+            }
+
             pub async fn get<T>(id: T) -> ::anyhow::Result<Self>
             where
                 ::surrealdb::types::RecordIdKey: From<T>,
@@ -482,6 +496,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             ) -> ::anyhow::Result<Self> {
                 ::appdb::repository::Repo::<Self>::update_at(id, self).await
             }
+
 
             pub async fn delete<T>(id: T) -> ::anyhow::Result<()>
             where

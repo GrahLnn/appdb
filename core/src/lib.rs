@@ -16,7 +16,7 @@ pub mod model;
 pub mod prelude;
 /// Raw and builder-style query helpers.
 pub mod query;
-/// CRUD repository layer.
+/// CRUD internals plus the model-facing [`Crud`] trait.
 pub mod repository;
 /// Serde helpers for ids and SurrealDB-friendly encoding.
 pub mod serde_utils;
