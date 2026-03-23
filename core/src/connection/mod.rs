@@ -85,7 +85,13 @@ impl DbRuntime {
         Self::open_with_options(path, InitDbOptions::default()).await
     }
 
-    /// Opens a runtime with explicit options and applies registered schema.
+    /// Opens a schema-managed runtime with explicit options and applies every
+    /// registered schema inventory item before the handle becomes available.
+    ///
+    /// This managed-open contract is intentionally separate from schemaless
+    /// persistence semantics: callers that use `InitDbOptions::default()` still
+    /// get automatic table bootstrap on first write, but that guarantee must not
+    /// rely on schema side effects from this startup path.
     pub async fn open_with_options(path: PathBuf, options: InitDbOptions) -> Result<Self> {
         fs::create_dir_all(&path)?;
         let worker = Arc::new(DbWorker::spawn(path, options)?);

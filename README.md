@@ -133,5 +133,7 @@ let value: Option<i64> = query_bound_return(stmt).await?;
 
 ## 说明
 
+- `DbRuntime::open*` / `init_db*` 走的是 **schema-managed** 启动路径：运行时会先应用通过 schema inventory 注册的 DDL（例如 `#[unique]` 生成的索引）。
+- 直接用默认的嵌入式运行时做首次 `save` / `upsert_at` 时，库仍然保证 **schemaless** 持久化可用；这条承诺是独立的，不能把 managed 启动时顺带应用的 schema side effects 当作它的证明。
 - 更细的行为说明已经写进源码里的 rustdoc，直接看对应函数和结构体即可。
 - 这个库偏向单机嵌入式使用场景，不追求大而全的抽象层。

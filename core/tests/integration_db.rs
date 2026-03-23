@@ -1674,6 +1674,40 @@ fn schemaless_foreign_save_bootstraps_child_tables_without_schema_side_effects()
 }
 
 #[test]
+fn schema_managed_runtime_applies_registered_inventory() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        let runtime = DbRuntime::open(test_db_path())
+            .await
+            .expect("managed runtime should initialize and apply schema inventory");
+        runtime.reinstall_global_for_tests();
+
+        let stmt = RawSqlStmt::new(format!("INFO FOR TABLE {};", ItProfile::table_name()));
+        let info = query_bound_return::<serde_json::Value>(stmt)
+            .await
+            .expect("managed runtime table info query should succeed")
+            .expect("managed runtime table info should exist after schema inventory apply");
+
+        let indexes = info
+            .get("indexes")
+            .and_then(serde_json::Value::as_object)
+            .expect(
+                "managed runtime table info should expose indexes after schema inventory apply",
+            );
+        let unique_index = indexes
+            .get("it_profile_name_unique")
+            .and_then(serde_json::Value::as_str)
+            .expect("managed runtime should apply the registered unique index inventory");
+
+        assert!(
+            unique_index
+                .contains("DEFINE INDEX it_profile_name_unique ON it_profile FIELDS name UNIQUE"),
+            "managed runtime should report the registered unique index DDL, got: {unique_index}"
+        );
+    });
+}
+
+#[test]
 fn schemaless_upsert_at_bootstraps_plain_explicit_id_table() {
     let _guard = acquire_test_lock();
     run_async(async {
