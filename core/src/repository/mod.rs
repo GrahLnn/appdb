@@ -345,6 +345,12 @@ where
         }
     }
 
+    pub async fn exists_record(record: RecordId) -> Result<bool> {
+        let db = get_db()?;
+        let existing: Option<SurrealDbValue> = db.select(record).await?;
+        Ok(existing.is_some())
+    }
+
     /// Replaces the stored content of a row at the provided record id.
     pub async fn update_at(id: RecordId, data: T) -> Result<T> {
         let db = get_db()?;

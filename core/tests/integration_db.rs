@@ -125,6 +125,12 @@ struct ItNestedParent {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItFreshSaveParent {
+    id: Id,
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNestedOptionalParent {
     id: Id,
     #[foreign]
@@ -981,6 +987,123 @@ fn nested_ref_single_and_option_paths() {
         assert_eq!(none_loaded, none_parent);
         assert_eq!(none_raw.child, None);
         assert_eq!(child_rows_after_none.len(), 3);
+    });
+}
+
+#[test]
+fn fresh_db_save_requires_no_manual_define_table() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        let input = ItFreshSaveParent {
+            id: Id::from("fresh-parent"),
+            name: "fresh-name".to_owned(),
+        };
+
+        let saved = ItFreshSaveParent::save(input.clone())
+            .await
+            .expect("fresh-db save should succeed without manual define table");
+        let loaded = ItFreshSaveParent::get("fresh-parent")
+            .await
+            .expect("fresh-db get should succeed after first save");
+
+        assert_eq!(saved, input);
+        assert_eq!(loaded, input);
+    });
+}
+
+#[test]
+fn foreign_child_with_explicit_id_is_auto_persisted_when_missing() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItNestedParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedIdChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let parent = ItNestedParent {
+            id: Id::from("explicit-id-parent"),
+            child: ItNestedIdChild {
+                id: Id::from("explicit-id-child"),
+                name: "created-on-save".to_owned(),
+            },
+        };
+
+        let saved = ItNestedParent::save(parent.clone())
+            .await
+            .expect("save should auto-persist missing explicit-id child");
+        let loaded = ItNestedParent::get("explicit-id-parent")
+            .await
+            .expect("get should return hydrated parent");
+        let raw = load_nested_parent_raw("explicit-id-parent").await;
+        let child = Repo::<ItNestedIdChild>::get("explicit-id-child")
+            .await
+            .expect("missing explicit-id child should now exist");
+
+        assert_eq!(saved, parent);
+        assert_eq!(loaded, parent);
+        assert_eq!(child, parent.child);
+        assert_eq!(
+            raw.child,
+            RecordId::new(ItNestedIdChild::table_name(), "explicit-id-child")
+        );
+    });
+}
+
+#[test]
+fn foreign_existing_child_is_reused_without_duplication() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItNestedParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedIdChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let child = ItNestedIdChild {
+            id: Id::from("reused-child"),
+            name: "reused-name".to_owned(),
+        };
+        let seeded = Repo::<ItNestedIdChild>::create(child.clone())
+            .await
+            .expect("seed child should succeed");
+        let seeded_id = seeded
+            .resolve_record_id()
+            .await
+            .expect("seeded child should resolve");
+
+        let parent = ItNestedParent {
+            id: Id::from("reused-parent"),
+            child: child.clone(),
+        };
+
+        let before_ids = Repo::<ItNestedIdChild>::list_record_ids()
+            .await
+            .expect("child ids before save should load");
+        let saved = ItNestedParent::save(parent.clone())
+            .await
+            .expect("save should reuse existing child");
+        let loaded = ItNestedParent::get("reused-parent")
+            .await
+            .expect("get should return hydrated reused parent");
+        let raw = load_nested_parent_raw("reused-parent").await;
+        let after_ids = Repo::<ItNestedIdChild>::list_record_ids()
+            .await
+            .expect("child ids after save should load");
+
+        assert_eq!(saved, parent);
+        assert_eq!(loaded, parent);
+        assert_eq!(before_ids, vec![seeded_id.clone()]);
+        assert_eq!(after_ids, vec![seeded_id.clone()]);
+        assert_eq!(raw.child, seeded_id);
     });
 }
 
