@@ -65,9 +65,10 @@ static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static TEST_RT: LazyLock<Runtime> =
     LazyLock::new(|| Runtime::new().expect("integration runtime should be created"));
 
-#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItStringUser {
     id: Id,
+    payload: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
@@ -860,6 +861,7 @@ fn id_repo_roundtrip_passes() {
 
         let inserted = Repo::<ItStringUser>::save(ItStringUser {
             id: Id::from("alice"),
+            payload: String::new(),
         })
         .await
         .expect("save should succeed");
@@ -884,6 +886,7 @@ fn inherent_model_api_roundtrip_passes() {
 
         let inserted = Repo::<ItStringUser>::save(ItStringUser {
             id: Id::from("alice"),
+            payload: String::new(),
         })
         .await
         .expect("save should succeed");
@@ -931,6 +934,7 @@ fn select_missing_record_fails() {
 
         let _ = Repo::<ItStringUser>::save(ItStringUser {
             id: Id::from("seed"),
+            payload: String::new(),
         })
         .await
         .expect("seed save should succeed");
@@ -992,28 +996,61 @@ fn save_preserves_payload_fields() {
     run_async(async {
         ensure_db().await;
 
-        Repo::<ItProfile>::delete_all()
+        Repo::<ItStringUser>::delete_all()
             .await
             .expect("delete_all should succeed");
 
-        let inserted = Repo::<ItProfile>::save(ItProfile {
-            id: Id::from("p1"),
-            name: "alice".to_owned(),
-            note: None,
+        let inserted = Repo::<ItStringUser>::save(ItStringUser {
+            id: Id::from("s1"),
+            payload: "hello".to_owned(),
         })
         .await
         .expect("save should succeed");
 
-        assert_eq!(inserted.id, Id::from("p1"));
-        assert_eq!(inserted.name, "alice");
-        assert_eq!(inserted.note, None);
+        assert_eq!(inserted.id, Id::from("s1"));
+        assert_eq!(inserted.payload, "hello");
 
-        let selected = Repo::<ItProfile>::get("p1")
+        let selected = Repo::<ItStringUser>::get("s1")
             .await
             .expect("get should succeed");
-        assert_eq!(selected.id, Id::from("p1"));
-        assert_eq!(selected.name, "alice");
-        assert_eq!(selected.note, None);
+        assert_eq!(selected.id, Id::from("s1"));
+        assert_eq!(selected.payload, "hello");
+    });
+}
+
+#[test]
+fn ordinary_colon_strings_are_not_record_links() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        ensure_tables_exist(&[ItStringUser::table_name()]).await;
+
+        Repo::<ItStringUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let input = ItStringUser {
+            id: Id::from("colon-string-user"),
+            payload: "alpha:beta".to_owned(),
+        };
+
+        let saved = ItStringUser::save(input.clone())
+            .await
+            .expect("save should preserve ordinary colon strings");
+        let loaded = ItStringUser::get("colon-string-user")
+            .await
+            .expect("get should preserve ordinary colon strings");
+        let raw: serde_json::Value = query_bound_return(RawSqlStmt::new(format!(
+            "SELECT payload FROM {}:`colon-string-user`;",
+            ItStringUser::table_name()
+        )))
+        .await
+        .expect("raw payload query should succeed")
+        .expect("raw payload row should exist");
+
+        assert_eq!(saved, input);
+        assert_eq!(loaded, input);
+        assert_eq!(raw, serde_json::json!({ "payload": "alpha:beta" }));
     });
 }
 
