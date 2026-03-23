@@ -131,6 +131,36 @@ pub trait ForeignModel: StoredModel {
     }
 }
 
+tokio::task_local! {
+    static FOREIGN_SAVE_CLEANUP_STACK: std::cell::RefCell<Vec<surrealdb::types::RecordId>>;
+}
+
+fn foreign_cleanup_enabled() -> bool {
+    FOREIGN_SAVE_CLEANUP_STACK.try_with(|_| ()).is_ok()
+}
+
+fn foreign_cleanup_push(id: surrealdb::types::RecordId) {
+    let _ = FOREIGN_SAVE_CLEANUP_STACK.try_with(|stack| {
+        stack.borrow_mut().push(id);
+    });
+}
+
+pub(crate) async fn run_with_foreign_cleanup_scope<F, Fut, T>(
+    f: F,
+) -> anyhow::Result<(T, Vec<surrealdb::types::RecordId>)>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    FOREIGN_SAVE_CLEANUP_STACK
+        .scope(std::cell::RefCell::new(Vec::new()), async move {
+            let value = f().await?;
+            let cleanup = FOREIGN_SAVE_CLEANUP_STACK.with(|stack| stack.borrow().clone());
+            Ok((value, cleanup))
+        })
+        .await
+}
+
 /// Converts foreign JSON shapes like `{ id: ... }` into raw record-id JSON values.
 pub fn rewrite_foreign_json_value(value: &mut serde_json::Value) {
     match value {
@@ -172,15 +202,27 @@ where
                 Ok(record_id)
             } else if let Some(explicit_record_id) = explicit_record_id {
                 let saved = repository::Repo::<T>::create_at(explicit_record_id, value).await?;
-                saved.resolve_record_id().await
+                let saved_id = saved.resolve_record_id().await?;
+                if foreign_cleanup_enabled() {
+                    foreign_cleanup_push(saved_id.clone());
+                }
+                Ok(saved_id)
             } else {
                 let saved = repository::Repo::<T>::create(value).await?;
-                saved.resolve_record_id().await
+                let saved_id = saved.resolve_record_id().await?;
+                if foreign_cleanup_enabled() {
+                    foreign_cleanup_push(saved_id.clone());
+                }
+                Ok(saved_id)
             }
         }
         Err(err) if err.to_string().contains("Record not found") => {
             let saved = repository::Repo::<T>::create(value).await?;
-            saved.resolve_record_id().await
+            let saved_id = saved.resolve_record_id().await?;
+            if foreign_cleanup_enabled() {
+                foreign_cleanup_push(saved_id.clone());
+            }
+            Ok(saved_id)
         }
         Err(_err) if explicit_record_id.is_some() => {
             let saved = repository::Repo::<T>::create_at(
@@ -188,7 +230,11 @@ where
                 value,
             )
             .await?;
-            saved.resolve_record_id().await
+            let saved_id = saved.resolve_record_id().await?;
+            if foreign_cleanup_enabled() {
+                foreign_cleanup_push(saved_id.clone());
+            }
+            Ok(saved_id)
         }
         Err(err) => Err(err),
     }

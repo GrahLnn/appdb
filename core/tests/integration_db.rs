@@ -1107,6 +1107,324 @@ fn foreign_existing_child_is_reused_without_duplication() {
     });
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItAtomicSaveChild {
+    id: Id,
+    #[unique]
+    code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct ItAtomicSaveParentStored {
+    id: Id,
+    child: RecordId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct ItAtomicSaveParent {
+    id: Id,
+    child: ItAtomicSaveChild,
+}
+
+static mut ATOMIC_SAVE_HYDRATE_FAIL: bool = true;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredAtomicSaveParentRow {
+    id: Id,
+    child: RecordId,
+}
+
+impl StoredModel for ItAtomicSaveParent {
+    type Stored = ItAtomicSaveParentStored;
+
+    fn into_stored(self) -> anyhow::Result<Self::Stored> {
+        anyhow::bail!("into_stored should not be used for atomic save parent tests")
+    }
+
+    fn from_stored(stored: Self::Stored) -> anyhow::Result<Self> {
+        let child_json = serde_json::to_value(&stored.child)?;
+        let child_id = child_json
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|raw| {
+                raw.split_once(':')
+                    .map(|(_, key)| key.trim_matches('`').to_owned())
+            })
+            .unwrap_or_else(|| child_json.to_string());
+        Ok(Self {
+            id: stored.id,
+            child: ItAtomicSaveChild {
+                id: Id::from(child_id),
+                code: String::new(),
+            },
+        })
+    }
+}
+
+impl ModelMeta for ItAtomicSaveParent {
+    fn table_name() -> &'static str {
+        static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+        TABLE_NAME
+            .get_or_init(|| register_table(stringify!(ItAtomicSaveParent), "it_atomic_save_parent"))
+    }
+}
+
+impl Crud for ItAtomicSaveParent {}
+
+#[allow(clippy::manual_async_fn)]
+impl appdb::ForeignModel for ItAtomicSaveParent {
+    fn persist_foreign(
+        value: Self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self::Stored>> + Send {
+        async move {
+            let child_record = appdb::resolve_foreign_record_id(value.child).await?;
+            Ok(ItAtomicSaveParentStored {
+                id: value.id,
+                child: child_record,
+            })
+        }
+    }
+
+    fn hydrate_foreign(
+        stored: Self::Stored,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self>> + Send {
+        async move {
+            if unsafe { ATOMIC_SAVE_HYDRATE_FAIL } {
+                anyhow::bail!(
+                    "intentional atomic save hydration failure for {}",
+                    stored.id
+                )
+            }
+            Ok(Self {
+                id: stored.id,
+                child: Repo::<ItAtomicSaveChild>::get_record(stored.child).await?,
+            })
+        }
+    }
+
+    fn has_foreign_fields() -> bool {
+        true
+    }
+}
+
+async fn load_atomic_save_parent_raw(id: &str) -> Option<StoredAtomicSaveParentRow> {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItAtomicSaveParent::table_name())
+        .bind("id", id.to_owned());
+
+    let value = query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("atomic save raw parent query should succeed");
+
+    value.map(|value| {
+        let id = value
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|raw| {
+                raw.split_once(':')
+                    .map(|(_, key)| key.trim_matches('`').to_owned())
+            })
+            .expect("atomic save raw row should contain normalized string id");
+        let child = value
+            .get("child")
+            .cloned()
+            .map(serde_json::from_value::<RecordId>)
+            .expect("atomic save raw row should contain child")
+            .expect("atomic save raw child should decode as record id");
+
+        StoredAtomicSaveParentRow {
+            id: Id::from(id),
+            child,
+        }
+    })
+}
+
+async fn atomic_child_exists(id: &str) -> bool {
+    Repo::<ItAtomicSaveChild>::get(id).await.is_ok()
+}
+
+async fn atomic_parent_exists(id: &str) -> bool {
+    load_atomic_save_parent_raw(id).await.is_some()
+}
+
+fn set_atomic_save_hydrate_fail(value: bool) {
+    unsafe {
+        ATOMIC_SAVE_HYDRATE_FAIL = value;
+    }
+}
+
+#[test]
+fn single_save_failure_leaves_no_foreign_residue() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItAtomicSaveParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItAtomicSaveChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        set_atomic_save_hydrate_fail(true);
+
+        let parent = ItAtomicSaveParent {
+            id: Id::from("atomic-parent-single"),
+            child: ItAtomicSaveChild {
+                id: Id::from("atomic-child-single"),
+                code: "single-code".to_owned(),
+            },
+        };
+
+        let err = Repo::<ItAtomicSaveParent>::save(ItAtomicSaveParent {
+            id: parent.id.clone(),
+            child: parent.child.clone(),
+        })
+        .await
+        .expect_err("single save should fail after write when hydration fails");
+
+        assert!(
+            err.to_string()
+                .contains("intentional atomic save hydration failure"),
+            "unexpected save failure: {err}"
+        );
+        assert!(
+            !atomic_parent_exists("atomic-parent-single").await,
+            "parent row should not persist after failed save"
+        );
+        assert!(
+            !atomic_child_exists("atomic-child-single").await,
+            "child row should not persist after failed save"
+        );
+    });
+}
+
+#[test]
+fn save_many_failure_leaves_no_batch_orphans() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItAtomicSaveParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItAtomicSaveChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        set_atomic_save_hydrate_fail(true);
+
+        let rows = vec![
+            ItAtomicSaveParent {
+                id: Id::from("atomic-parent-batch-a"),
+                child: ItAtomicSaveChild {
+                    id: Id::from("atomic-child-batch-a"),
+                    code: "batch-code-a".to_owned(),
+                },
+            },
+            ItAtomicSaveParent {
+                id: Id::from("atomic-parent-batch-b"),
+                child: ItAtomicSaveChild {
+                    id: Id::from("atomic-child-batch-b"),
+                    code: "batch-code-b".to_owned(),
+                },
+            },
+        ];
+
+        let err = Repo::<ItAtomicSaveParent>::save_many(rows)
+            .await
+            .expect_err("save_many should fail after writes when hydration fails");
+
+        assert!(
+            err.to_string()
+                .contains("intentional atomic save hydration failure"),
+            "unexpected batch save failure: {err}"
+        );
+        for id in ["atomic-parent-batch-a", "atomic-parent-batch-b"] {
+            assert!(
+                !atomic_parent_exists(id).await,
+                "batch parent {id} should not persist after failed save_many"
+            );
+        }
+        for id in ["atomic-child-batch-a", "atomic-child-batch-b"] {
+            assert!(
+                !atomic_child_exists(id).await,
+                "batch child {id} should not persist after failed save_many"
+            );
+        }
+    });
+}
+
+#[test]
+fn failed_save_can_retry_cleanly_with_same_identifiers() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItAtomicSaveParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItAtomicSaveChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        set_atomic_save_hydrate_fail(true);
+
+        let failed = ItAtomicSaveParent {
+            id: Id::from("atomic-parent-retry"),
+            child: ItAtomicSaveChild {
+                id: Id::from("atomic-child-retry"),
+                code: "retry-initial".to_owned(),
+            },
+        };
+
+        let err = Repo::<ItAtomicSaveParent>::save(failed)
+            .await
+            .expect_err("initial save should fail after write when hydration fails");
+
+        assert!(
+            err.to_string()
+                .contains("intentional atomic save hydration failure"),
+            "unexpected retry setup failure: {err}"
+        );
+        assert!(
+            !atomic_parent_exists("atomic-parent-retry").await,
+            "failed save should leave no parent residue before retry"
+        );
+        assert!(
+            !atomic_child_exists("atomic-child-retry").await,
+            "failed save should leave no child residue before retry"
+        );
+
+        let corrected = ItAtomicSaveParent {
+            id: Id::from("atomic-parent-retry"),
+            child: ItAtomicSaveChild {
+                id: Id::from("atomic-child-retry"),
+                code: "retry-corrected".to_owned(),
+            },
+        };
+
+        set_atomic_save_hydrate_fail(false);
+        let saved = Repo::<ItAtomicSaveParent>::save(corrected.clone())
+            .await
+            .expect("retry save should succeed once cleanup is correct");
+        let loaded = Repo::<ItAtomicSaveParent>::get("atomic-parent-retry")
+            .await
+            .expect("retry get should return hydrated parent");
+        let raw = load_atomic_save_parent_raw("atomic-parent-retry")
+            .await
+            .expect("retry parent row should exist");
+        let child = Repo::<ItAtomicSaveChild>::get("atomic-child-retry")
+            .await
+            .expect("retry child row should exist");
+
+        assert_eq!(saved, corrected);
+        assert_eq!(loaded, corrected);
+        assert_eq!(child, corrected.child);
+        assert_eq!(
+            raw.child,
+            RecordId::new(ItAtomicSaveChild::table_name(), "atomic-child-retry")
+        );
+    });
+}
+
 #[test]
 fn nested_ref_vec_and_collection_hydration() {
     let _guard = acquire_test_lock();
