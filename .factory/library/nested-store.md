@@ -27,4 +27,6 @@ Mission-specific guidance for explicit `#[foreign]` support.
 - `#[derive(Bridge)]` first version should compile-fail on unit variants, struct variants, multi-field tuple variants, and payloads that do not satisfy `Bridge`.
 - First recursive-container scope now includes only `Option` and `Vec`; reject other wrappers in this task.
 - Current scope keeps the no-lazy-loading and no `merge`/`patch` boundaries, but save/save_many now require transactional parent/child semantics for foreign graph persistence.
+- Follow-up scope after `0.2.6`: schemaless table bootstrap should follow the same Store-wide rule for root and foreign-referenced models; `#[foreign]` is not a separate table-creation mechanism.
+- Follow-up scope after `0.2.6`: string-form record-link decoding must distinguish real record links from ordinary colon strings so normal payloads are left untouched.
 - Raw query helper writes remain out of scope, but raw-query read compatibility for foreign hydration is in scope.

@@ -1,0 +1,51 @@
+{
+  "featureId": "milestone-a-commit-boundary-batch-save-and-retry",
+  "reviewedAt": "2026-03-23T09:57:30.054486+00:00",
+  "commitId": "e6a49f756a0fcb5ef68ef7756d98174332a4eb4b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The regression tests demonstrate the intended failure and retry behavior, but the implementation still commits before later hydration can fail and still performs foreign-child persistence through repository-level calls outside the authoritative transaction. That means the feature does not deliver the required commit-boundary fix for VAL-SAVE-005 or VAL-CROSS-002.",
+    "issues": [
+      {
+        "file": "core/src/repository/mod.rs",
+        "line": 708,
+        "severity": "blocking",
+        "description": "Repo::save_many appends COMMIT TRANSACTION before decoding and T::hydrate_foreign. If any later decode/hydration step fails, the batch has already committed and the code falls back to delete repair. The feature explicitly required all success-critical decode/hydration work to share one authoritative transaction boundary, so this remains the rejected post-commit cleanup design rather than a real commit-boundary fix."
+      },
+      {
+        "file": "core/src/repository/mod.rs",
+        "line": 696,
+        "severity": "blocking",
+        "description": "Each save_many row still resolves and auto-creates foreign children via T::persist_foreign wrapped in run_with_foreign_cleanup_scope before the batch transaction query runs. Those child writes use the default repository persistence path instead of the live uncommitted save_many transaction handle, violating the feature requirement that foreign-child creation and parent UPSERTs operate inside the same Surreal transaction boundary."
+      },
+      {
+        "file": "core/src/lib.rs",
+        "line": 160,
+        "severity": "blocking",
+        "description": "RepoForeignPersistence still implements ForeignPersistence with repository-level exists/create/create_at calls. resolve_foreign_record_id_with therefore has no transaction-bound persistence context to use for save_many, so the foundational seam required by the feature was not extended onto the live transaction handle."
+      },
+      {
+        "file": "core/tests/integration_db.rs",
+        "line": 1436,
+        "severity": "non_blocking",
+        "description": "The retry regression exercises Repo::save rather than Repo::save_many even though VAL-CROSS-002 is assigned here as part of the batch-save commit-boundary feature. It proves clean retry for the same identifiers, but not specifically for a failed batch path."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill tells workers not to accept cleanup-only atomicity and to move foreign persistence under the authoritative transaction boundary, but this worker still concluded success without that property because the existing regressions passed. The skill or validator guidance likely needs a stronger explicit step to reject transaction-boundary claims when code inspection still shows COMMIT before hydrate/decode.",
+      "evidence": "Worker transcript shows verification-only completion despite mission/skill rules; SKILL.md steps 13-14 explicitly forbid cleanup-only atomicity, while core/src/repository/mod.rs lines 692-732 and core/src/lib.rs lines 160-177 still use post-commit deletes plus repository-level foreign persistence."
+    },
+    {
+      "area": "conventions",
+      "observation": "Project guidance requires GitNexus impact analysis before editing symbols, but this environment does not expose GitNexus tooling. Workers repeatedly fall back to git diff/status review, suggesting the mission/shared guidance should clarify that this repo environment currently lacks those tools for scrutiny/worker runs.",
+      "evidence": "Mission/CLAUDE guidance mandates gitnexus_impact, while the reviewed worker handoff and transcript explicitly note GitNexus commands were unavailable and used git diff/status fallback instead."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: the codebase currently passes residue-cleanup regressions, but save_many still commits before later failure points and still persists foreign children through repository-level calls outside the live batch transaction. This does not satisfy the requested commit-boundary fix for VAL-SAVE-005 or VAL-CROSS-002."
+}

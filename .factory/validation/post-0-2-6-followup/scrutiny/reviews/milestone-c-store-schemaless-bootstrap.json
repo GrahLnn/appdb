@@ -1,0 +1,33 @@
+{
+  "featureId": "milestone-c-store-schemaless-bootstrap",
+  "reviewedAt": "2026-03-23T14:51:40Z",
+  "commitId": "83c9d237255cc46b5b665102e286613e0f6e012f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds the requested focused regression and the runtime behavior it asserts appears to hold, but the worker commit also bundled unrelated scrutiny artifact churn from other milestones, so this feature implementation was not actually isolated to its assigned scope.",
+    "issues": [
+      {
+        "file": ".factory/validation/hydrate-roundtrip/scrutiny/synthesis.json",
+        "line": 1,
+        "severity": "blocking",
+        "description": "Commit 83c9d237255cc46b5b665102e286613e0f6e012f includes unrelated .factory/validation review and synthesis changes from hydrate-roundtrip and save-atomicity in addition to the intended core/tests/integration_db.rs regression. The feature contract and worker skill required isolating this feature to its own scoped diff; shipping prior milestone scrutiny artifacts inside this feature commit makes the implementation non-isolated and breaks the assigned review scope."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill already tells workers to inspect git diff and git diff --cached and to unstage unrelated pre-existing index entries before committing, but this session still produced a commit that bundled unrelated staged scrutiny artifacts. The procedure is correct; enforcement/worker adherence was the gap.",
+      "evidence": "Worker transcript skeleton for session 8a552dd5-f5e9-4310-859a-cbe2ecd9e3f2 shows both git diff --cached review and a final commit, while commit 83c9d237255cc46b5b665102e286613e0f6e012f still contains unrelated .factory/validation files outside the feature scope."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Shared library guidance now documents the follow-up schemaless bootstrap rule as a Store-wide contract for all persisted graph nodes, which matches this feature and likely helped keep the actual code change to a single focused regression rather than a foreign-specific runtime patch.",
+      "evidence": "C:\\Users\\admin\\appdb\\.factory\\library\\architecture.md and nested-store.md both contain follow-up notes that schemaless table bootstrap must be Store-wide rather than a foreign-only exception."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fails scrutiny: the new regression in core/tests/integration_db.rs correctly proves schemaless parent+foreign-child saves on a fresh DB, but the reviewed feature commit is not acceptable as scoped feature output because it also commits unrelated scrutiny artifact changes from other milestones."
+}

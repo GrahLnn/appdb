@@ -1,0 +1,61 @@
+{
+  "milestone": "save-atomicity",
+  "surface": "cargo-test",
+  "groupId": "save-atomicity-runtime",
+  "assertions": [
+    {
+      "id": "VAL-SAVE-001",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p appdb --test integration_db fresh_db_save_requires_no_manual_define_table -- --exact --nocapture"
+      ],
+      "notes": "Focused regression passed; first save on a fresh DB succeeded and get() returned the saved row."
+    },
+    {
+      "id": "VAL-SAVE-002",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p appdb --test integration_db foreign_child_with_explicit_id_is_auto_persisted_when_missing -- --exact --nocapture"
+      ],
+      "notes": "Focused regression passed; missing explicit-id foreign child was auto-persisted and parent stored a RecordId reference."
+    },
+    {
+      "id": "VAL-SAVE-003",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p appdb --test integration_db foreign_existing_child_is_reused_without_duplication -- --exact --nocapture"
+      ],
+      "notes": "Focused regression passed; existing foreign child row was reused without duplication."
+    },
+    {
+      "id": "VAL-SAVE-004",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p appdb --test integration_db single_save_failure_leaves_no_foreign_residue -- --exact --nocapture"
+      ],
+      "notes": "Focused regression passed; failed save left neither parent nor child residue."
+    },
+    {
+      "id": "VAL-SAVE-005",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p appdb --test integration_db save_many_failure_leaves_no_batch_orphans -- --exact --nocapture"
+      ],
+      "notes": "Focused regression passed; failed batch save left no parents or orphan children behind."
+    },
+    {
+      "id": "VAL-CROSS-002",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p appdb --test integration_db failed_save_can_retry_cleanly_with_same_identifiers -- --exact --nocapture"
+      ],
+      "notes": "Focused regression passed; retry after failure succeeded with same identifiers after clean rollback."
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "cargo test"
+  ],
+  "artifacts": []
+}

@@ -1,0 +1,40 @@
+{
+  "featureId": "milestone-a-fresh-save-and-explicit-id-foreign-persist",
+  "reviewedAt": "2026-03-23T09:56:17.877420+00:00",
+  "commitId": "e6ab39d41d34d7ad4655559e51417af9f93ef567",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature behavior is present in the working tree and the focused regressions for missing explicit-id child auto-persistence and existing-child reuse are well targeted, but the handoff commit attached to this feature does not contain the implementation and the current save path still overclaims atomicity by relying on post-commit cleanup rather than a single authoritative transaction boundary.",
+    "issues": [
+      {
+        "file": "core/src/repository/mod.rs",
+        "line": 578,
+        "severity": "blocking",
+        "description": "Repo::save commits the parent UPSERT before T::hydrate_foreign runs; if hydration later fails, the code falls back to best-effort deletes after commit. That does not satisfy the mission's required all-or-nothing save semantics and means this feature cannot safely be treated as satisfying VAL-SAVE-002/003 in a way that is isolated from the rejected residue-cleanup design."
+      },
+      {
+        "file": "core/src/repository/mod.rs",
+        "line": 692,
+        "severity": "blocking",
+        "description": "Repo::save_many likewise commits before later decode/hydrate can fail and then performs cleanup deletes. This is the same rejected post-commit repair pattern, so the feature handoff overclaims correctness if read as an atomic persistence completion rather than a narrower foreign-id behavior change."
+      },
+      {
+        "file": "C:/Users/admin/.factory/missions/ed95771b-aefa-4fdc-835a-4974ccd2bae0/handoffs/2026-03-23T08-28-03-776Z__milestone-a-fresh-save-and-explicit-id-foreign-persist__fc683e09-4034-4831-8ba5-69389ea220d8.json",
+        "line": 1,
+        "severity": "non_blocking",
+        "description": "The handoff points to commit e6ab39d, but that commit only updates the scrutiny synthesis artifact and contains none of the source or test changes for this feature. Review evidence therefore had to come from the current working tree and prior worker transcript rather than the advertised commit."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill says to write tests first and implement the feature, but this worker ran in verification-only mode because the feature was already present. The skill should explicitly document that verification-only completion is valid when the assigned behavior is already landed, otherwise workers appear to violate procedure despite doing the correct scoped work.",
+      "evidence": "Feature handoff skillFeedback.followedProcedure=false with deviations explaining the repository already contained the implementation; skill file C:/Users/admin/appdb/.factory/skills/rust-library-worker/SKILL.md currently lacks a verification-only branch."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed. The targeted tests for explicit-id foreign auto-persist and existing-child reuse exist and match VAL-SAVE-002/003, but the recorded handoff commit does not contain this feature's code and the live save/save_many implementation still depends on post-commit cleanup, which scrutiny already rejected for save-atomicity claims."
+}
