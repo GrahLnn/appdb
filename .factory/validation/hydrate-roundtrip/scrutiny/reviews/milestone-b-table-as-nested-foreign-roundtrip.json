@@ -1,0 +1,15 @@
+{
+  "featureId": "milestone-b-table-as-nested-foreign-roundtrip",
+  "reviewedAt": "2026-03-23T12:45:00Z",
+  "commitId": "e2c1a1c9490f7676e16572ed499000333a7c0099",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Commit e2c1a1c is a scoped test-surface accumulation for this feature: it updates only core/tests/integration_db.rs and adds/retains alias-foreign regressions covering both direct #[table_as(...)] foreign roundtrip and nested alias models that themselves own #[foreign] fields across save/get/get_record/list/list_limit, with raw-row assertions proving target-table RecordId storage for both alias rows and holder rows. The reviewed implementation satisfies the feature contract because the runtime behavior was already landed in prior hydrate-roundtrip commits and this feature commit correctly captures the missing milestone test surface without introducing unrelated implementation changes.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Pass. I reviewed the feature metadata, worker handoff, transcript skeleton, and commit e2c1a1c. The commit is limited to the shared integration regression file and the covered alias-roundtrip tests satisfy the feature contract, including nested alias hydration and raw RecordId storage expectations through the target table."
+}

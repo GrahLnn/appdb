@@ -1,0 +1,28 @@
+{
+  "featureId": "milestone-b-save-return-shared-decode-seam",
+  "reviewedAt": "2026-03-23T12:45:30.068219+00:00",
+  "commitId": "e6a49f7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The shared stored-row decode seam is implemented in the intended locations and the worker evidence shows the targeted regressions were exercised, but the feature does not fully satisfy its contract because the retained cross-entrypoint regression still uses an order-dependent list_limit(1) assertion instead of an unambiguous fixture.",
+    "issues": [
+      {
+        "file": "core/tests/integration_db.rs",
+        "line": 3669,
+        "severity": "blocking",
+        "description": "successful_foreign_save_matches_all_read_entrypoints calls list_limit(1) and then expects the saved row to be present in that single-row result without making fixture order deterministic. This can pass or fail based on incidental storage ordering, so the feature does not reliably prove the required cross-entrypoint consistency for the intended row."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill still tells workers to validate list_limit() with an unambiguous fixture, but this feature handoff claimed success while keeping an order-dependent list_limit(1) regression. The procedure itself is correct; the review evidence shows enforcement/tracking, not skill content, was the gap.",
+      "evidence": "C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md (steps 15 and 24) requires unambiguous read-path fixtures, while core/tests/integration_db.rs:3669 uses list_limit(1) and expects the saved row to appear in that single result."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature handoff, transcript skeleton, commit diff, mission guidance, and shared-state files. The implementation correctly routes save-return, repository stored-row decode, and macro-generated foreign decode through a shared typed record-link seam, but the feature still fails review because its retained cross-entrypoint regression is nondeterministic at list_limit(1) and therefore does not conclusively satisfy the feature contract."
+}
