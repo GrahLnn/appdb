@@ -1,0 +1,28 @@
+{
+  "featureId": "milestone-a-fresh-save-and-explicit-id-foreign-persist",
+  "reviewedAt": "2026-03-23T08:14:16Z",
+  "commitId": "6a3e35b706841d1693c5c619f75008da91bc1696",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature added the requested regressions and partially fixed explicit-id foreign auto-persist/reuse, but the fresh-DB requirement is not actually proven because the new test does not start from a fresh embedded database state.",
+    "issues": [
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\tests\\integration_db.rs",
+        "line": 997,
+        "severity": "blocking",
+        "description": "\fresh_db_save_requires_no_manual_define_table calls \u001bnsure_db() instead of resetting to a fresh database. \u001bnsure_db() only reuses the shared test runtime, so this test can pass even if prior tests already created the table. The feature requirement explicitly called for proving first save on a fresh embedded DB succeeds without manual DEFINE TABLE, and this test does not establish that precondition."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker did not follow the mission rule to make new regressions fail first for this feature, but the rust-library-worker skill only says to run targeted tests and confirm they fail before implementing. It does not explicitly warn reviewers/workers that a fresh DB regression must actively reset or reinitialize the embedded database rather than reusing ensure_db().",
+      "evidence": "Mission AGENTS.md requires Workers must add failing tests first and specifically lists fresh DB save coverage. The final committed test at core/tests/integration_db.rs:994-1013 only calls ensure_db(), while the worker transcript skeleton shows no pre-fix failing run of this exact test and earlier exploration referenced reinit_db(...) elsewhere instead."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: explicit-id foreign persistence behavior appears covered, but the fresh-database acceptance criterion is not actually validated because the committed regression reuses an existing DB/runtime instead of proving first-save behavior on a clean embedded database."
+}
