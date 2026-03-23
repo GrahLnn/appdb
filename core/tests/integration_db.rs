@@ -129,6 +129,56 @@ struct StoredAliasedForeignParentRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItAliasedNestedAuthor {
+    id: Id,
+    #[unique]
+    handle: String,
+    display_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItAliasedNestedPost {
+    id: Id,
+    #[unique]
+    slug: String,
+    headline: String,
+    #[foreign]
+    author: ItAliasedNestedAuthor,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+#[table_as(ItAliasedNestedPost)]
+struct ItAliasedNestedPostAlias {
+    id: Id,
+    #[unique]
+    slug: String,
+    headline: String,
+    #[foreign]
+    author: ItAliasedNestedAuthor,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItAliasedNestedHolder {
+    id: Id,
+    #[foreign]
+    featured: ItAliasedNestedPostAlias,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredAliasedNestedPostRow {
+    id: Id,
+    slug: String,
+    headline: String,
+    author: RecordId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredAliasedNestedHolderRow {
+    id: Id,
+    featured: RecordId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItNestedForeignLeaf {
     id: Id,
     #[unique]
@@ -492,6 +542,32 @@ async fn load_aliased_foreign_parent_raw(id: &str) -> StoredAliasedForeignParent
         featured,
         nested,
     }
+}
+
+async fn load_aliased_nested_post_raw(id: &str) -> StoredAliasedNestedPostRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItAliasedNestedPost::table_name())
+        .bind("id", id.to_owned());
+
+    query_bound_return::<StoredAliasedNestedPostRow>(stmt)
+        .await
+        .expect("aliased nested post raw query should succeed")
+        .expect("aliased nested post raw row should exist")
+}
+
+async fn load_aliased_nested_holder_raw(id: &str) -> StoredAliasedNestedHolderRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItAliasedNestedHolder::table_name())
+        .bind("id", id.to_owned());
+
+    let value = query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("aliased nested holder raw query should succeed")
+        .expect("aliased nested holder raw row should exist");
+
+    let mut value = value;
+    appdb::decode_record_link_value(&mut value);
+    serde_json::from_value(value).expect("aliased nested holder raw row should decode")
 }
 
 async fn load_inline_parent_raw(id: &str) -> StoredInlineParentRow {
@@ -1976,7 +2052,7 @@ fn table_as_reuses_target_table_name_and_lookup_metadata() {
 }
 
 #[test]
-fn table_as_roundtrip_and_foreign_paths_share_target_table() {
+fn table_as_alias_preserves_foreign_roundtrip_through_target_table() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
@@ -2037,14 +2113,127 @@ fn table_as_roundtrip_and_foreign_paths_share_target_table() {
         let loaded_parent = ItAliasedForeignParent::get("aliased-parent")
             .await
             .expect("aliased foreign parent get should succeed");
+        let listed_parent = ItAliasedForeignParent::list()
+            .await
+            .expect("aliased foreign parent list should succeed")
+            .into_iter()
+            .find(|row| row.id == Id::from("aliased-parent"))
+            .expect("aliased parent should be present in list results");
+        let limited_parent = ItAliasedForeignParent::list_limit(10)
+            .await
+            .expect("aliased foreign parent list_limit should succeed")
+            .into_iter()
+            .find(|row| row.id == Id::from("aliased-parent"))
+            .expect("aliased parent should be present in list_limit results");
         let raw_parent = load_aliased_foreign_parent_raw("aliased-parent").await;
 
         assert_eq!(saved_parent, parent);
         assert_eq!(loaded_parent, parent);
+        assert_eq!(listed_parent, parent);
+        assert_eq!(limited_parent, parent);
 
         let expected_record = RecordId::new(ItAliasedPost::table_name(), "aliased-post");
         assert_eq!(raw_parent.featured, Some(expected_record.clone()));
         assert_eq!(raw_parent.nested, Some(vec![vec![expected_record]]));
+    });
+}
+
+#[test]
+fn table_as_alias_with_nested_foreign_roundtrips_across_all_reads() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        ensure_tables_exist(&[
+            ItAliasedNestedAuthor::table_name(),
+            ItAliasedNestedPost::table_name(),
+            ItAliasedNestedHolder::table_name(),
+        ])
+        .await;
+
+        Repo::<ItAliasedNestedHolder>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItAliasedNestedPost>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItAliasedNestedAuthor>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let holder = ItAliasedNestedHolder {
+            id: Id::from("aliased-holder-target"),
+            featured: ItAliasedNestedPostAlias {
+                id: Id::from("aliased-nested-post-target"),
+                slug: "alias-target".to_owned(),
+                headline: "Alias headline".to_owned(),
+                author: ItAliasedNestedAuthor {
+                    id: Id::from("aliased-author-target"),
+                    handle: "alias-author".to_owned(),
+                    display_name: "Alias Author".to_owned(),
+                },
+            },
+        };
+
+        let other = ItAliasedNestedHolder {
+            id: Id::from("aliased-holder-other"),
+            featured: ItAliasedNestedPostAlias {
+                id: Id::from("aliased-nested-post-other"),
+                slug: "alias-other".to_owned(),
+                headline: "Other headline".to_owned(),
+                author: ItAliasedNestedAuthor {
+                    id: Id::from("aliased-author-other"),
+                    handle: "alias-author-other".to_owned(),
+                    display_name: "Other Author".to_owned(),
+                },
+            },
+        };
+
+        ItAliasedNestedHolder::save(other)
+            .await
+            .expect("seed save should succeed");
+        let saved = ItAliasedNestedHolder::save(holder.clone())
+            .await
+            .expect("aliased nested holder save should succeed");
+        let got = ItAliasedNestedHolder::get("aliased-holder-target")
+            .await
+            .expect("aliased nested holder get should succeed");
+        let got_record = ItAliasedNestedHolder::get_record(RecordId::new(
+            ItAliasedNestedHolder::table_name(),
+            "aliased-holder-target",
+        ))
+        .await
+        .expect("aliased nested holder get_record should succeed");
+        let listed = ItAliasedNestedHolder::list()
+            .await
+            .expect("aliased nested holder list should succeed")
+            .into_iter()
+            .find(|row| row.id == Id::from("aliased-holder-target"))
+            .expect("target holder should be present in list results");
+        let limited = ItAliasedNestedHolder::list_limit(10)
+            .await
+            .expect("aliased nested holder list_limit should succeed")
+            .into_iter()
+            .find(|row| row.id == Id::from("aliased-holder-target"))
+            .expect("target holder should be present in list_limit results");
+        let raw_alias_row = load_aliased_nested_post_raw("aliased-nested-post-target").await;
+        let raw_holder_row = load_aliased_nested_holder_raw("aliased-holder-target").await;
+
+        assert_eq!(saved, holder);
+        assert_eq!(got, holder);
+        assert_eq!(got_record, holder);
+        assert_eq!(listed, holder);
+        assert_eq!(limited, holder);
+        assert_eq!(
+            raw_alias_row.author,
+            RecordId::new(ItAliasedNestedAuthor::table_name(), "aliased-author-target")
+        );
+        assert_eq!(
+            raw_holder_row.featured,
+            RecordId::new(
+                ItAliasedNestedPost::table_name(),
+                "aliased-nested-post-target"
+            )
+        );
     });
 }
 
