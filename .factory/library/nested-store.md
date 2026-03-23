@@ -26,4 +26,5 @@ Mission-specific guidance for explicit `#[foreign]` support.
 - First version should exclude `#[foreign]` fields from automatic lookup candidates and reject `#[unique]` on foreign fields.
 - `#[derive(Bridge)]` first version should compile-fail on unit variants, struct variants, multi-field tuple variants, and payloads that do not satisfy `Bridge`.
 - First recursive-container scope now includes only `Option` and `Vec`; reject other wrappers in this task.
-- First-version boundaries: no lazy-loading API, no `merge`/`patch`/raw query helper support, and no transactional guarantee for parent/child writes.
+- Current scope keeps the no-lazy-loading and no `merge`/`patch` boundaries, but save/save_many now require transactional parent/child semantics for foreign graph persistence.
+- Raw query helper writes remain out of scope, but raw-query read compatibility for foreign hydration is in scope.
