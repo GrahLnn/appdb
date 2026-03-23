@@ -17,3 +17,5 @@ Environment variables, external dependencies, and setup notes.
 - The installed GitNexus CLI may not expose the documented `detect_changes` subcommand; when unavailable, use `git diff` plus available `gitnexus impact/context` commands as the approved fallback scope check.
 - Known non-blocking note from dry run: `core/tests/integration_db.rs` currently emits a dead-code warning for `NamedFieldTestRelation.created_at`, which may matter for `clippy -D warnings` if left unresolved.
 - Nested-reference mission note: compile-pass coverage may need a dedicated trybuild/pass harness because the current repo only has compile-fail wiring in `core/tests/sensitive_compile.rs`.
+- Current mission requires no extra services, ports, credentials, or background processes; all validation should stay inside Cargo-driven tests and the embedded SurrealDB runtime.
+- For failure-then-retry assertions, workers should prefer reusing the same record identifiers inside one test fixture rather than creating fresh ids for the retry path.
