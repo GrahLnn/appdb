@@ -4,9 +4,9 @@
 
 目标只有几个：
 
-- 用 `#[derive(Store)]` 给模型挂上直接可用的仓储能力
+- 用 `#[derive(Store)]` 给模型挂上直接可用的模型级 CRUD 能力
 - 用 prelude 导出一个简单的使用面
-- 保持 API 以 `save`、`get`、`list` 这种直观名字为主
+- 保持推荐 API 以模型自身的 `save`、`get`、`list` 这种直观名字为主
 - 给需要加密的字段提供 `Sensitive` 派生支持
 
 ## 工作区结构
@@ -18,7 +18,7 @@
 
 - `appdb::prelude::*`: 常用类型和能力的集中导出
 - `appdb::connection`: 数据库初始化和运行时
-- `#[derive(Store)]`: 业务模型的主入口
+- `#[derive(Store)]`: 业务模型的主入口，推荐直接通过模型类型调用 CRUD
 - `appdb::graph::GraphRepo`: relation table 辅助
 - `appdb::query`: 原始 SQL 与带 bind 的查询辅助
 
@@ -73,6 +73,21 @@ struct Profile {
 ```
 
 对这种模型，业务代码仍然直接使用 `Profile` 调 `save` / `get` / `list` 等 Store API；`#[secure]` 字段会在仓储边界自动加密落库、读回时自动解密。第一版里 `create_return_id` 不支持敏感模型，且 `#[secure]` 字段不能参与 `#[unique]` 或自动 lookup。
+
+## 推荐 public API vs internal helpers
+
+推荐给业务调用方的主路径：
+
+- 在模型上直接调用 `save` / `save_many` / `create` / `get` / `list`
+- 需要实例方法时，通过 `appdb::Crud` trait 提供的包装调用
+- 图关系继续使用 `GraphRepo` / relation helpers
+
+不推荐把下面这些当成日常业务入口：
+
+- `appdb::repository::Repo::<T>`：这是仓储内部构建层，主要给库内部、测试和少量高级集成 seam 使用
+- 直接围绕 internal helper 组合 public CRUD 流程
+
+换句话说，`Repo` 仍然公开以保留扩展能力，但文档约定的主 API 已经收敛到模型级 Store/Crud surface，而不是 `Repo::<T>` 组合层。
 
 ## `#[store(ref)]` 嵌套引用
 
@@ -135,5 +150,6 @@ let value: Option<i64> = query_bound_return(stmt).await?;
 
 - `DbRuntime::open*` / `init_db*` 走的是 **schema-managed** 启动路径：运行时会先应用通过 schema inventory 注册的 DDL（例如 `#[unique]` 生成的索引）。
 - 直接用默认的嵌入式运行时做首次 `save` / `upsert_at` 时，库仍然保证 **schemaless** 持久化可用；这条承诺是独立的，不能把 managed 启动时顺带应用的 schema side effects 当作它的证明。
+- 因此文档里的推荐调用顺序是：把 `init_db*` / `DbRuntime::open*` 视为 managed schema 启动入口；把模型级 `save` / `get` / `list` 视为稳定的 public CRUD surface。两者分别表达启动契约与持久化契约，不要混成“必须先走 internal repo helper 才能正确保存”。
 - 更细的行为说明已经写进源码里的 rustdoc，直接看对应函数和结构体即可。
 - 这个库偏向单机嵌入式使用场景，不追求大而全的抽象层。

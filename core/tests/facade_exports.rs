@@ -1,5 +1,5 @@
-use appdb::prelude::{Id, TxStmt};
-use appdb::{CryptoContext, Sensitive};
+use appdb::prelude::{Crud, Id, TxStmt};
+use appdb::{CryptoContext, Sensitive, Store};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::SurrealValue;
 
@@ -7,6 +7,12 @@ use surrealdb::types::SurrealValue;
 struct FacadeSecret {
     #[secure]
     value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct FacadeUser {
+    id: Id,
+    name: String,
 }
 
 #[test]
@@ -32,4 +38,10 @@ fn prelude_reexports_common_items() {
 
     let id: Id = 42.into();
     assert_eq!(id.as_number(), Some(42));
+
+    let _save = FacadeUser::save;
+    let _save_many = FacadeUser::save_many;
+    let _create = FacadeUser::create;
+    let _get = FacadeUser::get::<&str>;
+    let _crud_save = <FacadeUser as Crud>::save;
 }
