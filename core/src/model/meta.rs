@@ -24,6 +24,11 @@ pub trait ModelMeta:
     + Send
     + Sync
 {
+    /// Returns the storage table name used for this model.
+    fn storage_table() -> &'static str {
+        Self::table_name()
+    }
+
     /// Returns the table name used for this model.
     fn table_name() -> &'static str;
 
@@ -32,7 +37,7 @@ pub trait ModelMeta:
     where
         RecordIdKey: From<T>,
     {
-        RecordId::new(Self::table_name(), id)
+        RecordId::new(Self::storage_table(), id)
     }
 }
 

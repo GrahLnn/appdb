@@ -2469,6 +2469,14 @@ fn store_unique_field_registers_schema_index() {
 #[test]
 fn table_as_reuses_target_table_name_and_lookup_metadata() {
     assert_eq!(ItAliasedPost::table_name(), ItAliasedPostBase::table_name());
+    assert_eq!(
+        ItAliasedPost::storage_table(),
+        ItAliasedPostBase::storage_table()
+    );
+    assert_eq!(
+        ItAliasedPostBase::storage_table(),
+        ItAliasedPost::table_name()
+    );
     assert_eq!(ItAliasedPostBase::lookup_fields(), &["slug"]);
 }
 

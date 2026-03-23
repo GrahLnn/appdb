@@ -253,7 +253,7 @@ where
     pub async fn create(data: T) -> Result<T> {
         let db = get_db()?;
         let created: Option<T::Stored> = db
-            .create(T::table_name())
+            .create(T::storage_table())
             .content(T::persist_foreign(data).await?)
             .await?;
         match created {
@@ -276,8 +276,8 @@ where
         let db = get_db()?;
         let stored = T::persist_foreign(data).await?;
         let created: Option<RecordId> = db
-            .query(QueryKind::create_return_id(T::table_name()))
-            .bind(("table", Table::from(T::table_name())))
+            .query(QueryKind::create_return_id(T::storage_table()))
+            .bind(("table", Table::from(T::storage_table())))
             .bind(("data", stored))
             .await?
             .check()?
@@ -389,7 +389,7 @@ where
         for item in data {
             stored.push(T::persist_foreign(item).await?);
         }
-        let created: Vec<T::Stored> = db.insert(T::table_name()).content(stored).await?;
+        let created: Vec<T::Stored> = db.insert(T::storage_table()).content(stored).await?;
         stored_rows_to_public_hydrated::<T>(created).await
     }
 
@@ -406,8 +406,8 @@ where
                 chunk_clone.push(T::persist_foreign(item).await?);
             }
             let inserted: Vec<T::Stored> = db
-                .query(QueryKind::insert(T::table_name()))
-                .bind(("table", Table::from(T::table_name())))
+                .query(QueryKind::insert(T::storage_table()))
+                .bind(("table", Table::from(T::storage_table())))
                 .bind(("data", chunk_clone))
                 .await?
                 .check()?
@@ -436,8 +436,11 @@ where
                 chunk_clone.push(T::persist_foreign(item).await?);
             }
             let inserted: Vec<T::Stored> = db
-                .query(QueryKind::insert_or_replace(T::table_name(), keys.clone()))
-                .bind(("table", Table::from(T::table_name())))
+                .query(QueryKind::insert_or_replace(
+                    T::storage_table(),
+                    keys.clone(),
+                ))
+                .bind(("table", Table::from(T::storage_table())))
                 .bind(("data", chunk_clone))
                 .await?
                 .check()?
@@ -454,7 +457,7 @@ where
         RecordIdKey: From<K>,
         K: Send,
     {
-        let record = RecordId::new(T::table_name(), id);
+        let record = RecordId::new(T::storage_table(), id);
         Self::delete_record(record).await
     }
 
@@ -475,7 +478,7 @@ where
         let db = get_db()?;
         let result = db
             .query(QueryKind::delete_table())
-            .bind(("table", Table::from(T::table_name())))
+            .bind(("table", Table::from(T::storage_table())))
             .await?;
         if let Err(err) = result.check() {
             match DBError::from(err) {
@@ -490,8 +493,8 @@ where
     pub async fn find_one_id(k: &str, v: &str) -> Result<RecordId> {
         let db = get_db()?;
         let ids: Vec<RecordId> = db
-            .query(QueryKind::select_id_single(T::table_name()))
-            .bind(("table", Table::from(T::table_name())))
+            .query(QueryKind::select_id_single(T::storage_table()))
+            .bind(("table", Table::from(T::storage_table())))
             .bind(("k", k.to_owned()))
             .bind(("v", v.to_owned()))
             .await?
@@ -506,8 +509,8 @@ where
     pub async fn list_record_ids() -> Result<Vec<RecordId>> {
         let db = get_db()?;
         let mut result = db
-            .query(QueryKind::all_id(T::table_name()))
-            .bind(("table", Table::from(T::table_name())))
+            .query(QueryKind::all_id(T::storage_table()))
+            .bind(("table", Table::from(T::storage_table())))
             .await?
             .check()?;
         let ids: Vec<RecordId> = result.take(0)?;
@@ -527,7 +530,7 @@ where
             .collect::<Vec<_>>();
         let mut query = db
             .query(QueryKind::select_id_by_fields(&fields))
-            .bind(("table", Table::from(T::table_name())));
+            .bind(("table", Table::from(T::storage_table())));
 
         for (idx, (field, value)) in lookup_parts.into_iter().enumerate() {
             query = query
@@ -560,7 +563,7 @@ where
         let (stored, created_foreign_records) =
             crate::run_with_foreign_cleanup_scope(|| async { T::persist_foreign(data).await })
                 .await?;
-        let (record, content, id) = prepare_save_parts(T::table_name(), stored)?;
+        let (record, content, id) = prepare_save_parts(T::storage_table(), stored)?;
         let mut result = db
             .query("BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;")
             .bind(("record", record.clone()))
@@ -591,10 +594,10 @@ where
     {
         let db = get_db()?;
         let key: RecordIdKey = id.into();
-        let record = RecordId::new(T::table_name(), key.clone());
+        let record = RecordId::new(T::storage_table(), key.clone());
         if T::has_foreign_fields() {
             let stmt = crate::query::RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
-                .bind("table", T::table_name())
+                .bind("table", T::storage_table())
                 .bind("id", key);
             let raw = crate::query::query_bound_return::<serde_json::Value>(stmt)
                 .await?
@@ -624,7 +627,7 @@ where
             let db = get_db()?;
             let mut result = db
                 .query(QueryKind::select_all_with_id())
-                .bind(("table", Table::from(T::table_name())))
+                .bind(("table", Table::from(T::storage_table())))
                 .await?
                 .check()?;
             let rows: Vec<SurrealDbValue> = result.take(0)?;
@@ -634,7 +637,7 @@ where
         let db = get_db()?;
         let mut result = db
             .query(QueryKind::select_all_with_id())
-            .bind(("table", Table::from(T::table_name())))
+            .bind(("table", Table::from(T::storage_table())))
             .await?
             .check()?;
         let rows: Vec<T::Stored> = result.take(0)?;
@@ -648,7 +651,7 @@ where
             let db = get_db()?;
             let mut result = db
                 .query(QueryKind::select_limit_with_id())
-                .bind(("table", Table::from(T::table_name())))
+                .bind(("table", Table::from(T::storage_table())))
                 .bind(("count", count))
                 .await?
                 .check()?;
@@ -659,7 +662,7 @@ where
         let db = get_db()?;
         let mut result = db
             .query(QueryKind::select_limit_with_id())
-            .bind(("table", Table::from(T::table_name())))
+            .bind(("table", Table::from(T::storage_table())))
             .bind(("count", count))
             .await?
             .check()?;
@@ -690,7 +693,7 @@ where
                     })
                     .await?;
                 created_foreign_records.append(&mut row_foreign_records);
-                let (record, content, id) = prepare_save_parts(T::table_name(), stored_row)?;
+                let (record, content, id) = prepare_save_parts(T::storage_table(), stored_row)?;
                 sql.push_str(&format!(
                     "UPSERT ONLY $record_{idx} CONTENT $data_{idx} RETURN AFTER;"
                 ));

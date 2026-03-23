@@ -500,7 +500,10 @@ where
         _ => return Ok(None),
     };
 
-    Ok(Some(surrealdb::types::RecordId::new(T::table_name(), key)))
+    Ok(Some(surrealdb::types::RecordId::new(
+        T::storage_table(),
+        key,
+    )))
 }
 
 #[::async_trait::async_trait]
