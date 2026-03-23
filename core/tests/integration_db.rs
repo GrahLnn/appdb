@@ -1497,6 +1497,14 @@ fn failed_save_can_retry_cleanly_with_same_identifiers() {
         assert_eq!(saved, corrected);
         assert_eq!(loaded, corrected);
         assert_eq!(child, corrected.child);
+        assert!(
+            atomic_parent_exists("atomic-parent-retry").await,
+            "successful retry should persist the parent once the failure flag is cleared"
+        );
+        assert!(
+            atomic_child_exists("atomic-child-retry").await,
+            "successful retry should persist the child once the failure flag is cleared"
+        );
         assert_eq!(
             raw.child,
             RecordId::new(ItAtomicSaveChild::table_name(), "atomic-child-retry")
