@@ -18,7 +18,7 @@ Use this skill for features that modify `core` and/or `macros` in the `appdb` wo
 ## Work Procedure
 
 1. Read `mission.md`, mission `AGENTS.md`, `.factory/services.yaml`, and relevant `.factory/library/*.md` files before changing code. Rely on worker-base for startup; do not manually invoke `.factory/init.sh` unless the current shell can execute it correctly.
-2. If project instructions ask for a GitNexus scope-check command that is unavailable in the current environment, fall back to `git diff` plus the available `gitnexus impact/context` commands and explicitly record that fallback in the handoff.
+2. If project instructions ask for a GitNexus scope-check command that is unavailable in the current environment, fall back to `git diff` plus any available `gitnexus impact/context` commands; if no GitNexus commands are available at all, use pure `git diff` / `git status` / targeted file inspection and explicitly record that fallback in the handoff.
 3. In this mission's mixed Git/Jujutsu environment, prefer `git status` / `git diff` for repository inspection unless the orchestrator explicitly requests Jujutsu commands; avoid `jj status` or similar working-copy commands when a clean Git view is sufficient.
 4. Inspect the exact symbols and tests touched by the feature. Match existing code style and current library patterns; do not invent a second public path if the mission calls for a single main path.
 5. Write tests first for the feature's acceptance criteria:
@@ -36,11 +36,12 @@ Use this skill for features that modify `core` and/or `macros` in the `appdb` wo
 9. Manually verify any raw-storage assertions required by the feature using the repository's testing/runtime surface. If the feature claims encrypted-at-rest behavior, confirm it through raw DB evidence rather than only in-memory helper assertions.
 10. For nested-reference work, prove both halves of the contract: parent rows store only child `RecordId` values, and caller-facing APIs still return hydrated domain children.
 11. For this mission's foreign/save regressions, treat failure paths as first-class acceptance criteria: write a failing regression that proves residue exists or could exist, then implement cleanup/atomicity so the failure-path test passes.
-12. When a feature claims read-path consistency, compare the same logical row across `save` return, `get`, `get_record`, `list`, and `list_limit`; make the fixture state unambiguous so `list_limit` is proving the intended row.
-13. When validating raw-query compatibility, exercise a true string-form record link case (for example ``child:`c1```) rather than only object-form `{ id: ... }` rows.
-14. For `#[table_as(...)]` work, prove both target-table raw storage and alias-facing hydrated values; if the alias model itself contains `#[foreign]` fields, validate that nested alias graph across all required read entry points.
-15. Run targeted validation during iteration, then run the repo commands from `.factory/services.yaml` before ending the feature. If a validator fails, fix the issue or return to the orchestrator with a precise blocker.
-16. Before finalizing a feature, inspect your diff so the change stays within the assigned feature scope; do not leave unrelated sibling-feature edits mixed into the same worker result.
-17. Check both `git diff` and `git diff --cached` before commit/final handoff. If pre-existing staged changes outside your feature scope are present and you cannot safely isolate them, return to the orchestrator instead of committing over them.
-18. Do not leave background processes running. Avoid watch modes. If you start anything long-lived, stop it before ending the session.
-19. In the handoff, be explicit about tests added, commands run, what behavior changed, raw-row evidence collected, failure-path evidence (if any), and any unresolved risks or follow-up work.
+12. Passing residue-cleanup tests is not sufficient for atomicity claims; inspect the actual commit boundary in `save` / `save_many` and do not mark the feature complete if a later failure would still require post-commit repair.
+13. When a feature claims read-path consistency, compare the same logical row across `save` return, `get`, `get_record`, `list`, and `list_limit`; make the fixture state unambiguous so `list_limit` is proving the intended row.
+14. When validating raw-query compatibility, exercise a true string-form record link case (for example ``child:`c1```) rather than only object-form `{ id: ... }` rows.
+15. For `#[table_as(...)]` work, prove both target-table raw storage and alias-facing hydrated values; if the alias model itself contains `#[foreign]` fields, validate that nested alias graph across all required read entry points.
+16. Run targeted validation during iteration, then run the repo commands from `.factory/services.yaml` before ending the feature. If a validator fails, fix the issue or return to the orchestrator with a precise blocker.
+17. Before finalizing a feature, inspect your diff so the change stays within the assigned feature scope; do not leave unrelated sibling-feature edits mixed into the same worker result.
+18. Check both `git diff` and `git diff --cached` before commit/final handoff. If pre-existing staged changes outside your feature scope are present and you cannot safely isolate them, return to the orchestrator instead of committing over them.
+19. Do not leave background processes running. Avoid watch modes. If you start anything long-lived, stop it before ending the session.
+20. In the handoff, be explicit about tests added, commands run, what behavior changed, raw-row evidence collected, failure-path evidence (if any), and any unresolved risks or follow-up work.
