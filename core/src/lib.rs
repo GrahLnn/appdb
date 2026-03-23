@@ -164,14 +164,60 @@ where
         + Send
         + Sync,
 {
+    let explicit_record_id = explicit_foreign_record_id(&value)?;
+
     match value.resolve_record_id().await {
-        Ok(record_id) => Ok(record_id),
+        Ok(record_id) => {
+            if repository::Repo::<T>::exists_record(record_id.clone()).await? {
+                Ok(record_id)
+            } else if let Some(explicit_record_id) = explicit_record_id {
+                let saved = repository::Repo::<T>::create_at(explicit_record_id, value).await?;
+                saved.resolve_record_id().await
+            } else {
+                let saved = repository::Repo::<T>::create(value).await?;
+                saved.resolve_record_id().await
+            }
+        }
         Err(err) if err.to_string().contains("Record not found") => {
             let saved = repository::Repo::<T>::create(value).await?;
             saved.resolve_record_id().await
         }
+        Err(_err) if explicit_record_id.is_some() => {
+            let saved = repository::Repo::<T>::create_at(
+                explicit_record_id.expect("checked is_some above"),
+                value,
+            )
+            .await?;
+            saved.resolve_record_id().await
+        }
         Err(err) => Err(err),
     }
+}
+
+fn explicit_foreign_record_id<T>(value: &T) -> anyhow::Result<Option<surrealdb::types::RecordId>>
+where
+    T: model::meta::ModelMeta + serde::Serialize,
+{
+    let serde_json::Value::Object(map) = serde_json::to_value(value)? else {
+        return Ok(None);
+    };
+
+    let key = match map.get("id") {
+        Some(serde_json::Value::String(id)) if !id.is_empty() => {
+            surrealdb::types::RecordIdKey::from(id.clone())
+        }
+        Some(serde_json::Value::Number(id)) => {
+            surrealdb::types::RecordIdKey::from(id.as_i64().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "model `{}` has `id` but numeric id is out of i64 range",
+                    std::any::type_name::<T>()
+                )
+            })?)
+        }
+        _ => return Ok(None),
+    };
+
+    Ok(Some(surrealdb::types::RecordId::new(T::table_name(), key)))
 }
 
 #[::async_trait::async_trait]
