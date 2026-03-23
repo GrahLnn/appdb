@@ -174,6 +174,71 @@ where
     serializer.serialize_str(value)
 }
 
+pub fn deserialize_record_id_or_compat_string<'de, D>(deserializer: D) -> Result<RecordId, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::String(text) => {
+            if let Ok(record) = RecordId::parse_simple(&text) {
+                Ok(record)
+            } else {
+                Ok(RecordId::new("_", text.trim_matches('`').to_owned()))
+            }
+        }
+        other => serde_json::from_value(other).map_err(|err| {
+            <D::Error as serde::de::Error>::custom(format!(
+                "failed to deserialize record id: {err}"
+            ))
+        }),
+    }
+}
+
+pub fn record_id_to_plain_string(record: &RecordId) -> String {
+    match &record.key {
+        RecordIdKey::String(value) => value.trim_matches('`').to_owned(),
+        RecordIdKey::Number(value) => value.to_string(),
+        other => other.to_sql(),
+    }
+}
+
+pub fn normalize_public_id_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(id) = map.get_mut("id") {
+                let normalized = match id {
+                    serde_json::Value::String(text) => {
+                        RecordId::parse_simple(text).ok().map(|record| {
+                            serde_json::Value::String(record_id_to_plain_string(&record))
+                        })
+                    }
+                    serde_json::Value::Object(_) => serde_json::from_value::<RecordId>(id.clone())
+                        .ok()
+                        .map(|record| {
+                            serde_json::Value::String(record_id_to_plain_string(&record))
+                        }),
+                    _ => None,
+                };
+
+                if let Some(normalized) = normalized {
+                    *id = normalized;
+                }
+            }
+
+            for nested in map.values_mut() {
+                normalize_public_id_value(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for nested in items {
+                normalize_public_id_value(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{deserialize_id_or_record_id_as_string, serialize_id_as_string, Id};

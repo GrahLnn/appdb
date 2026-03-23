@@ -268,7 +268,14 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
     let stored_fields = named_fields.iter().map(|field| {
         let ident = field.ident.clone().expect("named field");
         let ty = stored_field_type(field, &foreign_fields);
-        quote! { #ident: #ty }
+        if is_record_id_type(&ty) {
+            quote! {
+                #[serde(deserialize_with = "::appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
+                #ident: #ty
+            }
+        } else {
+            quote! { #ident: #ty }
+        }
     });
 
     let into_stored_assignments = named_fields.iter().map(|field| {
@@ -1204,6 +1211,16 @@ fn is_id_type(ty: &Type) -> bool {
         Type::Path(TypePath { path, .. }) => path.segments.last().is_some_and(|segment| {
             let ident = segment.ident.to_string();
             ident == "Id"
+        }),
+        _ => false,
+    }
+}
+
+fn is_record_id_type(ty: &Type) -> bool {
+    match ty {
+        Type::Path(TypePath { path, .. }) => path.segments.last().is_some_and(|segment| {
+            let ident = segment.ident.to_string();
+            ident == "RecordId"
         }),
         _ => false,
     }

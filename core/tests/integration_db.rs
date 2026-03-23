@@ -78,6 +78,7 @@ struct ItNumberUser {
 
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 struct ItRecordUser {
+    #[serde(deserialize_with = "appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
     id: RecordId,
     name: String,
 }
@@ -170,12 +171,14 @@ struct StoredAliasedNestedPostRow {
     id: Id,
     slug: String,
     headline: String,
+    #[serde(deserialize_with = "appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
     author: RecordId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
 struct StoredAliasedNestedHolderRow {
     id: Id,
+    #[serde(deserialize_with = "appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
     featured: RecordId,
 }
 
@@ -203,12 +206,14 @@ struct ItNestedForeignRoot {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
 struct StoredNestedForeignRootRow {
     id: Id,
+    #[serde(deserialize_with = "appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
     branch: RecordId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
 struct StoredNestedForeignBranchRow {
     id: Id,
+    #[serde(deserialize_with = "appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
     leaf: RecordId,
 }
 
@@ -1051,6 +1056,45 @@ fn ordinary_colon_strings_are_not_record_links() {
         assert_eq!(saved, input);
         assert_eq!(loaded, input);
         assert_eq!(raw, serde_json::json!({ "payload": "alpha:beta" }));
+    });
+}
+
+#[test]
+fn decode_record_link_value_accepts_table_agnostic_unquoted_record_ids() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecordUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let db = get_db().expect("db should be initialized");
+        db.query("CREATE type::record($table, $id) CONTENT { name: $name };")
+            .bind(("table", "custom_table"))
+            .bind(("id", 1001))
+            .bind(("name", "custom"))
+            .await
+            .expect("seed custom table row should succeed")
+            .check()
+            .expect("seed custom table row should be valid");
+
+        let raw: serde_json::Value = query_bound_return(
+            RawSqlStmt::new(
+                "RETURN { id: type::string(type::record($first_table, $first_id)), name: $plain }",
+            )
+            .bind("first_table", "custom_table")
+            .bind("first_id", 1001)
+            .bind("plain", "alpha:beta gamma"),
+        )
+        .await
+        .expect("raw record-id payload query should succeed")
+        .expect("raw record-id payload row should exist");
+
+        let selected = serde_json::to_string(&raw).expect("raw payload should serialize");
+
+        assert!(selected.contains("custom_table:1001"));
+        assert!(selected.contains("alpha:beta gamma"));
     });
 }
 

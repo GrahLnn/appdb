@@ -229,18 +229,15 @@ pub fn rewrite_foreign_json_value(value: &mut serde_json::Value) {
     }
 }
 
-fn parse_record_link_string(text: &str) -> Option<serde_json::Value> {
+pub(crate) fn parse_record_link_string(text: &str) -> Option<serde_json::Value> {
     let (table, key) = text.split_once(':')?;
-    if table.is_empty() {
+    if table.is_empty() || !is_valid_record_link_table(table) {
         return None;
     }
 
     let key = if key.starts_with('`') && key.ends_with('`') {
         key.trim_matches('`')
     } else {
-        if !table.starts_with("it_record_") {
-            return None;
-        }
         key
     };
 
@@ -254,6 +251,12 @@ fn parse_record_link_string(text: &str) -> Option<serde_json::Value> {
     };
 
     Some(serde_json::json!({ "table": table, "key": key }))
+}
+
+fn is_valid_record_link_table(table: &str) -> bool {
+    table
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn rewrite_foreign_record_link_value(value: &mut serde_json::Value) {
@@ -284,6 +287,10 @@ fn rewrite_foreign_record_link_value(value: &mut serde_json::Value) {
 }
 
 /// Rewrites string-form record links into the canonical RecordId serde contract.
+///
+/// This remains available for callers that are explicitly decoding RecordId-typed
+/// payloads. Generic stored-row decode paths should prefer field-type-aware
+/// deserialization instead of recursively rewriting arbitrary strings.
 pub fn decode_record_link_value(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::String(text) => {
@@ -425,7 +432,9 @@ where
     }
 
     async fn hydrate_foreign(id: surrealdb::types::RecordId) -> anyhow::Result<Self> {
-        repository::Repo::<Self>::get_record(id).await
+        let mut value = serde_json::to_value(repository::Repo::<Self>::get_record(id).await?)?;
+        crate::serde_utils::id::normalize_public_id_value(&mut value);
+        Ok(serde_json::from_value(value)?)
     }
 }
 
