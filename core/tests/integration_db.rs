@@ -790,6 +790,18 @@ async fn load_nested_foreign_branch_raw(id: &str) -> StoredNestedForeignBranchRo
     }
 }
 
+async fn seed_nested_foreign_root_pair(
+    other: ItNestedForeignRoot,
+    target: ItNestedForeignRoot,
+) -> ItNestedForeignRoot {
+    ItNestedForeignRoot::save(other)
+        .await
+        .expect("seed save should succeed");
+    ItNestedForeignRoot::save(target.clone())
+        .await
+        .expect("target save should succeed")
+}
+
 async fn ensure_tables_exist(table_names: &[&str]) {
     let db = get_db().expect("database should be initialized");
     for table in table_names {
@@ -3583,12 +3595,7 @@ fn foreign_read_paths_are_consistent_across_get_variants() {
             },
         };
 
-        ItNestedForeignRoot::save(other.clone())
-            .await
-            .expect("seed save should succeed");
-        let saved = ItNestedForeignRoot::save(target.clone())
-            .await
-            .expect("target save should succeed");
+        let saved = seed_nested_foreign_root_pair(other, target.clone()).await;
 
         let got = ItNestedForeignRoot::get("consistent-root-target")
             .await
@@ -3606,7 +3613,7 @@ fn foreign_read_paths_are_consistent_across_get_variants() {
             .into_iter()
             .find(|row| row.id == Id::from("consistent-root-target"))
             .expect("target row should be present in list results");
-        let limited = ItNestedForeignRoot::list_limit(10)
+        let limited = ItNestedForeignRoot::list_limit(2)
             .await
             .expect("list_limit should succeed");
         let limited_target = limited
@@ -3644,6 +3651,17 @@ fn successful_foreign_save_matches_all_read_entrypoints() {
             .await
             .expect("delete_all should succeed");
 
+        let other = ItNestedForeignRoot {
+            id: Id::from("save-return-root-other"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("save-return-branch-other"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("save-return-leaf-other"),
+                    code: "save-return-code-other".to_owned(),
+                },
+            },
+        };
+
         let input = ItNestedForeignRoot {
             id: Id::from("save-return-root"),
             branch: ItNestedForeignBranch {
@@ -3655,9 +3673,7 @@ fn successful_foreign_save_matches_all_read_entrypoints() {
             },
         };
 
-        let saved = ItNestedForeignRoot::save(input.clone())
-            .await
-            .expect("save should succeed");
+        let saved = seed_nested_foreign_root_pair(other.clone(), input.clone()).await;
         let got = ItNestedForeignRoot::get("save-return-root")
             .await
             .expect("get should succeed");
@@ -3673,20 +3689,26 @@ fn successful_foreign_save_matches_all_read_entrypoints() {
             .into_iter()
             .find(|row| row.id == Id::from("save-return-root"))
             .expect("saved row should be present in list results");
-        let limited = ItNestedForeignRoot::list_limit(1)
+        let limited = ItNestedForeignRoot::list_limit(2)
             .await
-            .expect("list_limit should succeed")
+            .expect("list_limit should succeed");
+        let limited_target = limited
             .into_iter()
             .find(|row| row.id == Id::from("save-return-root"))
             .expect("saved row should be present in list_limit results");
         let root_raw = load_nested_foreign_root_raw("save-return-root").await;
         let branch_raw = load_nested_foreign_branch_raw("save-return-branch").await;
 
+        assert_ne!(
+            other.id, input.id,
+            "fixture should include a distinct second row"
+        );
+
         assert_eq!(saved, input);
         assert_eq!(got, input);
         assert_eq!(got_record, input);
         assert_eq!(listed, input);
-        assert_eq!(limited, input);
+        assert_eq!(limited_target, input);
         assert_eq!(
             root_raw.branch,
             RecordId::new(ItNestedForeignBranch::table_name(), "save-return-branch")
