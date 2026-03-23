@@ -1181,6 +1181,12 @@ fn ordinary_colon_strings_are_not_record_links() {
         let loaded = ItStringUser::get("colon-string-user")
             .await
             .expect("get should preserve ordinary colon strings");
+        let loaded_record = Repo::<ItStringUser>::get_record(RecordId::new(
+            ItStringUser::table_name(),
+            "colon-string-user",
+        ))
+        .await
+        .expect("get_record should preserve ordinary colon strings");
         let raw: serde_json::Value = query_bound_return(RawSqlStmt::new(format!(
             "SELECT payload FROM {}:`colon-string-user`;",
             ItStringUser::table_name()
@@ -1191,6 +1197,7 @@ fn ordinary_colon_strings_are_not_record_links() {
 
         assert_eq!(saved, input);
         assert_eq!(loaded, input);
+        assert_eq!(loaded_record, input);
         assert_eq!(raw, serde_json::json!({ "payload": "alpha:beta" }));
     });
 }

@@ -40,6 +40,7 @@ Architectural decisions, discovered patterns, and mission-specific integration g
   - Stored field types for foreign containers must preserve the same wrapper shape while recursively replacing only the leaf type with `RecordId`.
   - Raw-query compatibility for this mission includes string-form record links such as ``child:`c1```; decode helpers must normalize them instead of assuming only `{ id: ... }` shapes.
   - Follow-up scope after `0.2.6`: schemaless table bootstrap must be a Store-wide persistence rule for all persisted types encountered in the save graph, not a foreign-specific exception path.
+- Follow-up proof split after `0.2.6`: treat schema-managed inventory application and schemaless first-save/bootstrap as separate contracts. Managed-open proof belongs to the runtime/schema layer; schemaless save correctness must stand on its own without borrowing schema side effects from managed startup.
   - Follow-up scope after `0.2.6`: record-link parsing must stay strict enough that ordinary colon-containing payload strings (for example `alpha:beta`) are not coerced into `RecordId` decode paths.
   - If strict record-link parsing conflicts with existing string-form `RecordId` compatibility, prefer moving that compatibility into a field-type-aware repository/stored-row decode seam rather than broadening the global string rewrite path.
   - `#[table_as(...)]` aliases must continue to resolve through the target table even when the aliased model itself contains `#[foreign]` fields and is later nested again as a foreign child.
