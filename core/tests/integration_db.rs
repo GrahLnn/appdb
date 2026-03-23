@@ -18,6 +18,49 @@ use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
 
+#[derive(Clone, Default)]
+struct RecordingForeignPersistence {
+    events: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl RecordingForeignPersistence {
+    fn events(&self) -> Vec<String> {
+        self.events.lock().expect("events lock poisoned").clone()
+    }
+}
+
+impl appdb::ForeignPersistence for RecordingForeignPersistence {
+    async fn exists_record(&self, record: RecordId) -> anyhow::Result<bool> {
+        self.events
+            .lock()
+            .expect("events lock poisoned")
+            .push(format!("exists:{record:?}"));
+        Repo::<ItAtomicSaveChild>::exists_record(record).await
+    }
+
+    async fn create<T>(&self, data: T) -> anyhow::Result<T>
+    where
+        T: ModelMeta + Crud + StoredModel + appdb::ForeignModel + Send,
+    {
+        self.events
+            .lock()
+            .expect("events lock poisoned")
+            .push(format!("create:{}", T::table_name()));
+        Repo::<T>::create(data).await
+    }
+
+    async fn create_at<T>(&self, id: RecordId, data: T) -> anyhow::Result<T>
+    where
+        T: ModelMeta + Crud + StoredModel + appdb::ForeignModel + Send,
+    {
+        self.events
+            .lock()
+            .expect("events lock poisoned")
+            .push(format!("create_at:{id:?}"));
+        Repo::<T>::create_at(id, data).await
+    }
+}
+
 static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static TEST_RT: LazyLock<Runtime> =
     LazyLock::new(|| Runtime::new().expect("integration runtime should be created"));
@@ -1294,6 +1337,42 @@ fn single_save_failure_leaves_no_foreign_residue() {
         assert!(
             !atomic_child_exists("atomic-child-single").await,
             "child row should not persist after failed save"
+        );
+    });
+}
+
+#[test]
+fn foreign_resolution_can_use_injected_persistence_context() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItAtomicSaveChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let persistence = RecordingForeignPersistence::default();
+        let record = appdb::resolve_foreign_record_id_with(
+            &persistence,
+            ItAtomicSaveChild {
+                id: Id::from("atomic-child-context"),
+                code: "context-code".to_owned(),
+            },
+        )
+        .await
+        .expect("foreign resolution with injected persistence should succeed");
+
+        assert_eq!(
+            record,
+            RecordId::new("it_atomic_save_child", "atomic-child-context")
+        );
+        assert!(atomic_child_exists("atomic-child-context").await);
+        assert_eq!(
+            persistence.events(),
+            vec![
+                "exists:RecordId { table: Table(\"it_atomic_save_child\"), key: String(\"atomic-child-context\") }".to_owned(),
+                "create_at:RecordId { table: Table(\"it_atomic_save_child\"), key: String(\"atomic-child-context\") }".to_owned(),
+            ]
         );
     });
 }
