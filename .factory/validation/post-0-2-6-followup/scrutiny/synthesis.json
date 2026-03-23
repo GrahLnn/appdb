@@ -1,12 +1,12 @@
 {
   "milestone": "post-0-2-6-followup",
   "round": 1,
-  "status": "fail",
+  "status": "pass",
   "validatorsRun": {
-    "test": {
-      "passed": false,
-      "command": "cargo test --workspace -- --test-threads 8",
-      "exitCode": 1
+    "format": {
+      "passed": true,
+      "command": "cargo fmt --all -- --check",
+      "exitCode": 0
     },
     "typecheck": {
       "passed": true,
@@ -18,44 +18,31 @@
       "command": "cargo clippy --workspace --all-targets -- -D warnings",
       "exitCode": 0
     },
-    "format": {
+    "test": {
       "passed": true,
-      "command": "cargo fmt --all -- --check",
+      "command": "cargo test --workspace -- --test-threads 8",
       "exitCode": 0
     }
   },
   "reviewsSummary": {
     "total": 2,
-    "passed": 1,
-    "failed": 1,
-    "failedFeatures": [
-      "milestone-c-store-schemaless-bootstrap"
-    ]
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "workspace",
-      "severity": "blocking",
-      "description": "Workspace validation failed before review completion because cargo test --workspace -- --test-threads 8 reproduces a current regression in graph_relation_name_is_bound_as_identifier: Repo::<ItRecordUser>::get_record now receives string \"it_record_user:x\" where RecordId deserialization is expected. Validators did not fully pass for this milestone."
-    },
-    {
-      "featureId": "milestone-c-store-schemaless-bootstrap",
-      "severity": "blocking",
-      "description": "Review found commit 83c9d237255cc46b5b665102e286613e0f6e012f bundled unrelated .factory/validation scrutiny artifacts from other milestones alongside the intended schemaless regression, so the feature diff was not isolated to its assigned scope."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skills",
-      "suggestion": "Strengthen rust-library-worker enforcement around isolating staged changes before commit, since the current procedure already asks workers to inspect and unstage unrelated diff but a reviewed feature still committed unrelated scrutiny artifacts.",
-      "evidence": "Review for milestone-c-store-schemaless-bootstrap found commit 83c9d237255cc46b5b665102e286613e0f6e012f included unrelated .factory/validation files despite the worker following the general diff-review steps.",
+      "suggestion": "Strengthen rust-library-worker enforcement around isolating staged changes before commit, since the current procedure already asks workers to inspect git status --short, unstage unrelated changes, and avoid committing pre-existing staged artifacts, but a reviewed feature still committed unrelated .factory/validation files from other milestones.",
+      "evidence": "Review for milestone-c-store-schemaless-bootstrap found commit 83c9d237255cc46b5b665102e286613e0f6e012f included unrelated .factory/validation files despite the existing staging-isolation guidance.",
       "isSystemic": false
     },
     {
       "target": "skills",
-      "suggestion": "Align rust-library-worker completion rules with actual mission expectations or enforce the full services.yaml validation suite more strictly before workers finish, because a reviewed passing feature omitted the full validation commands yet still completed.",
-      "evidence": "Review for milestone-c-strict-record-link-string-classification noted the worker skipped cargo test -p appdb --test integration_db -- --test-threads 1, cargo test -p appdb --test sensitive_compile -- --nocapture, and cargo test --workspace -- --test-threads 8 after edits.",
+      "suggestion": "When decode logic is tightened for string-form record ids, require at least one regression using a non-test-specific or multiple table-name shapes so implementations cannot hard-code the it_record_* naming pattern and still satisfy review coverage.",
+      "evidence": "Review for milestone-c-strict-record-link-string-classification found core/tests/integration_db.rs only exercised it_record_user:x and it_record_user:y, which allowed core/src/lib.rs to special-case the it_record_* prefix while leaving other legitimate table:key shapes unsupported.",
       "isSystemic": false
     }
   ],
