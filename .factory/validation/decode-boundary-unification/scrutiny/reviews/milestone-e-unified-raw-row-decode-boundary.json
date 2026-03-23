@@ -1,28 +1,15 @@
 {
   "featureId": "milestone-e-unified-raw-row-decode-boundary",
-  "reviewedAt": "2026-03-23T18:58:10Z",
-  "commitId": "decfa02",
+  "reviewedAt": "2026-03-23T19:12:25Z",
+  "commitId": "7a00bfe",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
-  "status": "fail",
+  "status": "pass",
   "codeReview": {
-    "summary": "The commit adds only a regression test; runtime decode ownership was already present before this feature and the committed diff does not introduce or consolidate a canonical raw-row decode seam in production code, so the feature does not satisfy the milestone requirement that runtime code\u2014not only tests\u2014establish the unified boundary.",
-    "issues": [
-      {
-        "file": "core/tests/integration_db.rs",
-        "line": 3965,
-        "severity": "blocking",
-        "description": "The only code change in commit decfa02 is a new integration regression. The milestone explicitly requires runtime decode code to introduce or consolidate one canonical raw-row normalize/decode seam reused by save-return and foreign-aware reads, but diff inspection shows no production-file changes in core/src. This means the feature as delivered is test-only and does not establish the required runtime ownership."
-      }
-    ]
+    "summary": "The original blocking issue against decfa02 remains valid for that historical commit, but the current milestone state has since fixed it: production decode ownership now lives in core/src/repository/mod.rs through a shared raw-row decode pipeline reused by save-return and foreign-aware read entrypoints, so the milestone now satisfies the runtime-code requirement.",
+    "issues": []
   },
-  "sharedStateObservations": [
-    {
-      "area": "skills",
-      "observation": "The rust-library-worker skill tells workers to write tests first, but for this feature it does not strongly enforce the milestone-specific rule that a test-only diff is insufficient when runtime decode ownership must move in production code. The worker saw the seam already existed and shipped only a regression, which contradicts the feature description.",
-      "evidence": "Feature description in mission features.json says this feature is not complete with test-only changes; transcript and handoff for worker session 21831580-47f2-42bd-92a4-3a0457efc569 state no runtime code change was needed, and git show --stat decfa02 shows only core/tests/integration_db.rs changed."
-    }
-  ],
-  "addressesFailureFrom": null,
-  "summary": "Fail: the committed feature adds useful coverage, but it does not modify runtime decode code, so it does not satisfy the milestone requirement that production code introduce or consolidate the canonical raw-row decode boundary."
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/decode-boundary-unification/scrutiny/reviews/milestone-e-unified-raw-row-decode-boundary.json",
+  "summary": "Pass: decfa02 was correctly rejected as test-only, and current HEAD now contains real production decode-boundary ownership in core/src/repository/mod.rs, so the original blocking issue is fixed in the present milestone state."
 }
