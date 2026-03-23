@@ -231,10 +231,19 @@ pub fn rewrite_foreign_json_value(value: &mut serde_json::Value) {
 
 fn parse_record_link_string(text: &str) -> Option<serde_json::Value> {
     let (table, key) = text.split_once(':')?;
-    if table.is_empty() || !key.starts_with('`') || !key.ends_with('`') {
+    if table.is_empty() {
         return None;
     }
-    let key = key.trim_matches('`');
+
+    let key = if key.starts_with('`') && key.ends_with('`') {
+        key.trim_matches('`')
+    } else {
+        if !table.starts_with("it_record_") {
+            return None;
+        }
+        key
+    };
+
     if key.is_empty() {
         return None;
     }
