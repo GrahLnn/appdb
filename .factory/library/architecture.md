@@ -33,6 +33,7 @@ Architectural decisions, discovered patterns, and mission-specific integration g
   - Parent-facing API values remain domain models; raw parent rows for nested refs must store only child `RecordId` values (or arrays thereof).
   - The default concrete-model foreign path keeps the current child resolution order: explicit child id first, otherwise existing `UniqueLookupMeta` lookup semantics; if no existing child matches, create exactly one child row.
   - Current mission raises the bar on write semantics: `save` and `save_many` must be user-visible all-or-nothing across parent rows and auto-persisted foreign children.
+  - Post-commit compensating deletes are not an acceptable substitute for that atomicity requirement; the commit boundary itself must not expose residue on an error path.
   - Default read behavior for this mission must be eager hydration across `get`, `get_record`, `list`, and `list_limit`; do not leave a divergent foreign decode path behind.
   - Foreign fields should be excluded from automatic lookup metadata, and `#[unique]` must not be allowed on foreign fields.
   - Recursive foreign support should live in a runtime helper trait adjacent to `Bridge`, not by hard-coding every container depth in the macro. Macros should validate only the allowed wrapper family (`Option`, `Vec`) and generate recursive persist/hydrate calls.
