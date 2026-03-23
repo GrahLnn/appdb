@@ -244,6 +244,33 @@ fn parse_record_link_string(text: &str) -> Option<serde_json::Value> {
     Some(serde_json::json!({ "table": table, "key": key }))
 }
 
+fn rewrite_foreign_record_link_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) => {
+            if let Some(record) = parse_record_link_string(text) {
+                *value = record;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(id) = map.get_mut("id") {
+                rewrite_foreign_record_link_value(id);
+                *value = id.clone();
+                return;
+            }
+
+            for nested in map.values_mut() {
+                rewrite_foreign_record_link_value(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for nested in items {
+                rewrite_foreign_record_link_value(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Rewrites string-form record links into the canonical RecordId serde contract.
 pub fn decode_record_link_value(value: &mut serde_json::Value) {
     match value {
@@ -268,26 +295,7 @@ pub fn decode_record_link_value(value: &mut serde_json::Value) {
 
 /// Rewrites stored foreign payloads into the canonical RecordId serde contract.
 pub fn decode_stored_record_links(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::String(_) => decode_record_link_value(value),
-        serde_json::Value::Object(map) => {
-            if let Some(id) = map.get("id").cloned() {
-                *value = id;
-                decode_record_link_value(value);
-                return;
-            }
-
-            for nested in map.values_mut() {
-                decode_stored_record_links(nested);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for nested in items {
-                decode_stored_record_links(nested);
-            }
-        }
-        _ => {}
-    }
+    rewrite_foreign_record_link_value(value);
 }
 
 /// Saves or resolves one foreign child model and returns its record id.
