@@ -1,0 +1,39 @@
+{
+  "featureId": "milestone-a-commit-boundary-single-save-atomicity",
+  "reviewedAt": "2026-03-23T00:00:00Z",
+  "commitId": "b8b228fe83809b0ff7ca93e854c2de242bbfe127",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature does not satisfy commit-boundary atomicity. `Repo::save` still commits the parent write before the failure-prone hydrate/return-shaping step and then repairs residue with post-commit deletes, which the feature explicitly forbids.",
+    "issues": [
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\repository\\mod.rs",
+        "line": 574,
+        "severity": "blocking",
+        "description": "`Repo::save` executes `BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;` before calling `T::hydrate_foreign(stored).await`. If hydration/return-shaping fails afterward, the code compensates with `db.delete(record)` and child deletes instead of keeping the commit boundary authoritative. That violates the feature requirement that the operation must not commit before it can still fail and must not use post-commit compensating deletes."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\tests\\integration_db.rs",
+        "line": 1257,
+        "severity": "blocking",
+        "description": "The added regression only proves residue is cleaned up after a forced hydrate failure. It does not prove true all-or-nothing commit-boundary behavior, so it can pass even while `Repo::save` still commits and repairs afterward. This leaves the core acceptance criterion unverified."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker handoff claims the feature is present at HEAD and validated, but the reviewed code still uses post-commit compensating deletes in `Repo::save`. The rust-library-worker skill already warns that residue-cleanup tests are insufficient for atomicity, so the worker appears to have marked success without following that requirement.",
+      "evidence": "Handoff `C:\\Users\\admin\\.factory\\missions\\ed95771b-aefa-4fdc-835a-4974ccd2bae0\\handoffs\\2026-03-23T08-04-08-347Z__milestone-a-commit-boundary-single-save-atomicity__89918594-16d2-4e2f-b2cc-e37f183d7b0a.json` says `Repo::save` no longer relies on post-commit compensating deletes, but `core/src/repository/mod.rs:582-587` still deletes the parent and created foreign rows after hydrate failure; skill file `C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md` steps 11-12 explicitly forbid treating cleanup-only behavior as atomicity proof."
+    },
+    {
+      "area": "conventions",
+      "observation": "Mission guidance about atomicity is already documented clearly; no additional shared-state gap beyond enforcing the existing rule was identified.",
+      "evidence": "Mission AGENTS at `C:\\Users\\admin\\.factory\\missions\\ed95771b-aefa-4fdc-835a-4974ccd2bae0\\AGENTS.md` states that post-commit compensating deletes do not satisfy atomicity and that workers must inspect the actual commit boundary; the current implementation in `core/src/repository/mod.rs:574-587` violates exactly that rule."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: the implementation preserves cleanup semantics but not true commit-boundary atomicity. `Repo::save` still commits before hydrate/return-shaping can fail and then performs compensating deletes, so the feature scope remains unmet despite the added regression passing."
+}

@@ -1,0 +1,63 @@
+{
+  "milestone": "save-atomicity",
+  "round": 2,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 1,
+    "failed": 1,
+    "failedFeatures": [
+      "milestone-a-atomic-save-and-retry-cleanup"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "milestone-a-atomic-save-and-retry-cleanup",
+      "severity": "blocking",
+      "description": "Repo::save commits the UPSERT transaction before calling hydrate_foreign, then tries to repair failures with db.delete on the parent and tracked foreign rows. That is explicitly the forbidden post-commit compensating-delete design, so the commit boundary is not all-or-nothing as required."
+    },
+    {
+      "featureId": "milestone-a-atomic-save-and-retry-cleanup",
+      "severity": "blocking",
+      "description": "Repo::save_many likewise commits the batch before hydrate_foreign runs, and on failure it issues best-effort deletes for parents and tracked children. This leaves atomicity dependent on cleanup succeeding after commit instead of on the transaction boundary itself."
+    },
+    {
+      "featureId": "milestone-a-atomic-save-and-retry-cleanup",
+      "severity": "blocking",
+      "description": "The new regressions only assert the database is clean after the compensating deletes complete. They do not prove the required stronger contract that the public error path never exposes already-committed residue without relying on post-commit cleanup."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md / skill guidance",
+      "suggestion": "Clarify shared GitNexus fallback guidance so workers may use pure `git diff`-based review when no GitNexus tooling is available at all, and distinguish that case from partial-tool fallback.",
+      "evidence": "Handoff skillFeedback for worker session d16b96e4-3c33-41db-becf-442d4d839435 says no gitnexus_* tools were available; C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md step 2 currently assumes some GitNexus impact/context commands may still be available.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The worker reported the feature as already satisfying a true atomic boundary even though the reviewed commit still uses post-commit delete cleanup in save/save_many. The skill/procedure may need a sharper check that commit-boundary atomicity is evidenced in code, not inferred from passing residue-cleanup tests.",
+      "reason": "ambiguous-or-not-actioned-by-scrutiny"
+    }
+  ],
+  "previousRound": "C:/Users/admin/appdb/.factory/validation/save-atomicity/scrutiny/synthesis.json"
+}

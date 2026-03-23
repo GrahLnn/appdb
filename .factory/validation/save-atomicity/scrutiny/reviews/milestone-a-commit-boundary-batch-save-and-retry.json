@@ -1,0 +1,34 @@
+{
+  "featureId": "milestone-a-commit-boundary-batch-save-and-retry",
+  "reviewedAt": "2026-03-23T08:14:36Z",
+  "commitId": "e27a6eb133cd865a8b35321ecea3f85e786e28a1",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The reviewed worker session made no code changes because the feature had already landed earlier, and the current implementation still relies on post-commit delete cleanup after hydrate failures instead of keeping batch save within a true commit-boundary atomic region. That violates the feature scope and mission guidance even though the targeted regressions pass.",
+    "issues": [
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\repository\\mod.rs",
+        "line": 721,
+        "severity": "blocking",
+        "description": "Repo::save_many commits the transaction before hydrating the returned rows, then compensates by deleting parents and tracked foreign children on hydrate failure. This is explicitly post-commit cleanup, not true commit-boundary atomicity, so a later failure still depends on repair after commit rather than the transaction boundary itself."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\repository\\mod.rs",
+        "line": 582,
+        "severity": "blocking",
+        "description": "The same post-commit cleanup pattern remains in Repo::save: hydration happens after COMMIT TRANSACTION, and failures trigger deletes afterward. The reviewed feature description required batch save and retries to depend on the same true commit-boundary atomicity, but the underlying boundary is still not authoritative."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill still instructs workers to write failure-path regressions first but does not force them to reject implementations that only make those regressions pass via post-commit deletes strongly enough; this worker stopped at no-op verification even though the code still violated the mission boundary.",
+      "evidence": "Worker transcript for session ce89d793-f3b9-4c63-b73c-9927fe095236 reports the feature was already implemented and verified without raising the remaining post-commit cleanup issue; current code in core/src/repository/mod.rs:567-590 and 677-729 still deletes after commit."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: the current implementation does not satisfy the feature’s required true commit-boundary atomicity. Batch save and retry semantics still rely on compensating deletes after commit, and the reviewed worker session did not address that remaining gap."
+}
