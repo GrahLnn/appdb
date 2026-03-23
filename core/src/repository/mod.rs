@@ -93,8 +93,7 @@ fn record_id_key_to_json_value(key: &RecordIdKey) -> Value {
 }
 
 fn normalize_foreign_shapes(value: &mut serde_json::Value) {
-    crate::rewrite_foreign_json_value(value);
-    normalize_nested_record_id_json(value);
+    crate::decode_stored_record_links(value);
 }
 
 async fn decode_hydrated_row<T>(mut row: serde_json::Value) -> Result<T>
@@ -140,9 +139,19 @@ where
     T: ForeignModel,
     T::Stored: serde::de::DeserializeOwned,
 {
-    let mut row = row.into_json_value();
+    let row = row.into_json_value();
+    decode_stored_row_value::<T>(row, Some(id))
+}
+
+fn decode_stored_row_value<T>(mut row: Value, id: Option<Value>) -> Result<T::Stored>
+where
+    T: ForeignModel,
+    T::Stored: serde::de::DeserializeOwned,
+{
     if let Value::Object(map) = &mut row {
-        map.insert("id".to_owned(), id);
+        if let Some(id) = id {
+            map.insert("id".to_owned(), id);
+        }
     }
 
     if T::has_foreign_fields() {
@@ -153,32 +162,16 @@ where
                 }
             }
         }
-        Ok(serde_json::from_value(row)?)
-    } else {
-        Ok(serde_json::from_value(row)?)
     }
+
+    crate::decode_record_link_value(&mut row);
+    Ok(serde_json::from_value(row)?)
 }
 
 pub(crate) async fn record_exists(record: RecordId) -> Result<bool> {
     let db = get_db()?;
     let existing: Option<SurrealDbValue> = db.select(record).await?;
     Ok(existing.is_some())
-}
-
-fn normalize_nested_record_id_json(value: &mut serde_json::Value) {
-    if let serde_json::Value::Object(map) = value {
-        if let Some(id) = map.get_mut("id") {
-            *id = serde_json::Value::String(appdb_id_from_record_string(id));
-        }
-
-        for nested in map.values_mut() {
-            normalize_nested_record_id_json(nested);
-        }
-    } else if let serde_json::Value::Array(items) = value {
-        for nested in items {
-            normalize_nested_record_id_json(nested);
-        }
-    }
 }
 
 fn appdb_id_from_record_string(value: &serde_json::Value) -> String {
@@ -344,9 +337,12 @@ where
     /// Loads a row by full `RecordId`.
     pub async fn get_record(record: RecordId) -> Result<T> {
         let db = get_db()?;
-        let record: Option<T::Stored> = db.select(record).await?;
+        let record: Option<SurrealDbValue> = db.select(record).await?;
         match record {
-            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
+            Some(stored) => {
+                let stored = decode_stored_row_value::<T>(stored.into_json_value(), None)?;
+                Ok(T::hydrate_foreign(stored).await?)
+            }
             None => Err(DBError::NotFound.into()),
         }
     }

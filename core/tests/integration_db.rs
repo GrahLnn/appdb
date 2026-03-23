@@ -129,6 +129,39 @@ struct StoredAliasedForeignParentRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItNestedForeignLeaf {
+    id: Id,
+    #[unique]
+    code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItNestedForeignBranch {
+    id: Id,
+    #[foreign]
+    leaf: ItNestedForeignLeaf,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItNestedForeignRoot {
+    id: Id,
+    #[foreign]
+    branch: ItNestedForeignBranch,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredNestedForeignRootRow {
+    id: Id,
+    branch: RecordId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredNestedForeignBranchRow {
+    id: Id,
+    leaf: RecordId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItInlineChild {
     id: Id,
     name: String,
@@ -492,9 +525,8 @@ async fn load_nested_parent_raw(id: &str) -> StoredNestedParentRow {
     let child = value
         .get("child")
         .cloned()
-        .map(serde_json::from_value::<RecordId>)
-        .expect("nested parent raw row should contain child")
-        .expect("nested parent child should decode as record id");
+        .map(|value| parse_record_id_value(value, "nested parent child"))
+        .expect("nested parent raw row should contain child");
     StoredNestedParentRow {
         id: Id::from(id),
         child,
@@ -518,12 +550,10 @@ async fn load_nested_optional_parent_raw(id: &str) -> StoredNestedOptionalParent
                 .map(|(_, key)| key.trim_matches('`').to_owned())
         })
         .expect("nested optional parent raw row should contain normalized string id");
-    let child = value
-        .get("child")
-        .cloned()
-        .map(serde_json::from_value::<RecordId>)
-        .transpose()
-        .expect("nested optional parent child should decode as optional record id");
+    let child = match value.get("child").cloned() {
+        Some(serde_json::Value::Null) | None => None,
+        Some(other) => Some(parse_record_id_value(other, "nested optional parent child")),
+    };
     StoredNestedOptionalParentRow {
         id: Id::from(id),
         child,
@@ -549,10 +579,12 @@ async fn load_nested_vec_parent_raw(id: &str) -> StoredNestedVecParentRow {
         .expect("nested vec parent raw row should contain normalized string id");
     let children = value
         .get("children")
-        .cloned()
-        .map(serde_json::from_value::<Vec<RecordId>>)
+        .and_then(serde_json::Value::as_array)
         .expect("nested vec parent raw row should contain children")
-        .expect("nested vec children should decode as record ids");
+        .iter()
+        .cloned()
+        .map(|value| parse_record_id_value(value, "nested vec child"))
+        .collect::<Vec<_>>();
     StoredNestedVecParentRow {
         id: Id::from(id),
         children,
@@ -576,13 +608,22 @@ async fn load_recursive_foreign_parent_raw(id: &str) -> StoredRecursiveForeignPa
                 .map(|(_, key)| key.trim_matches('`').to_owned())
         })
         .expect("recursive foreign parent raw row should contain normalized string id");
-    let children = value
-        .get("children")
-        .cloned()
-        .map(serde_json::from_value::<Option<Vec<Vec<RecordId>>>>)
-        .transpose()
-        .expect("recursive foreign children should decode as nested optional record ids")
-        .flatten();
+    let children = value.get("children").and_then(|value| match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::Array(rows) => Some(
+            rows.iter()
+                .map(|row| {
+                    row.as_array()
+                        .expect("recursive foreign child row should be an array")
+                        .iter()
+                        .cloned()
+                        .map(|value| parse_record_id_value(value, "recursive foreign child"))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>(),
+        ),
+        _ => panic!("recursive foreign children should be null or nested arrays"),
+    });
     StoredRecursiveForeignParentRow {
         id: Id::from(id),
         children,
@@ -609,12 +650,78 @@ async fn load_manual_foreign_parent_raw(id: &str) -> StoredManualForeignParentRo
     let child = value
         .get("child")
         .cloned()
-        .map(serde_json::from_value::<RecordId>)
-        .expect("manual foreign parent raw row should contain child")
-        .expect("manual foreign child should decode as record id");
+        .map(|value| parse_record_id_value(value, "manual foreign child"))
+        .expect("manual foreign parent raw row should contain child");
     StoredManualForeignParentRow {
         id: Id::from(id),
         child,
+    }
+}
+
+async fn load_nested_foreign_root_raw(id: &str) -> StoredNestedForeignRootRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItNestedForeignRoot::table_name())
+        .bind("id", id.to_owned());
+
+    let value = query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("nested foreign root raw row query should succeed")
+        .expect("nested foreign root raw row should exist");
+    let id = value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|raw| {
+            raw.split_once(':')
+                .map(|(_, key)| key.trim_matches('`').to_owned())
+        })
+        .expect("nested foreign root raw row should contain normalized string id");
+    let branch = value
+        .get("branch")
+        .cloned()
+        .map(|value| parse_record_id_value(value, "nested foreign root branch"))
+        .expect("nested foreign root raw row should contain branch");
+    StoredNestedForeignRootRow {
+        id: Id::from(id),
+        branch,
+    }
+}
+
+async fn load_nested_foreign_branch_raw(id: &str) -> StoredNestedForeignBranchRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItNestedForeignBranch::table_name())
+        .bind("id", id.to_owned());
+
+    let value = query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("nested foreign branch raw row query should succeed")
+        .expect("nested foreign branch raw row should exist");
+    let id = value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|raw| {
+            raw.split_once(':')
+                .map(|(_, key)| key.trim_matches('`').to_owned())
+        })
+        .expect("nested foreign branch raw row should contain normalized string id");
+    let leaf = value
+        .get("leaf")
+        .cloned()
+        .map(|value| parse_record_id_value(value, "nested foreign branch leaf"))
+        .expect("nested foreign branch raw row should contain leaf");
+    StoredNestedForeignBranchRow {
+        id: Id::from(id),
+        leaf,
+    }
+}
+
+async fn ensure_tables_exist(table_names: &[&str]) {
+    let db = get_db().expect("database should be initialized");
+    for table in table_names {
+        db.query(format!("DEFINE TABLE IF NOT EXISTS {table} SCHEMALESS;"))
+            .await
+            .expect("table define should succeed")
+            .check()
+            .expect("table define response should be valid");
     }
 }
 
@@ -635,6 +742,21 @@ fn assert_sensitive_row_encrypted(
         }
         (None, None) => {}
         other => panic!("unexpected note state: {other:?}"),
+    }
+}
+
+fn parse_record_id_value(value: serde_json::Value, context: &str) -> RecordId {
+    match serde_json::from_value::<RecordId>(value.clone()) {
+        Ok(record) => record,
+        Err(_) => {
+            let text = value
+                .as_str()
+                .unwrap_or_else(|| panic!("{context} should be a record-id-compatible string"));
+            let (table, key) = text
+                .split_once(':')
+                .unwrap_or_else(|| panic!("{context} should be a table:key record link"));
+            RecordId::new(table, key.trim_matches('`'))
+        }
     }
 }
 
@@ -3103,6 +3225,219 @@ fn nested_ref_cross_area_regressions() {
                 .await
                 .expect("mixed sensitive relation out_ids should succeed");
         assert!(sensitive_outs.iter().any(|id| id == &sensitive_target_id));
+    });
+}
+
+#[test]
+fn nested_foreign_models_roundtrip_through_get() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        ensure_tables_exist(&[
+            ItNestedForeignLeaf::table_name(),
+            ItNestedForeignBranch::table_name(),
+            ItNestedForeignRoot::table_name(),
+        ])
+        .await;
+
+        Repo::<ItNestedForeignRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignBranch>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let input = ItNestedForeignRoot {
+            id: Id::from("nested-foreign-root"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("nested-foreign-branch"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("nested-foreign-leaf"),
+                    code: "nested-leaf-code".to_owned(),
+                },
+            },
+        };
+
+        let saved = ItNestedForeignRoot::save(input.clone())
+            .await
+            .expect("save should succeed for nested foreign graph");
+        let loaded = ItNestedForeignRoot::get("nested-foreign-root")
+            .await
+            .expect("get should hydrate nested foreign graph");
+        let root_raw = load_nested_foreign_root_raw("nested-foreign-root").await;
+        let branch_raw = load_nested_foreign_branch_raw("nested-foreign-branch").await;
+
+        assert_eq!(saved, input);
+        assert_eq!(loaded, input);
+        assert_eq!(
+            root_raw.branch,
+            RecordId::new(ItNestedForeignBranch::table_name(), "nested-foreign-branch")
+        );
+        assert_eq!(
+            branch_raw.leaf,
+            RecordId::new(ItNestedForeignLeaf::table_name(), "nested-foreign-leaf")
+        );
+    });
+}
+
+#[test]
+fn foreign_read_paths_are_consistent_across_get_variants() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        ensure_tables_exist(&[
+            ItNestedForeignLeaf::table_name(),
+            ItNestedForeignBranch::table_name(),
+            ItNestedForeignRoot::table_name(),
+        ])
+        .await;
+
+        Repo::<ItNestedForeignRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignBranch>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let target = ItNestedForeignRoot {
+            id: Id::from("consistent-root-target"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("consistent-branch-target"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("consistent-leaf-target"),
+                    code: "consistent-target".to_owned(),
+                },
+            },
+        };
+        let other = ItNestedForeignRoot {
+            id: Id::from("consistent-root-other"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("consistent-branch-other"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("consistent-leaf-other"),
+                    code: "consistent-other".to_owned(),
+                },
+            },
+        };
+
+        ItNestedForeignRoot::save(other.clone())
+            .await
+            .expect("seed save should succeed");
+        let saved = ItNestedForeignRoot::save(target.clone())
+            .await
+            .expect("target save should succeed");
+
+        let got = ItNestedForeignRoot::get("consistent-root-target")
+            .await
+            .expect("get should succeed");
+        let got_record = ItNestedForeignRoot::get_record(RecordId::new(
+            ItNestedForeignRoot::table_name(),
+            "consistent-root-target",
+        ))
+        .await
+        .expect("get_record should succeed");
+        let listed = ItNestedForeignRoot::list()
+            .await
+            .expect("list should succeed");
+        let listed_target = listed
+            .into_iter()
+            .find(|row| row.id == Id::from("consistent-root-target"))
+            .expect("target row should be present in list results");
+        let limited = ItNestedForeignRoot::list_limit(10)
+            .await
+            .expect("list_limit should succeed");
+        let limited_target = limited
+            .into_iter()
+            .find(|row| row.id == Id::from("consistent-root-target"))
+            .expect("target row should be present in list_limit results");
+
+        assert_eq!(saved, target);
+        assert_eq!(got, target);
+        assert_eq!(got_record, target);
+        assert_eq!(listed_target, target);
+        assert_eq!(limited_target, target);
+    });
+}
+
+#[test]
+fn successful_foreign_save_matches_all_read_entrypoints() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        ensure_tables_exist(&[
+            ItNestedForeignLeaf::table_name(),
+            ItNestedForeignBranch::table_name(),
+            ItNestedForeignRoot::table_name(),
+        ])
+        .await;
+
+        Repo::<ItNestedForeignRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignBranch>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let input = ItNestedForeignRoot {
+            id: Id::from("save-return-root"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("save-return-branch"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("save-return-leaf"),
+                    code: "save-return-code".to_owned(),
+                },
+            },
+        };
+
+        let saved = ItNestedForeignRoot::save(input.clone())
+            .await
+            .expect("save should succeed");
+        let got = ItNestedForeignRoot::get("save-return-root")
+            .await
+            .expect("get should succeed");
+        let got_record = ItNestedForeignRoot::get_record(RecordId::new(
+            ItNestedForeignRoot::table_name(),
+            "save-return-root",
+        ))
+        .await
+        .expect("get_record should succeed");
+        let listed = ItNestedForeignRoot::list()
+            .await
+            .expect("list should succeed")
+            .into_iter()
+            .find(|row| row.id == Id::from("save-return-root"))
+            .expect("saved row should be present in list results");
+        let limited = ItNestedForeignRoot::list_limit(1)
+            .await
+            .expect("list_limit should succeed")
+            .into_iter()
+            .find(|row| row.id == Id::from("save-return-root"))
+            .expect("saved row should be present in list_limit results");
+        let root_raw = load_nested_foreign_root_raw("save-return-root").await;
+        let branch_raw = load_nested_foreign_branch_raw("save-return-branch").await;
+
+        assert_eq!(saved, input);
+        assert_eq!(got, input);
+        assert_eq!(got_record, input);
+        assert_eq!(listed, input);
+        assert_eq!(limited, input);
+        assert_eq!(
+            root_raw.branch,
+            RecordId::new(ItNestedForeignBranch::table_name(), "save-return-branch")
+        );
+        assert_eq!(
+            branch_raw.leaf,
+            RecordId::new(ItNestedForeignLeaf::table_name(), "save-return-leaf")
+        );
     });
 }
 

@@ -295,7 +295,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         let ident = field.ident.to_string();
         quote! {
             if let ::std::option::Option::Some(value) = map.get_mut(#ident) {
-                ::appdb::rewrite_foreign_json_value(value);
+                ::appdb::decode_stored_record_links(value);
             }
         }
     });
