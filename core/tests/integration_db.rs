@@ -3962,6 +3962,94 @@ fn raw_query_string_record_links_decode_into_foreign_models() {
 }
 
 #[test]
+fn decode_raw_row_helper_accepts_string_and_object_record_links() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        ensure_tables_exist(&[
+            ItNestedForeignLeaf::table_name(),
+            ItNestedForeignBranch::table_name(),
+            ItNestedForeignRoot::table_name(),
+        ])
+        .await;
+
+        Repo::<ItNestedForeignRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignBranch>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let leaf_sql = format!(
+            "CREATE ONLY {}:`decode-helper-leaf` CONTENT {{ code: 'decode-helper-code' }};",
+            ItNestedForeignLeaf::table_name()
+        );
+        query_bound_checked(RawSqlStmt::new(leaf_sql))
+            .await
+            .expect("leaf seed query should succeed");
+
+        let branch_sql = format!(
+            "CREATE ONLY {}:`decode-helper-branch` CONTENT {{ leaf: {{ id: '{}:`decode-helper-leaf`' }} }};",
+            ItNestedForeignBranch::table_name(),
+            ItNestedForeignLeaf::table_name()
+        );
+        query_bound_checked(RawSqlStmt::new(branch_sql))
+            .await
+            .expect("branch object-form record link query should succeed");
+
+        let root_sql = format!(
+            "CREATE ONLY {}:`decode-helper-root` CONTENT {{ branch: '{}:`decode-helper-branch`' }};",
+            ItNestedForeignRoot::table_name(),
+            ItNestedForeignBranch::table_name()
+        );
+        query_bound_checked(RawSqlStmt::new(root_sql))
+            .await
+            .expect("root string-form record link query should succeed");
+
+        let expected = ItNestedForeignRoot {
+            id: Id::from("decode-helper-root"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("decode-helper-branch"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("decode-helper-leaf"),
+                    code: "decode-helper-code".to_owned(),
+                },
+            },
+        };
+
+        let got = ItNestedForeignRoot::get("decode-helper-root")
+            .await
+            .expect("get should decode mixed string/object foreign links");
+        let got_record = ItNestedForeignRoot::get_record(RecordId::new(
+            ItNestedForeignRoot::table_name(),
+            "decode-helper-root",
+        ))
+        .await
+        .expect("get_record should reuse the shared decode helper");
+        let listed = ItNestedForeignRoot::list()
+            .await
+            .expect("list should reuse the shared decode helper")
+            .into_iter()
+            .find(|row| row.id == Id::from("decode-helper-root"))
+            .expect("decode-helper root should be present in list results");
+        let limited = ItNestedForeignRoot::list_limit(10)
+            .await
+            .expect("list_limit should reuse the shared decode helper")
+            .into_iter()
+            .find(|row| row.id == Id::from("decode-helper-root"))
+            .expect("decode-helper root should be present in list_limit results");
+
+        assert_eq!(got, expected);
+        assert_eq!(got_record, expected);
+        assert_eq!(listed, expected);
+        assert_eq!(limited, expected);
+    });
+}
+
+#[test]
 fn foreign_read_paths_are_consistent_across_get_variants() {
     let _guard = acquire_test_lock();
     run_async(async {
