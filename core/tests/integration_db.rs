@@ -10,7 +10,7 @@ use appdb::crypto::{
 use appdb::graph::{GraphCrud, GraphRepo};
 use appdb::model::meta::{register_table, HasId, ModelMeta, ResolveRecordId, UniqueLookupMeta};
 use appdb::model::relation::relation_name;
-use appdb::query::{query_bound_return, RawSqlStmt};
+use appdb::query::{query_bound_checked, query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
 use appdb::{Bridge, Crud, Id, Relation, Sensitive, Store, StoredModel};
@@ -3279,6 +3279,74 @@ fn nested_foreign_models_roundtrip_through_get() {
         assert_eq!(
             branch_raw.leaf,
             RecordId::new(ItNestedForeignLeaf::table_name(), "nested-foreign-leaf")
+        );
+    });
+}
+
+#[test]
+fn raw_query_string_record_links_decode_into_foreign_models() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        ensure_tables_exist(&[
+            ItNestedForeignLeaf::table_name(),
+            ItNestedForeignBranch::table_name(),
+            ItNestedForeignRoot::table_name(),
+        ])
+        .await;
+
+        Repo::<ItNestedForeignRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignBranch>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let leaf_sql = format!(
+            "CREATE ONLY {}:`raw-link-leaf` CONTENT {{ code: 'raw-link-code' }};",
+            ItNestedForeignLeaf::table_name()
+        );
+        query_bound_checked(RawSqlStmt::new(leaf_sql))
+            .await
+            .expect("leaf seed query should succeed");
+
+        let branch_sql = format!(
+            "CREATE ONLY {}:`raw-link-branch` CONTENT {{ leaf: '{}:`raw-link-leaf`' }};",
+            ItNestedForeignBranch::table_name(),
+            ItNestedForeignLeaf::table_name()
+        );
+        query_bound_checked(RawSqlStmt::new(branch_sql))
+            .await
+            .expect("branch raw string record link query should succeed");
+
+        let root_sql = format!(
+            "CREATE ONLY {}:`raw-link-root` CONTENT {{ branch: '{}:`raw-link-branch`' }};",
+            ItNestedForeignRoot::table_name(),
+            ItNestedForeignBranch::table_name()
+        );
+        query_bound_checked(RawSqlStmt::new(root_sql))
+            .await
+            .expect("root raw string record link query should succeed");
+
+        let loaded = ItNestedForeignRoot::get("raw-link-root")
+            .await
+            .expect("get should hydrate raw string record links through foreign models");
+
+        assert_eq!(
+            loaded,
+            ItNestedForeignRoot {
+                id: Id::from("raw-link-root"),
+                branch: ItNestedForeignBranch {
+                    id: Id::from("raw-link-branch"),
+                    leaf: ItNestedForeignLeaf {
+                        id: Id::from("raw-link-leaf"),
+                        code: "raw-link-code".to_owned(),
+                    },
+                },
+            }
         );
     });
 }

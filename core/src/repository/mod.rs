@@ -93,6 +93,7 @@ fn record_id_key_to_json_value(key: &RecordIdKey) -> Value {
 }
 
 fn normalize_foreign_shapes(value: &mut serde_json::Value) {
+    crate::rewrite_foreign_json_value(value);
     crate::decode_stored_record_links(value);
 }
 
