@@ -566,12 +566,29 @@ where
     /// Saves a model by its `id` field and returns the normalized row.
     pub async fn save(data: T) -> Result<T> {
         let db = get_db()?;
-        let stored = T::persist_foreign(data).await?;
+        let (stored, created_foreign_records) =
+            crate::run_with_foreign_cleanup_scope(|| async { T::persist_foreign(data).await })
+                .await?;
         let (record, content, id) = prepare_save_parts(T::table_name(), stored)?;
-        let row: Option<SurrealDbValue> = db.upsert(record).content(content).await?;
+        let mut result = db
+            .query("BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;")
+            .bind(("record", record.clone()))
+            .bind(("data", content.clone()))
+            .await?
+            .check()?;
+        let row: Option<SurrealDbValue> = result.take(1)?;
         let row = row.ok_or(DBError::EmptyResult("save"))?;
         let stored = decode_saved_row::<T>(row, id)?;
-        T::hydrate_foreign(stored).await
+        match T::hydrate_foreign(stored).await {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                let _: Option<SurrealDbValue> = db.delete(record).await?;
+                for foreign_record in created_foreign_records.into_iter().rev() {
+                    let _: Option<SurrealDbValue> = db.delete(foreign_record).await?;
+                }
+                Err(err)
+            }
+        }
     }
 
     /// Fetches one model by raw id key and normalizes the returned `id`.
@@ -668,16 +685,23 @@ where
 
         for chunk in data.chunks(chunk_size) {
             let mut prepared = Vec::with_capacity(chunk.len());
-            let mut sql = String::new();
+            let mut sql = String::from("BEGIN TRANSACTION; ");
+            let mut created_foreign_records = Vec::new();
 
             for (idx, row) in chunk.iter().cloned().enumerate() {
-                let (record, content, id) =
-                    prepare_save_parts(T::table_name(), T::persist_foreign(row).await?)?;
+                let (stored_row, mut row_foreign_records) =
+                    crate::run_with_foreign_cleanup_scope(|| async {
+                        T::persist_foreign(row).await
+                    })
+                    .await?;
+                created_foreign_records.append(&mut row_foreign_records);
+                let (record, content, id) = prepare_save_parts(T::table_name(), stored_row)?;
                 sql.push_str(&format!(
                     "UPSERT ONLY $record_{idx} CONTENT $data_{idx} RETURN AFTER;"
                 ));
                 prepared.push((record, content, id));
             }
+            sql.push_str("COMMIT TRANSACTION;");
 
             let mut query = db.query(sql);
             for (idx, (record, content, _)) in prepared.iter().enumerate() {
@@ -688,11 +712,22 @@ where
 
             let mut result = query.await?.check()?;
 
-            for (idx, (_, _, id)) in prepared.into_iter().enumerate() {
-                let row: Option<SurrealDbValue> = result.take(idx)?;
+            for (idx, (_, _, id)) in prepared.clone().into_iter().enumerate() {
+                let row: Option<SurrealDbValue> = result.take(idx + 1)?;
                 let row = row.ok_or(DBError::EmptyResult("save_many"))?;
                 let stored = decode_saved_row::<T>(row, id)?;
-                inserted_all.push(T::hydrate_foreign(stored).await?);
+                match T::hydrate_foreign(stored).await {
+                    Ok(value) => inserted_all.push(value),
+                    Err(err) => {
+                        for (record, _, _) in prepared.iter() {
+                            let _: Option<SurrealDbValue> = db.delete(record.clone()).await?;
+                        }
+                        for foreign_record in created_foreign_records.into_iter().rev() {
+                            let _: Option<SurrealDbValue> = db.delete(foreign_record).await?;
+                        }
+                        return Err(err);
+                    }
+                }
             }
         }
 
