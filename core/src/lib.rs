@@ -231,6 +231,9 @@ pub fn rewrite_foreign_json_value(value: &mut serde_json::Value) {
 
 fn parse_record_link_string(text: &str) -> Option<serde_json::Value> {
     let (table, key) = text.split_once(':')?;
+    if table.is_empty() || !key.starts_with('`') || !key.ends_with('`') {
+        return None;
+    }
     let key = key.trim_matches('`');
     if key.is_empty() {
         return None;
