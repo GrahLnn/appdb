@@ -32,8 +32,11 @@ Architectural decisions, discovered patterns, and mission-specific integration g
   - `#[derive(Bridge)]` should auto-generate `From<Payload>` conversions and table-name-based hydrate dispatch; reject unsupported enum shapes with focused derive-time diagnostics.
   - Parent-facing API values remain domain models; raw parent rows for nested refs must store only child `RecordId` values (or arrays thereof).
   - The default concrete-model foreign path keeps the current child resolution order: explicit child id first, otherwise existing `UniqueLookupMeta` lookup semantics; if no existing child matches, create exactly one child row.
-  - Default read behavior is eager hydration for `get`, `list`, and `list_limit`.
+  - Current mission raises the bar on write semantics: `save` and `save_many` must be user-visible all-or-nothing across parent rows and auto-persisted foreign children.
+  - Default read behavior for this mission must be eager hydration across `get`, `get_record`, `list`, and `list_limit`; do not leave a divergent foreign decode path behind.
   - Foreign fields should be excluded from automatic lookup metadata, and `#[unique]` must not be allowed on foreign fields.
   - Recursive foreign support should live in a runtime helper trait adjacent to `Bridge`, not by hard-coding every container depth in the macro. Macros should validate only the allowed wrapper family (`Option`, `Vec`) and generate recursive persist/hydrate calls.
   - Stored field types for foreign containers must preserve the same wrapper shape while recursively replacing only the leaf type with `RecordId`.
-  - First version does not promise transactional parent/child writes and does not expand nested semantics to `merge`, `patch`, or raw query helpers.
+  - Raw-query compatibility for this mission includes string-form record links such as ``child:`c1```; decode helpers must normalize them instead of assuming only `{ id: ... }` shapes.
+  - `#[table_as(...)]` aliases must continue to resolve through the target table even when the aliased model itself contains `#[foreign]` fields and is later nested again as a foreign child.
+  - Keep scope tight: do not expand the new semantics to `merge` or `patch` unless the orchestrator adds scope, but raw-query read compatibility is in scope for foreign hydration.
