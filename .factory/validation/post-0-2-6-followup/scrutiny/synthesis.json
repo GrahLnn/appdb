@@ -1,7 +1,7 @@
 {
   "milestone": "post-0-2-6-followup",
-  "round": 1,
-  "status": "pass",
+  "round": 2,
+  "status": "fail",
   "validatorsRun": {
     "format": {
       "passed": true,
@@ -25,13 +25,39 @@
     }
   },
   "reviewsSummary": {
-    "total": 2,
+    "total": 5,
     "passed": 2,
-    "failed": 0,
-    "failedFeatures": []
+    "failed": 3,
+    "failedFeatures": [
+      "milestone-c-reconnect-public-id-hydration-normalization",
+      "milestone-c-strict-record-link-string-classification",
+      "milestone-c-typed-stored-row-record-id-decode-seam"
+    ]
   },
-  "blockingIssues": [],
-  "appliedUpdates": [],
+  "blockingIssues": [
+    {
+      "featureId": "milestone-c-reconnect-public-id-hydration-normalization",
+      "severity": "blocking",
+      "description": "The completed worker session ac635f6f-96c0-4e74-80be-0b3346e911d4 has neither a handoff artifact nor a worker-transcripts.jsonl entry, so scrutiny cannot verify the declared commit, verification commands, or transcript skeleton required by the review contract."
+    },
+    {
+      "featureId": "milestone-c-strict-record-link-string-classification",
+      "severity": "blocking",
+      "description": "The feature contract required ordinary colon strings to remain safe across save/get/get_record, but ordinary_colon_strings_are_not_record_links only proves save() and get(), leaving get_record() without evidence."
+    },
+    {
+      "featureId": "milestone-c-typed-stored-row-record-id-decode-seam",
+      "severity": "blocking",
+      "description": "The reviewed commit 3ff4d10 only changes CRUD-surface docs/comments and generated convenience methods; it does not introduce or modify the stored-row RecordId decode seam promised by this feature, so there is no implementation diff to validate."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Recorded that schema-managed inventory application and schemaless first-save/bootstrap are separately proven contracts and should not be treated as shared evidence.",
+      "sourceFeature": "milestone-c-store-schemaless-bootstrap"
+    }
+  ],
   "suggestedGuidanceUpdates": [
     {
       "target": "skills",
@@ -44,13 +70,23 @@
       "suggestion": "When decode logic is tightened for string-form record ids, require at least one regression using a non-test-specific or multiple table-name shapes so implementations cannot hard-code the it_record_* naming pattern and still satisfy review coverage.",
       "evidence": "Review for milestone-c-strict-record-link-string-classification found core/tests/integration_db.rs only exercised it_record_user:x and it_record_user:y, which allowed core/src/lib.rs to special-case the it_record_* prefix while leaving other legitimate table:key shapes unsupported.",
       "isSystemic": false
+    },
+    {
+      "target": "skills",
+      "suggestion": "Document how rust-library-worker should behave when an assigned feature is already satisfied by the checked-out mission baseline, so verification-only outcomes can still be reported without looking like procedure violations or being attached to non-implementing commits.",
+      "evidence": "Reviews for milestone-c-field-aware-record-id-decode-seam and milestone-c-typed-stored-row-record-id-decode-seam both encountered baseline-already-landed behavior, but only one had enough evidence to pass; the other was attached to commit 3ff4d10 even though that commit did not implement the seam.",
+      "isSystemic": true
     }
   ],
   "rejectedObservations": [
     {
       "observation": "Store-wide schemaless bootstrap should be documented as shared architecture knowledge.",
       "reason": "already-documented"
+    },
+    {
+      "observation": "Missing mission handoff/transcript artifacts should be applied directly as a library or services update.",
+      "reason": "reject: artifact-traceability gaps are mission-process problems that belong to orchestrator or skill guidance, not factual repo/library state"
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/post-0-2-6-followup/scrutiny/synthesis.json"
 }
