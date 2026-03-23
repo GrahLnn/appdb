@@ -1,0 +1,34 @@
+{
+  "featureId": "milestone-a-transaction-aware-foreign-persistence-seam",
+  "reviewedAt": "2026-03-23T09:56:37Z",
+  "commitId": "0da5aca",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The commit introduces an injectable foreign persistence abstraction and threads it through resolve_foreign_record_id, but it stops at a generic Repo-backed adapter and a unit-style seam test. It does not deliver the feature’s required transaction-aware foundation because the new abstraction cannot operate on a live save/save_many transaction handle and the added coverage never exercises parent save/save_many through the seam.",
+    "issues": [
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\lib.rs",
+        "line": 135,
+        "severity": "blocking",
+        "description": "The new ForeignPersistence seam is still fundamentally repository-scoped: its only operations are exists_record/create/create_at, and the default implementation calls repository::record_exists / Repo::<T>::create / Repo::<T>::create_at. There is no capability to bind the seam to the authoritative uncommitted transaction handle used by parent save/save_many writes, so missing foreign children still cannot be resolved/created inside that same transaction boundary as required by the feature description."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\tests\\integration_db.rs",
+        "line": 1345,
+        "severity": "blocking",
+        "description": "The only new regression test calls resolve_foreign_record_id_with directly with a recording adapter and asserts event logging. It does not drive Repo::save or Repo::save_many, does not prove the seam is reusable by those code paths, and does not verify behavior against a live transaction-owned parent write. As a result, the implementation is not demonstrated as the reusable save-atomicity foundation the feature requires."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The mission library documents that save/save_many now require transactional parent/child semantics, but it does not explicitly record the more specific acceptance criterion for seam-only foundation work: the foreign persistence context must be able to target the same live uncommitted Surreal transaction handle as parent writes, not just an abstract repository adapter.",
+      "evidence": "architecture.md and nested-store.md describe transactional semantics broadly, while this failed feature implemented a repo-backed injection seam in core/src/lib.rs:135-177 instead of a transaction-bound context."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: the commit adds an injectable repo-level foreign persistence adapter, but it does not provide or prove the transaction-bound seam required for later atomic save/save_many work."
+}

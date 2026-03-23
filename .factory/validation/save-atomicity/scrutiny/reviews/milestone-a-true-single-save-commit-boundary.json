@@ -1,0 +1,40 @@
+{
+  "featureId": "milestone-a-true-single-save-commit-boundary",
+  "reviewedAt": "2026-03-23T09:56:52.588657Z",
+  "commitId": "0da5aca459cc436f522b92326f5e1269fe8b4d0a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The reviewed commit adds an injectable foreign-persistence seam and a seam-focused regression, but it does not eliminate the post-commit failure window in Repo::save. Repo::save still commits before hydrate/return shaping and then issues compensating deletes on error, which does not satisfy VAL-SAVE-004's true all-or-nothing commit-boundary requirement.",
+    "issues": [
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\repository\\mod.rs",
+        "line": 579,
+        "severity": "blocking",
+        "description": "Repo::save still executes `BEGIN TRANSACTION; UPSERT ... RETURN AFTER; COMMIT TRANSACTION;` before calling `decode_saved_row` and `T::hydrate_foreign`. If either decode or hydration fails, the code deletes the parent and created foreign children afterward. This preserves a post-commit compensating-cleanup design instead of moving all fallible success-critical work inside the authoritative commit boundary, so public save errors can still occur after a commit."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\tests\\integration_db.rs",
+        "line": 1344,
+        "severity": "blocking",
+        "description": "The added regression only proves that `resolve_foreign_record_id_with` can use an injected persistence context. It does not prove the feature's required behavior that single-save failure avoids any committed residue because commit itself is deferred past all remaining failure points. The existing `single_save_failure_leaves_no_foreign_residue` test still passes via compensating deletes, which the mission explicitly disallows as sufficient evidence."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\lib.rs",
+        "line": 247,
+        "severity": "non_blocking",
+        "description": "The new `ForeignPersistence` seam uses repo-level `create`/`create_at` calls by default, but this feature does not yet supply a transaction-bound implementation for Repo::save. That leaves the new seam only partially integrated for commit-boundary atomicity and can mislead future workers unless paired with documentation or a transaction-backed implementation."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill already warns that residue-cleanup tests are insufficient and that workers must inspect the actual save/save_many commit boundary. The transcript shows the worker recognized that the feature was already implemented and therefore skipped code changes, but the handoff still claimed the commit satisfied the true commit-boundary requirement even though code inspection shows post-commit deletes remain. This suggests the procedure may need a stronger explicit review checkpoint for 'already implemented' features so workers do not conflate cleanup semantics with commit-boundary atomicity.",
+      "evidence": "Skill: C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md steps 13-14. Transcript skeleton for dcaba3d1-e437-4b14-8d7a-2dece161be96 shows no code edits and a handoff asserting Repo::save no longer relies on post-commit delete repair. Code at core/src/repository/mod.rs:571-592 still deletes after commit on hydrate failure."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed. Commit 0da5aca adds an injectable foreign persistence seam and an associated seam test, but Repo::save still commits before later decode/hydration can fail and then compensates with deletes. That does not satisfy the feature's true single-save commit-boundary requirement or VAL-SAVE-004 without compensating cleanup."
+}

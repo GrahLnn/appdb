@@ -39,5 +39,7 @@ Architectural decisions, discovered patterns, and mission-specific integration g
   - Recursive foreign support should live in a runtime helper trait adjacent to `Bridge`, not by hard-coding every container depth in the macro. Macros should validate only the allowed wrapper family (`Option`, `Vec`) and generate recursive persist/hydrate calls.
   - Stored field types for foreign containers must preserve the same wrapper shape while recursively replacing only the leaf type with `RecordId`.
   - Raw-query compatibility for this mission includes string-form record links such as ``child:`c1```; decode helpers must normalize them instead of assuming only `{ id: ... }` shapes.
+  - Follow-up scope after `0.2.6`: schemaless table bootstrap must be a Store-wide persistence rule for all persisted types encountered in the save graph, not a foreign-specific exception path.
+  - Follow-up scope after `0.2.6`: record-link parsing must stay strict enough that ordinary colon-containing payload strings (for example `alpha:beta`) are not coerced into `RecordId` decode paths.
   - `#[table_as(...)]` aliases must continue to resolve through the target table even when the aliased model itself contains `#[foreign]` fields and is later nested again as a foreign child.
   - Keep scope tight: do not expand the new semantics to `merge` or `patch` unless the orchestrator adds scope, but raw-query read compatibility is in scope for foreign hydration.

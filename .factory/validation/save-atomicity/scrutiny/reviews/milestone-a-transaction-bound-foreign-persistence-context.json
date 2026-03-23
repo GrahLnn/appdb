@@ -1,0 +1,51 @@
+{
+  "featureId": "milestone-a-transaction-bound-foreign-persistence-context",
+  "reviewedAt": "2026-03-23T09:57:35.222655Z",
+  "commitId": "f191e7d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The reviewed commit only strengthens retry assertions in integration_db and does not implement or exercise a true transaction-bound foreign persistence context. The foundational seam exists as an injectable repository-backed ForeignPersistence abstraction, but parent save/save_many still resolve and create foreign rows through separate repository calls before issuing the parent transaction, so child creation is not bound to the same live uncommitted Surreal transaction handle required by the feature.",
+    "issues": [
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\lib.rs",
+        "line": 160,
+        "severity": "blocking",
+        "description": "RepoForeignPersistence is the only production ForeignPersistence implementation and it delegates create/create_at/exists_record to repository-level calls that open their own DB operations. There is no transaction-bound implementation that can query/create children through the parent's live uncommitted transaction handle, so the requested foundational seam is still missing."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\repository\\mod.rs",
+        "line": 574,
+        "severity": "blocking",
+        "description": "Repo::save persists foreign children via run_with_foreign_cleanup_scope(T::persist_foreign(...)) before starting the parent BEGIN TRANSACTION/UPSERT/COMMIT query. That means foreign child creation occurs outside the authoritative parent transaction boundary and relies on cleanup after failure rather than a shared uncommitted transaction handle."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\repository\\mod.rs",
+        "line": 696,
+        "severity": "blocking",
+        "description": "Repo::save_many likewise resolves/persists each foreign child before composing the batch transaction SQL, then compensates with deletes on hydrate failure. This is not the transaction-bound seam the feature description requires for later batch atomicity work."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\tests\\integration_db.rs",
+        "line": 1345,
+        "severity": "non_blocking",
+        "description": "The new test only proves resolve_foreign_record_id_with can call an injected persistence object and record exists/create_at events. It does not verify using the same live uncommitted transaction handle as parent save/save_many, so the regression coverage materially under-tests the feature claim."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill tells workers to validate an already-implemented feature if it appears present, but this worker treated an existing injectable seam plus stronger retry assertions as sufficient even though the mission and architecture notes explicitly require foreign child persistence to move under the authoritative transaction boundary rather than rely on cleanup.",
+      "evidence": "Handoff for ad0d48e9-55cb-41a8-ad88-78b4a8c0f829 says no production code changes were needed. Mission AGENTS.md says to move the foreign seam under the authoritative transaction boundary rather than patch only the parent UPSERT path, and core/src/repository/mod.rs:571-595 and 690-732 still call T::persist_foreign before BEGIN TRANSACTION."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The shared library documents cleanup-based atomicity guidance but does not explicitly record that the current ForeignPersistence abstraction is only repository-backed and therefore insufficient for the transaction-bound feature unless a second implementation is introduced over the live tx handle.",
+      "evidence": "architecture.md notes that save/save_many must be all-or-nothing and that workers should move the foreign seam under the authoritative transaction boundary, but it does not capture the concrete limitation visible in core/src/lib.rs:135-177 where RepoForeignPersistence delegates only to repository calls."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed handoff, transcript skeleton, commit f191e7d, and the relevant save/foreign-resolution code. Result: fail. The commit only tightened a retry regression; the codebase still lacks a transaction-bound foreign persistence context wired to the parent live transaction handle, so the feature's foundational requirement is unmet."
+}

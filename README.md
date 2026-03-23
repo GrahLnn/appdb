@@ -104,7 +104,11 @@ struct Parent {
 - 首版支持 `Child`、`Option<Child>`、`Vec<Child>`
 - 保存父对象时，会先按子对象的 `id` 或现有 lookup 规则解析子记录；找不到时自动创建子记录
 - 父表里只保存子记录的 `RecordId`（或其数组），读取父对象时会自动 hydrate 回完整子对象
-- 这一层不会扩展到 `merge` / `patch` / 原始 query helper，也不承诺父子写入事务原子性
+- `save` / `get` / `get_record` / `list` / `list_limit` 会保持一致的 hydrate 结果
+- 失败的 `save` / `save_many` 不应留下父子半成功残留；成功返回的对象应与后续读取结果一致
+- 原始 query 读路径支持字符串形态的 record link（例如 ``child:`c1```）回到正常 hydrate 流程
+- `#[table_as(...)]` 模型参与嵌套引用时，仍通过目标表落库并保持同样的 roundtrip 语义
+- 这一层不会扩展到 `merge` / `patch`
 
 ## 图关系示例
 

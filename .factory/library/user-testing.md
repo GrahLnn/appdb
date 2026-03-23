@@ -28,6 +28,13 @@ Validation surfaces, setup expectations, and concurrency guidance for user-testi
 - Rationale: the machine has ample headroom, the dry run stayed stable, and 5 concurrent validators remains within the 70% headroom rule while staying conservative for compile-heavy Cargo work.
 
 ## Gotchas
+## Flow Validator Guidance: cargo-test
+
+- Stay inside C:\Users\admin\appdb and use the real Cargo/Rust test surface only.
+- Do not open browsers or mock the library; validate through focused cargo test commands and raw storage assertions already encoded in integration tests.
+- Keep save-atomicity flows serialized against the shared embedded DB fixture lock; these assertions all touch the same global test database state.
+- Evidence should come from terminal output plus the regression names that prove the user-visible contract.
+
 
 - Raw storage assertions for encrypted-at-rest behavior should use raw DB query/select evidence, not only in-memory `encrypt/decrypt` helpers.
 - `clippy -D warnings` may surface the existing dead-code warning in `core/tests/integration_db.rs`; if it still reproduces after mission changes, treat it as part of this mission's validation work rather than ignoring it.
