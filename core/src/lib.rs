@@ -131,6 +131,52 @@ pub trait ForeignModel: StoredModel {
     }
 }
 
+/// Runtime persistence context for foreign resolution/creation.
+pub trait ForeignPersistence: Send + Sync {
+    /// Returns whether a record already exists.
+    fn exists_record(
+        &self,
+        record: surrealdb::types::RecordId,
+    ) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
+
+    /// Creates one new row with an auto-generated id and returns the saved model.
+    fn create<T>(&self, data: T) -> impl std::future::Future<Output = anyhow::Result<T>> + Send
+    where
+        T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send;
+
+    /// Creates one new row at the provided id and returns the saved model.
+    fn create_at<T>(
+        &self,
+        id: surrealdb::types::RecordId,
+        data: T,
+    ) -> impl std::future::Future<Output = anyhow::Result<T>> + Send
+    where
+        T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send;
+}
+
+#[derive(Clone, Copy, Default)]
+struct RepoForeignPersistence;
+
+impl ForeignPersistence for RepoForeignPersistence {
+    async fn exists_record(&self, record: surrealdb::types::RecordId) -> anyhow::Result<bool> {
+        repository::record_exists(record).await
+    }
+
+    async fn create<T>(&self, data: T) -> anyhow::Result<T>
+    where
+        T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send,
+    {
+        repository::Repo::<T>::create(data).await
+    }
+
+    async fn create_at<T>(&self, id: surrealdb::types::RecordId, data: T) -> anyhow::Result<T>
+    where
+        T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send,
+    {
+        repository::Repo::<T>::create_at(id, data).await
+    }
+}
+
 tokio::task_local! {
     static FOREIGN_SAVE_CLEANUP_STACK: std::cell::RefCell<Vec<surrealdb::types::RecordId>>;
 }
@@ -194,21 +240,39 @@ where
         + Send
         + Sync,
 {
+    resolve_foreign_record_id_with(&RepoForeignPersistence, value).await
+}
+
+/// Saves or resolves one foreign child model through the provided persistence context.
+pub async fn resolve_foreign_record_id_with<P, T>(
+    persistence: &P,
+    value: T,
+) -> anyhow::Result<surrealdb::types::RecordId>
+where
+    P: ForeignPersistence,
+    T: model::meta::ModelMeta
+        + model::meta::ResolveRecordId
+        + repository::Crud
+        + ForeignModel
+        + Clone
+        + Send
+        + Sync,
+{
     let explicit_record_id = explicit_foreign_record_id(&value)?;
 
     match value.resolve_record_id().await {
         Ok(record_id) => {
-            if repository::Repo::<T>::exists_record(record_id.clone()).await? {
+            if persistence.exists_record(record_id.clone()).await? {
                 Ok(record_id)
             } else if let Some(explicit_record_id) = explicit_record_id {
-                let saved = repository::Repo::<T>::create_at(explicit_record_id, value).await?;
+                let saved = persistence.create_at(explicit_record_id, value).await?;
                 let saved_id = saved.resolve_record_id().await?;
                 if foreign_cleanup_enabled() {
                     foreign_cleanup_push(saved_id.clone());
                 }
                 Ok(saved_id)
             } else {
-                let saved = repository::Repo::<T>::create(value).await?;
+                let saved = persistence.create(value).await?;
                 let saved_id = saved.resolve_record_id().await?;
                 if foreign_cleanup_enabled() {
                     foreign_cleanup_push(saved_id.clone());
@@ -217,7 +281,7 @@ where
             }
         }
         Err(err) if err.to_string().contains("Record not found") => {
-            let saved = repository::Repo::<T>::create(value).await?;
+            let saved = persistence.create(value).await?;
             let saved_id = saved.resolve_record_id().await?;
             if foreign_cleanup_enabled() {
                 foreign_cleanup_push(saved_id.clone());
@@ -225,11 +289,9 @@ where
             Ok(saved_id)
         }
         Err(_err) if explicit_record_id.is_some() => {
-            let saved = repository::Repo::<T>::create_at(
-                explicit_record_id.expect("checked is_some above"),
-                value,
-            )
-            .await?;
+            let saved = persistence
+                .create_at(explicit_record_id.expect("checked is_some above"), value)
+                .await?;
             let saved_id = saved.resolve_record_id().await?;
             if foreign_cleanup_enabled() {
                 foreign_cleanup_push(saved_id.clone());

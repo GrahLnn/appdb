@@ -159,6 +159,12 @@ where
     }
 }
 
+pub(crate) async fn record_exists(record: RecordId) -> Result<bool> {
+    let db = get_db()?;
+    let existing: Option<SurrealDbValue> = db.select(record).await?;
+    Ok(existing.is_some())
+}
+
 fn normalize_nested_record_id_json(value: &mut serde_json::Value) {
     if let serde_json::Value::Object(map) = value {
         if let Some(id) = map.get_mut("id") {
@@ -346,9 +352,7 @@ where
     }
 
     pub async fn exists_record(record: RecordId) -> Result<bool> {
-        let db = get_db()?;
-        let existing: Option<SurrealDbValue> = db.select(record).await?;
-        Ok(existing.is_some())
+        record_exists(record).await
     }
 
     /// Replaces the stored content of a row at the provided record id.
