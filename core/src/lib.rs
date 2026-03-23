@@ -141,6 +141,15 @@ pub trait ForeignPersistence: Send + Sync {
         record: surrealdb::types::RecordId,
     ) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
 
+    /// Ensures a row exists at the provided id and returns the saved model.
+    fn ensure_at<T>(
+        &self,
+        id: surrealdb::types::RecordId,
+        data: T,
+    ) -> impl std::future::Future<Output = anyhow::Result<T>> + Send
+    where
+        T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send;
+
     /// Creates one new row with an auto-generated id and returns the saved model.
     fn create<T>(&self, data: T) -> impl std::future::Future<Output = anyhow::Result<T>> + Send
     where
@@ -164,6 +173,15 @@ impl ForeignPersistence for RepoForeignPersistence {
         repository::record_exists(record).await
     }
 
+    async fn ensure_at<T>(&self, id: surrealdb::types::RecordId, data: T) -> anyhow::Result<T>
+    where
+        T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send,
+    {
+        // Foreign explicit-id persistence must share the same table-bootstrap semantics
+        // as root save paths, otherwise fresh schemaless child tables fail on create(id).
+        repository::Repo::<T>::upsert_at(id, data).await
+    }
+
     async fn create<T>(&self, data: T) -> anyhow::Result<T>
     where
         T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send,
@@ -175,9 +193,7 @@ impl ForeignPersistence for RepoForeignPersistence {
     where
         T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send,
     {
-        // Foreign explicit-id persistence must share the same table-bootstrap semantics
-        // as root save paths, otherwise fresh schemaless child tables fail on create(id).
-        repository::Repo::<T>::upsert_at(id, data).await
+        repository::Repo::<T>::create_at(id, data).await
     }
 }
 
@@ -379,57 +395,86 @@ where
 {
     let explicit_record_id = explicit_foreign_record_id(&value)?;
 
+    if let Some(explicit_record_id) = explicit_record_id {
+        return persist_foreign_explicit_id(persistence, explicit_record_id, value).await;
+    }
+
+    persist_foreign_find_or_create(persistence, value).await
+}
+
+async fn persist_foreign_explicit_id<P, T>(
+    persistence: &P,
+    explicit_record_id: surrealdb::types::RecordId,
+    value: T,
+) -> anyhow::Result<surrealdb::types::RecordId>
+where
+    P: ForeignPersistence,
+    T: model::meta::ModelMeta
+        + model::meta::ResolveRecordId
+        + repository::Crud
+        + ForeignModel
+        + Clone
+        + Send
+        + Sync,
+{
     match value.resolve_record_id().await {
-        Ok(record_id) => {
+        Ok(record_id) if record_id == explicit_record_id => {
             if persistence.exists_record(record_id.clone()).await? {
                 Ok(record_id)
-            } else if let Some(explicit_record_id) = explicit_record_id {
-                let saved = persistence.create_at(explicit_record_id, value).await?;
-                let saved_id = saved.resolve_record_id().await?;
-                if foreign_cleanup_enabled() {
-                    foreign_cleanup_push(saved_id.clone());
-                }
-                Ok(saved_id)
             } else {
-                let saved = persistence.create(value).await?;
-                let saved_id = saved.resolve_record_id().await?;
-                if foreign_cleanup_enabled() {
-                    foreign_cleanup_push(saved_id.clone());
-                }
-                Ok(saved_id)
+                save_foreign_created(persistence.ensure_at(explicit_record_id, value).await?).await
             }
         }
+        Ok(record_id) => Ok(record_id),
+        Err(err)
+            if matches!(
+                crate::error::classify_db_error_message(err.to_string()).kind(),
+                crate::error::DBErrorKind::MissingTable | crate::error::DBErrorKind::NotFound
+            ) =>
+        {
+            save_foreign_created(persistence.ensure_at(explicit_record_id, value).await?).await
+        }
+        Err(err) => Err(err),
+    }
+}
+
+async fn persist_foreign_find_or_create<P, T>(
+    persistence: &P,
+    value: T,
+) -> anyhow::Result<surrealdb::types::RecordId>
+where
+    P: ForeignPersistence,
+    T: model::meta::ModelMeta
+        + model::meta::ResolveRecordId
+        + repository::Crud
+        + ForeignModel
+        + Clone
+        + Send
+        + Sync,
+{
+    match value.resolve_record_id().await {
+        Ok(record_id) => Ok(record_id),
         Err(err)
             if matches!(
                 crate::error::classify_db_error_message(err.to_string()).kind(),
                 crate::error::DBErrorKind::NotFound
             ) =>
         {
-            let saved = persistence.create(value).await?;
-            let saved_id = saved.resolve_record_id().await?;
-            if foreign_cleanup_enabled() {
-                foreign_cleanup_push(saved_id.clone());
-            }
-            Ok(saved_id)
-        }
-        Err(err)
-            if explicit_record_id.is_some()
-                && matches!(
-                    crate::error::classify_db_error_message(err.to_string()).kind(),
-                    crate::error::DBErrorKind::MissingTable | crate::error::DBErrorKind::NotFound
-                ) =>
-        {
-            let saved = persistence
-                .create_at(explicit_record_id.expect("checked is_some above"), value)
-                .await?;
-            let saved_id = saved.resolve_record_id().await?;
-            if foreign_cleanup_enabled() {
-                foreign_cleanup_push(saved_id.clone());
-            }
-            Ok(saved_id)
+            save_foreign_created(persistence.create(value).await?).await
         }
         Err(err) => Err(err),
     }
+}
+
+async fn save_foreign_created<T>(saved: T) -> anyhow::Result<surrealdb::types::RecordId>
+where
+    T: model::meta::ResolveRecordId,
+{
+    let saved_id = saved.resolve_record_id().await?;
+    if foreign_cleanup_enabled() {
+        foreign_cleanup_push(saved_id.clone());
+    }
+    Ok(saved_id)
 }
 
 fn explicit_foreign_record_id<T>(value: &T) -> anyhow::Result<Option<surrealdb::types::RecordId>>

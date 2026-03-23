@@ -38,6 +38,17 @@ impl appdb::ForeignPersistence for RecordingForeignPersistence {
         Repo::<ItAtomicSaveChild>::exists_record(record).await
     }
 
+    async fn ensure_at<T>(&self, id: RecordId, data: T) -> anyhow::Result<T>
+    where
+        T: ModelMeta + Crud + StoredModel + appdb::ForeignModel + Send,
+    {
+        self.events
+            .lock()
+            .expect("events lock poisoned")
+            .push(format!("ensure_at:{id:?}"));
+        Repo::<T>::upsert_at(id, data).await
+    }
+
     async fn create<T>(&self, data: T) -> anyhow::Result<T>
     where
         T: ModelMeta + Crud + StoredModel + appdb::ForeignModel + Send,
@@ -1945,7 +1956,7 @@ fn foreign_resolution_can_use_injected_persistence_context() {
             persistence.events(),
             vec![
                 "exists:RecordId { table: Table(\"it_atomic_save_child\"), key: String(\"atomic-child-context\") }".to_owned(),
-                "create_at:RecordId { table: Table(\"it_atomic_save_child\"), key: String(\"atomic-child-context\") }".to_owned(),
+                "ensure_at:RecordId { table: Table(\"it_atomic_save_child\"), key: String(\"atomic-child-context\") }".to_owned(),
             ]
         );
     });
