@@ -15,6 +15,7 @@ Validation surfaces, setup expectations, and concurrency guidance for user-testi
   - integration tests in `core/tests/integration_db.rs`
   - focused runtime tests in `core/tests/sensitive_roundtrip.rs`
   - compile-fail tests in `core/tests/sensitive_compile.rs` with fixtures under `core/tests/ui/**`
+  - README and rustdoc/API-surface review backed by file evidence and, when examples change, compile-surface proof that the documented public path is the intended one
 - Representative dry run completed successfully during planning:
   - `cargo check --workspace --all-targets`
   - `cargo test -p appdb --test integration_db -- --test-threads 1`
@@ -40,10 +41,12 @@ Validation surfaces, setup expectations, and concurrency guidance for user-testi
 - `clippy -D warnings` may surface the existing dead-code warning in `core/tests/integration_db.rs`; if it still reproduces after mission changes, treat it as part of this mission's validation work rather than ignoring it.
 - For nested-store-reference validation, prove both halves of the contract: raw parent rows store only child `RecordId` values, and caller-facing APIs (`save`, `get`, `list`, `list_limit`) still return hydrated domain children.
 - For this mission, also prove `get_record()` matches `get` / `list` / `list_limit` for the same foreign row whenever a contract assertion requires read-path consistency.
+- For the new cleanup phase, validate each contract slice with focused evidence: explicit-id primitive semantics, foreign ensure vs lookup split, typed error classification, schema-managed vs schemaless behavior, raw decode boundary, and `table_as` metadata/storage/read semantics.
 - For `list_limit()` assertions, keep the fixture state unambiguous so the row under validation is uniquely identifiable.
 - Failure-path validation is in scope: prove that failed `save` / `save_many` calls leave no residue and that a corrected retry on the same identifiers succeeds.
 - Raw-query validation must include a string-form record link case such as ``child:`c1``` rather than relying only on object-form `{ id: ... }` rows.
 - Alias validation must include a `#[table_as(...)]` model that itself contains `#[foreign]` fields and is then nested again as a foreign child.
+- API-surface validation should confirm README/rustdoc now distinguish the recommended public CRUD path from internal repo helpers so users are not steered toward internal building-block methods.
 - New derive syntax such as `#[foreign]` needs compile-pass and compile-fail evidence; do not rely on runtime tests alone for macro acceptance or diagnostics.
 - For enum/manual `Bridge` support, add one compile-pass or runtime roundtrip proving a dispatcher type can persist to a concrete child record id and hydrate back to the original variant, plus compile-fail coverage that illegal foreign+lookup combinations are rejected.
 - For `#[derive(Bridge)]`, add compile-pass coverage for single-field tuple enums and compile-fail coverage for unit variants, struct variants, multi-field tuple variants, and payloads that do not implement `Bridge`.

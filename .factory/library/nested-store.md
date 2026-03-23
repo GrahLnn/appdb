@@ -30,3 +30,6 @@ Mission-specific guidance for explicit `#[foreign]` support.
 - Follow-up scope after `0.2.6`: schemaless table bootstrap should follow the same Store-wide rule for root and foreign-referenced models; `#[foreign]` is not a separate table-creation mechanism.
 - Follow-up scope after `0.2.6`: string-form record-link decoding must distinguish real record links from ordinary colon strings so normal payloads are left untouched.
 - Raw query helper writes remain out of scope, but raw-query read compatibility for foreign hydration is in scope.
+- Current cleanup phase: explicit-id foreign persistence should be expressed as an explicit ensure path built on the same canonical persistence primitive as the rest of the repository, not as a probe-first branch with overlapping write implementations.
+- Current cleanup phase: lookup-based foreign reuse remains valid, but it must be a separate semantic path (`find_or_create`) from explicit-id ensure.
+- Current cleanup phase: tests should isolate one promise at a time — schemaless bootstrap, lookup reuse, foreign hydration, alias semantics, and decode compatibility should not rely on one broad mixed regression as their only proof.
