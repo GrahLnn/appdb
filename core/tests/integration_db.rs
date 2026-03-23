@@ -13,7 +13,7 @@ use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_checked, query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
-use appdb::{Bridge, Crud, Id, Relation, Sensitive, Store, StoredModel};
+use appdb::{Bridge, Crud, DBErrorKind, Id, Relation, Sensitive, Store, StoredModel};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
@@ -257,6 +257,19 @@ struct ItNestedParent {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItSchemalessForeignChild {
+    id: Id,
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItSchemalessForeignParent {
+    id: Id,
+    #[foreign]
+    child: ItSchemalessForeignChild,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItFreshSaveParent {
     id: Id,
     name: String,
@@ -271,6 +284,12 @@ struct ItNestedOptionalParent {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
 struct StoredNestedParentRow {
+    id: Id,
+    child: RecordId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredSchemalessForeignParentRow {
     id: Id,
     child: RecordId,
 }
@@ -555,10 +574,13 @@ async fn load_aliased_nested_post_raw(id: &str) -> StoredAliasedNestedPostRow {
         .bind("table", ItAliasedNestedPost::table_name())
         .bind("id", id.to_owned());
 
-    query_bound_return::<StoredAliasedNestedPostRow>(stmt)
+    let mut value = query_bound_return::<serde_json::Value>(stmt)
         .await
         .expect("aliased nested post raw query should succeed")
-        .expect("aliased nested post raw row should exist")
+        .expect("aliased nested post raw row should exist");
+
+    appdb::decode_record_link_value(&mut value);
+    serde_json::from_value(value).expect("aliased nested post raw row should decode")
 }
 
 async fn load_aliased_nested_holder_raw(id: &str) -> StoredAliasedNestedHolderRow {
@@ -610,6 +632,34 @@ async fn load_nested_parent_raw(id: &str) -> StoredNestedParentRow {
         .map(|value| parse_record_id_value(value, "nested parent child"))
         .expect("nested parent raw row should contain child");
     StoredNestedParentRow {
+        id: Id::from(id),
+        child,
+    }
+}
+
+async fn load_schemaless_foreign_parent_raw(id: &str) -> StoredSchemalessForeignParentRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItSchemalessForeignParent::table_name())
+        .bind("id", id.to_owned());
+
+    let value = query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("schemaless foreign parent raw row query should succeed")
+        .expect("schemaless foreign parent raw row should exist");
+    let id = value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|raw| {
+            raw.split_once(':')
+                .map(|(_, key)| key.trim_matches('`').to_owned())
+        })
+        .expect("schemaless foreign parent raw row should contain normalized string id");
+    let child = value
+        .get("child")
+        .cloned()
+        .map(|value| parse_record_id_value(value, "schemaless foreign parent child"))
+        .expect("schemaless foreign parent raw row should contain child");
+    StoredSchemalessForeignParentRow {
         id: Id::from(id),
         child,
     }
@@ -948,6 +998,81 @@ fn select_missing_record_fails() {
             .await
             .expect_err("missing record should fail");
         assert!(err.to_string().contains("Record not found"), "{err}");
+    });
+}
+
+#[test]
+fn exists_record_missing_table_uses_typed_classification() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        reinit_db_with_options(test_db_path(), InitDbOptions::default())
+            .await
+            .expect("schemaless database should initialize");
+
+        let exists = Repo::<ItStringUser>::exists_record(RecordId::new(
+            ItStringUser::table_name(),
+            "typed-missing-table",
+        ))
+        .await
+        .expect("missing table should classify as typed missing-table and return false");
+
+        assert!(!exists);
+    });
+}
+
+#[test]
+fn create_at_duplicate_id_returns_typed_conflict() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItStringUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let original = Repo::<ItStringUser>::create_at(
+            RecordId::new(ItStringUser::table_name(), "typed-conflict"),
+            ItStringUser {
+                id: Id::from("typed-conflict"),
+                payload: "first".to_owned(),
+            },
+        )
+        .await
+        .expect("initial create_at should succeed");
+
+        let err = Repo::<ItStringUser>::create_at(
+            RecordId::new(ItStringUser::table_name(), "typed-conflict"),
+            ItStringUser {
+                id: Id::from("typed-conflict"),
+                payload: "second".to_owned(),
+            },
+        )
+        .await
+        .expect_err("duplicate create_at should return a typed conflict");
+        let typed = appdb::classify_db_error_message(err.to_string());
+        assert_eq!(typed.kind(), DBErrorKind::Conflict);
+
+        let loaded = Repo::<ItStringUser>::get("typed-conflict")
+            .await
+            .expect("original row should remain unchanged after duplicate create_at");
+        assert_eq!(original.payload, "first");
+        assert_eq!(loaded.payload, "first");
+    });
+}
+
+#[test]
+fn decode_raw_row_invalid_shape_returns_typed_decode_error() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        let stmt = RawSqlStmt::new("RETURN { id: 'typed-decode', payload: 99 }; ");
+        let err = query_bound_return::<ItStringUser>(stmt)
+            .await
+            .expect_err("invalid raw row shape should fail to decode");
+        let typed = appdb::classify_db_error_message(err.to_string());
+
+        assert_eq!(typed.kind(), DBErrorKind::Decode);
     });
 }
 
@@ -1494,6 +1619,108 @@ fn schemaless_foreign_save_bootstraps_store_child_tables() {
             raw.child,
             RecordId::new(ItNestedIdChild::table_name(), "schemaless-child")
         );
+    });
+}
+
+#[test]
+fn schemaless_foreign_save_bootstraps_child_tables_without_schema_side_effects() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        reinit_db_with_options(test_db_path(), InitDbOptions::default())
+            .await
+            .expect("schemaless database should initialize");
+
+        let parent = ItSchemalessForeignParent {
+            id: Id::from("schemaless-side-effect-free-parent"),
+            child: ItSchemalessForeignChild {
+                id: Id::from("schemaless-side-effect-free-child"),
+                name: "schemaless-without-unique-index".to_owned(),
+            },
+        };
+
+        let saved = ItSchemalessForeignParent::save(parent.clone())
+            .await
+            .expect("schemaless save should bootstrap foreign child tables even without schema inventory side effects");
+        let loaded = ItSchemalessForeignParent::get("schemaless-side-effect-free-parent")
+            .await
+            .expect("schemaless get should hydrate saved parent");
+        let raw = load_schemaless_foreign_parent_raw("schemaless-side-effect-free-parent").await;
+        let child = Repo::<ItSchemalessForeignChild>::get("schemaless-side-effect-free-child")
+            .await
+            .expect("schemaless foreign child should exist after save");
+
+        assert_eq!(saved, parent);
+        assert_eq!(loaded, parent);
+        assert_eq!(child, parent.child);
+        assert_eq!(
+            raw.child,
+            RecordId::new(
+                ItSchemalessForeignChild::table_name(),
+                "schemaless-side-effect-free-child"
+            )
+        );
+    });
+}
+
+#[test]
+fn schemaless_upsert_at_bootstraps_plain_explicit_id_table() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        reinit_db_with_options(test_db_path(), InitDbOptions::default())
+            .await
+            .expect("schemaless database should initialize");
+
+        let child = ItSchemalessForeignChild {
+            id: Id::from("schemaless-upsert-at-child"),
+            name: "plain-explicit-id-upsert".to_owned(),
+        };
+
+        let saved = Repo::<ItSchemalessForeignChild>::upsert_at(
+            RecordId::new(
+                ItSchemalessForeignChild::table_name(),
+                "schemaless-upsert-at-child",
+            ),
+            child.clone(),
+        )
+        .await
+        .expect("schemaless upsert_at should bootstrap the missing table");
+        let loaded = Repo::<ItSchemalessForeignChild>::get("schemaless-upsert-at-child")
+            .await
+            .expect("schemaless upsert_at row should be loadable");
+
+        assert_eq!(saved, child);
+        assert_eq!(loaded, child);
+    });
+}
+
+#[test]
+fn schemaless_resolve_foreign_record_id_bootstraps_plain_explicit_id_child() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        reinit_db_with_options(test_db_path(), InitDbOptions::default())
+            .await
+            .expect("schemaless database should initialize");
+
+        let child = ItSchemalessForeignChild {
+            id: Id::from("schemaless-resolve-foreign-child"),
+            name: "resolve-foreign-explicit-id".to_owned(),
+        };
+
+        let record = appdb::resolve_foreign_record_id(child.clone())
+            .await
+            .expect("resolve_foreign_record_id should bootstrap the missing child table");
+        let loaded = Repo::<ItSchemalessForeignChild>::get("schemaless-resolve-foreign-child")
+            .await
+            .expect("resolved foreign child should be persisted");
+
+        assert_eq!(
+            record,
+            RecordId::new(
+                ItSchemalessForeignChild::table_name(),
+                "schemaless-resolve-foreign-child"
+            )
+        );
+        assert_eq!(loaded, child);
     });
 }
 

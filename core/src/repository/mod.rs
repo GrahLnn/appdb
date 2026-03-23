@@ -118,13 +118,20 @@ where
 {
     let key = extract_record_id_key(&data)?;
     let id = record_id_key_to_json_value(&key);
+    let record = RecordId::new(table, key);
+    Ok((record, prepare_content(data)?, id))
+}
+
+fn prepare_content<T>(data: T) -> Result<Value>
+where
+    T: Serialize,
+{
     let mut content = serde_json::to_value(&data)?;
     if let Value::Object(map) = &mut content {
         map.remove("id");
     }
     strip_null_fields(&mut content);
-    let record = RecordId::new(table, key);
-    Ok((record, content, id))
+    Ok(content)
 }
 
 fn decode_saved_row<T>(row: SurrealDbValue, id: Value) -> Result<T::Stored>
@@ -157,13 +164,20 @@ where
         }
     }
 
-    Ok(serde_json::from_value(row)?)
+    serde_json::from_value(row).map_err(|err| DBError::Decode(err.to_string()).into())
 }
 
 pub(crate) async fn record_exists(record: RecordId) -> Result<bool> {
     let db = get_db()?;
-    let existing: Option<SurrealDbValue> = db.select(record).await?;
-    Ok(existing.is_some())
+    let selected: std::result::Result<Option<SurrealDbValue>, surrealdb::Error> =
+        db.select(record).await;
+    match selected {
+        Ok(existing) => Ok(existing.is_some()),
+        Err(err) => match DBError::from(err) {
+            DBError::MissingTable(_) => Ok(false),
+            other => Err(other.into()),
+        },
+    }
 }
 
 fn collect_lookup_parts<T>(data: &T) -> Result<Vec<(String, Value)>>
@@ -280,7 +294,7 @@ where
             .await?;
         match created {
             Some(stored) => Ok(T::hydrate_foreign(stored).await?),
-            None => Err(DBError::EmptyResult("create_at").into()),
+            None => Err(DBError::Conflict("record already exists".to_owned()).into()),
         }
     }
 
@@ -290,29 +304,22 @@ where
     where
         T: HasId,
     {
-        let db = get_db()?;
         let id = data.id();
-        let updated: Option<T::Stored> = db
-            .upsert(id)
-            .content(T::persist_foreign(data).await?)
-            .await?;
-        match updated {
-            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
-            None => Err(DBError::EmptyResult("upsert").into()),
-        }
+        Self::upsert_at(id, data).await
     }
 
     /// Upserts a row at the provided record id.
     pub async fn upsert_at(id: RecordId, data: T) -> Result<T> {
         let db = get_db()?;
-        let updated: Option<T::Stored> = db
-            .upsert(id)
-            .content(T::persist_foreign(data).await?)
-            .await?;
-        match updated {
-            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
-            None => Err(DBError::EmptyResult("upsert_at").into()),
-        }
+        let content = prepare_content(T::persist_foreign(data).await?)?;
+        db.query(
+            "BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;",
+        )
+            .bind(("record", id.clone()))
+            .bind(("data", content))
+            .await?
+            .check()?;
+        Self::get_record(id).await
     }
 
     /// Fetches a row by full record id.
@@ -471,9 +478,9 @@ where
             .bind(("table", Table::from(T::table_name())))
             .await?;
         if let Err(err) = result.check() {
-            let message = err.to_string();
-            if !message.contains("does not exist") {
-                return Err(err.into());
+            match DBError::from(err) {
+                DBError::MissingTable(_) => {}
+                other => return Err(other.into()),
             }
         }
         Ok(())

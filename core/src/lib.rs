@@ -175,7 +175,9 @@ impl ForeignPersistence for RepoForeignPersistence {
     where
         T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send,
     {
-        repository::Repo::<T>::create_at(id, data).await
+        // Foreign explicit-id persistence must share the same table-bootstrap semantics
+        // as root save paths, otherwise fresh schemaless child tables fail on create(id).
+        repository::Repo::<T>::upsert_at(id, data).await
     }
 }
 
@@ -397,7 +399,12 @@ where
                 Ok(saved_id)
             }
         }
-        Err(err) if err.to_string().contains("Record not found") => {
+        Err(err)
+            if matches!(
+                crate::error::classify_db_error_message(err.to_string()).kind(),
+                crate::error::DBErrorKind::NotFound
+            ) =>
+        {
             let saved = persistence.create(value).await?;
             let saved_id = saved.resolve_record_id().await?;
             if foreign_cleanup_enabled() {
@@ -405,7 +412,13 @@ where
             }
             Ok(saved_id)
         }
-        Err(_err) if explicit_record_id.is_some() => {
+        Err(err)
+            if explicit_record_id.is_some()
+                && matches!(
+                    crate::error::classify_db_error_message(err.to_string()).kind(),
+                    crate::error::DBErrorKind::MissingTable | crate::error::DBErrorKind::NotFound
+                ) =>
+        {
             let saved = persistence
                 .create_at(explicit_record_id.expect("checked is_some above"), value)
                 .await?;
