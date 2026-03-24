@@ -130,7 +130,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             impl ::appdb::model::meta::HasId for #struct_ident {
                 fn id(&self) -> ::surrealdb::types::RecordId {
                     ::surrealdb::types::RecordId::new(
-                        <Self as ::appdb::model::meta::ModelMeta>::table_name(),
+                        <Self as ::appdb::model::meta::ModelMeta>::storage_table(),
                         self.#field.clone(),
                     )
                 }
@@ -144,7 +144,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             impl ::appdb::model::meta::ResolveRecordId for #struct_ident {
                 async fn resolve_record_id(&self) -> ::anyhow::Result<::surrealdb::types::RecordId> {
                     Ok(::surrealdb::types::RecordId::new(
-                        <Self as ::appdb::model::meta::ModelMeta>::table_name(),
+                        <Self as ::appdb::model::meta::ModelMeta>::storage_table(),
                         self.#field.clone(),
                     ))
                 }
@@ -396,7 +396,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 
         impl ::appdb::model::meta::ModelMeta for #struct_ident {
             fn storage_table() -> &'static str {
-                <Self as ::appdb::model::meta::ModelMeta>::table_name()
+                #resolved_table_name_expr
             }
 
             fn table_name() -> &'static str {
@@ -553,7 +553,7 @@ fn derive_bridge_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStrea
         let payload_ty = &variant.payload_ty;
 
         quote! {
-            table if table == <#payload_ty as ::appdb::model::meta::ModelMeta>::table_name() => {
+            table if table == <#payload_ty as ::appdb::model::meta::ModelMeta>::storage_table() => {
                 ::std::result::Result::Ok(Self::#variant_ident(
                     <#payload_ty as ::appdb::Bridge>::hydrate_foreign(id).await?,
                 ))
