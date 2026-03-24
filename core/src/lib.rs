@@ -155,14 +155,6 @@ pub trait ForeignPersistence: Send + Sync {
     where
         T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send;
 
-    /// Creates one new row at the provided id and returns the saved model.
-    fn create_at<T>(
-        &self,
-        id: surrealdb::types::RecordId,
-        data: T,
-    ) -> impl std::future::Future<Output = anyhow::Result<T>> + Send
-    where
-        T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send;
 }
 
 #[derive(Clone, Copy, Default)]
@@ -187,13 +179,6 @@ impl ForeignPersistence for RepoForeignPersistence {
         T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send,
     {
         repository::Repo::<T>::create(data).await
-    }
-
-    async fn create_at<T>(&self, id: surrealdb::types::RecordId, data: T) -> anyhow::Result<T>
-    where
-        T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send,
-    {
-        repository::Repo::<T>::create_at(id, data).await
     }
 }
 
