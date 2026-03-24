@@ -268,6 +268,56 @@ struct ItNestedParent {
     child: ItNestedIdChild,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct ItMismatchedForeignChild {
+    id: Id,
+    resolved_id: Id,
+    name: String,
+}
+
+impl StoredModel for ItMismatchedForeignChild {
+    type Stored = Self;
+
+    fn into_stored(self) -> anyhow::Result<Self::Stored> {
+        Ok(self)
+    }
+
+    fn from_stored(stored: Self::Stored) -> anyhow::Result<Self> {
+        Ok(stored)
+    }
+}
+
+impl ModelMeta for ItMismatchedForeignChild {
+    fn table_name() -> &'static str {
+        static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+        TABLE_NAME.get_or_init(|| {
+            register_table(
+                stringify!(ItMismatchedForeignChild),
+                "it_mismatched_foreign_child",
+            )
+        })
+    }
+}
+
+impl Crud for ItMismatchedForeignChild {}
+
+impl appdb::ForeignModel for ItMismatchedForeignChild {
+    async fn persist_foreign(value: Self) -> anyhow::Result<Self::Stored> {
+        Ok(value)
+    }
+
+    async fn hydrate_foreign(stored: Self::Stored) -> anyhow::Result<Self> {
+        Ok(stored)
+    }
+}
+
+#[async_trait::async_trait]
+impl ResolveRecordId for ItMismatchedForeignChild {
+    async fn resolve_record_id(&self) -> anyhow::Result<RecordId> {
+        Ok(RecordId::new(Self::table_name(), self.resolved_id.to_string()))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItSchemalessForeignChild {
     id: Id,
@@ -1768,6 +1818,57 @@ fn foreign_existing_child_is_reused_without_duplication() {
         assert_eq!(before_ids, vec![seeded_id.clone()]);
         assert_eq!(after_ids, vec![seeded_id.clone()]);
         assert_eq!(raw.child, seeded_id);
+    });
+}
+
+#[test]
+fn foreign_explicit_id_and_resolved_record_id_mismatch_fails_deterministically() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItMismatchedForeignChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let err = appdb::resolve_foreign_record_id(ItMismatchedForeignChild {
+            id: Id::from("serialized-child"),
+            resolved_id: Id::from("resolved-child"),
+            name: "mismatch".to_owned(),
+        })
+        .await
+        .expect_err("mismatched explicit and resolved foreign ids should fail");
+
+        let db_err = appdb::error::classify_db_error(&err);
+        match db_err {
+            DBError::InvalidModel(message) => {
+                assert!(
+                    message.contains("foreign explicit id mismatch"),
+                    "unexpected invalid-model message: {message}"
+                );
+                assert!(
+                    message.contains("serialized explicit id"),
+                    "message should mention serialized explicit id: {message}"
+                );
+                assert!(
+                    message.contains("resolved record id"),
+                    "message should mention resolved record id: {message}"
+                );
+            }
+            other => panic!("expected invalid-model mismatch error, got {other:?}"),
+        }
+
+        let serialized = Repo::<ItMismatchedForeignChild>::get("serialized-child").await;
+        assert!(
+            matches!(appdb::error::classify_db_error(&serialized.expect_err("serialized id must remain absent")), DBError::NotFound | DBError::MissingTable(_)),
+            "serialized id should not be persisted"
+        );
+
+        let resolved = Repo::<ItMismatchedForeignChild>::get("resolved-child").await;
+        assert!(
+            matches!(appdb::error::classify_db_error(&resolved.expect_err("resolved id must remain absent")), DBError::NotFound | DBError::MissingTable(_)),
+            "resolved id should not be persisted"
+        );
     });
 }
 

@@ -425,7 +425,11 @@ where
                 save_foreign_created(persistence.ensure_at(explicit_record_id, value).await?).await
             }
         }
-        Ok(record_id) => Ok(record_id),
+        Ok(record_id) => Err(crate::error::DBError::InvalidModel(format!(
+            "foreign explicit id mismatch: serialized explicit id `{:?}` diverged from resolved record id `{:?}`",
+            explicit_record_id, record_id
+        ))
+        .into()),
         Err(err) => match crate::error::classify_db_error(&err) {
             crate::error::DBError::MissingTable(_) | crate::error::DBError::NotFound => {
                 save_foreign_created(persistence.ensure_at(explicit_record_id, value).await?).await
