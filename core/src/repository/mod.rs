@@ -93,6 +93,11 @@ fn record_id_key_to_json_value(key: &RecordIdKey) -> Value {
     }
 }
 
+fn record_id_to_stable_key(record: &RecordId) -> Result<String> {
+    let value = serde_json::to_value(record)?;
+    Ok(value.to_string())
+}
+
 fn normalize_foreign_shapes(value: &mut serde_json::Value) {
     crate::rewrite_foreign_json_value(value);
     crate::decode_stored_record_links(value);
@@ -786,7 +791,7 @@ where
             let mut prepared = Vec::with_capacity(chunk.len());
             let mut sql = String::from("BEGIN TRANSACTION; ");
             let mut created_foreign_records = Vec::new();
-            let mut seen_records = std::collections::HashSet::with_capacity(chunk.len());
+            let mut seen_records = std::collections::HashSet::<String>::with_capacity(chunk.len());
 
             for (idx, row) in chunk.iter().cloned().enumerate() {
                 let ((record, content, id), row_foreign_records) =
@@ -796,7 +801,8 @@ where
                         Ok::<_, anyhow::Error>((record, content, id))
                     })
                     .await?;
-                if !seen_records.insert(record.clone()) {
+                let record_key = record_id_to_stable_key(&record)?;
+                if !seen_records.insert(record_key) {
                     return Err(DBError::Conflict(format!(
                         "save_many received duplicate record id in one batch: {record:?}"
                     ))
