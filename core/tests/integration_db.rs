@@ -986,7 +986,8 @@ fn inherent_model_api_roundtrip_passes() {
         let err = ItStringUser::get("alice")
             .await
             .expect_err("deleted record should not load");
-        assert!(err.to_string().contains("Record not found"));
+        let typed = DBError::from(err);
+        assert_eq!(typed.kind(), DBErrorKind::NotFound);
 
         drop(inserted);
     });
@@ -1008,7 +1009,8 @@ fn select_missing_record_fails() {
         let err = Repo::<ItStringUser>::get("missing")
             .await
             .expect_err("missing record should fail");
-        assert!(err.to_string().contains("Record not found"), "{err}");
+        let typed = DBError::from(err);
+        assert_eq!(typed.kind(), DBErrorKind::NotFound, "{typed}");
     });
 }
 
@@ -1060,7 +1062,7 @@ fn create_at_duplicate_id_returns_typed_conflict() {
         )
         .await
         .expect_err("duplicate create_at should return a typed conflict");
-        let typed = appdb::classify_db_error_message(err.to_string());
+        let typed = DBError::from(err);
         assert_eq!(typed.kind(), DBErrorKind::Conflict);
 
         let loaded = Repo::<ItStringUser>::get("typed-conflict")
@@ -1137,7 +1139,7 @@ fn decode_raw_row_invalid_shape_returns_typed_decode_error() {
         let err = query_bound_return::<ItStringUser>(stmt)
             .await
             .expect_err("invalid raw row shape should fail to decode");
-        let typed = appdb::classify_db_error_message(err.to_string());
+        let typed = DBError::from(err);
 
         assert_eq!(typed.kind(), DBErrorKind::Decode);
     });
