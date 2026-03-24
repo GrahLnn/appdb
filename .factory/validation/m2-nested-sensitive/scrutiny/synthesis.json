@@ -1,7 +1,7 @@
 {
   "milestone": "m2-nested-sensitive",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -20,53 +20,36 @@
     }
   },
   "reviewsSummary": {
-    "total": 3,
-    "passed": 1,
+    "total": 5,
+    "passed": 3,
     "failed": 2,
-    "failedFeatures": [
-      "nested-sensitive-metadata-and-bounds",
-      "nested-sensitive-override-isolation"
-    ]
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "nested-sensitive-metadata-and-bounds",
-      "severity": "blocking",
-      "description": "The trybuild suite does not include a compile-pass case proving nested sensitive derives work when plaintext child types intentionally omit non-essential traits like PartialEq/Eq/Display, so VAL-NS-008 remains unproven."
-    },
-    {
-      "featureId": "nested-sensitive-override-isolation",
-      "severity": "blocking",
-      "description": "The reviewed tests only cover top-level wrong-context and override/default isolation; there is no nested secure leaf regression proving sibling-context failure for field-account overrides, so VAL-CROSS-002 remains unproven."
-    },
-    {
-      "featureId": "nested-sensitive-override-isolation",
-      "severity": "blocking",
-      "description": "There is no nested Store regression that saves a parent with multiple nested secure leaves using distinct field-account overrides and then proves wrong-leaf decryption fails, leaving the feature contract uncovered in persisted paths."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skill:scrutiny-validator or rust-library-worker",
-      "suggestion": "Add explicit guidance for verification-only reviews of already-landed features so workers know when they must prove the exact contract with focused evidence instead of treating nearby pre-existing tests as sufficient.",
-      "evidence": "The metadata/bounds and override-isolation reviews both found workers completing features on HEAD using surrounding tests that did not directly prove the promised contract.",
+      "suggestion": "When scrutiny reruns after fix features land, reviewer prompts and synthesis guidance should explicitly distinguish original failed commits from later fix features so legacy feature reports are not treated as current milestone failures once the fix features have been reviewed and passed.",
+      "evidence": "This rerun reviewed both the original m2 features and the later fix features. The original reports remained fail against historical commits 05ee508, while focused fix reviews on f596cf45 and 565419e proved VAL-NS-008 and VAL-CROSS-002 are now satisfied on HEAD.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md or skill guidance",
+      "suggestion": "Clarify the expected GitNexus fallback wording for worker handoffs when CLI commands like detect_changes are unavailable, so followedProcedure reporting stays consistent across workers and reviewers.",
+      "evidence": "Multiple review reports noted that current repo guidance requires GitNexus-first workflows but the available CLI did not expose detect_changes, causing workers to fall back to git/jj inspection with inconsistent reporting style.",
       "isSystemic": true
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Document the concrete SensitiveShape abstraction in shared knowledge.",
-      "reason": "Useful but belongs in .factory/library, and updating docs was not necessary to complete this scrutiny synthesis."
+      "observation": "Document the SensitiveShape seam in .factory/library/sensitive-crypto.md.",
+      "reason": "Useful knowledge, but not required to complete scrutiny and not necessary to apply during this synthesis pass."
     },
     {
-      "observation": "Clarify GitNexus fallback availability in worker guidance.",
-      "reason": "The repo already documents the fallback in AGENTS.md/CLAUDE.md; the review did not establish a concrete project-state change needed inside this milestone synthesis."
-    },
-    {
-      "observation": "Record that no dedicated nested override isolation regression exists yet in .factory/library/sensitive-crypto.md.",
-      "reason": "This is accurate but should be addressed by the fix feature that adds the missing regression rather than by the scrutiny synthesizer."
+      "observation": "Record in shared knowledge that the original 05ee508 commit did not yet prove metadata and nested override contracts.",
+      "reason": "The rerun synthesis already captures that historical distinction via previousRound plus fix-feature review outcomes; duplicating it into library state would be redundant."
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/m2-nested-sensitive/scrutiny/synthesis.json"
 }
