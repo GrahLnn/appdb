@@ -34,6 +34,7 @@ pub use serde_utils::id::*;
 pub use tx::*;
 
 use surrealdb::types::RecordId;
+use surrealdb_types::Kind;
 
 #[::async_trait::async_trait]
 /// Runtime seam for values persisted by `#[foreign]` fields.
@@ -120,6 +121,75 @@ pub trait SensitiveShape: Sized {
     ) -> Result<Self, crate::crypto::CryptoError>;
 }
 
+/// Runtime/storage seam for enum-bearing leaves inside an approved secure container.
+///
+/// This preserves the direct `#[secure] Enum` boundary while allowing containing
+/// sensitive shapes to store enum-bearing values through an encrypted byte payload.
+pub trait SensitiveValue: Sized {
+    /// Stored representation for this secure value seam.
+    type Encrypted: Clone
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + surrealdb::types::SurrealValue;
+
+    /// Encrypt one value under an already-resolved secure-field context.
+    fn encrypt_value(
+        &self,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self::Encrypted, crate::crypto::CryptoError>;
+
+    /// Decrypt one stored value back into the caller-facing type.
+    fn decrypt_value(
+        encrypted: &Self::Encrypted,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self, crate::crypto::CryptoError>;
+}
+
+/// Wrapper that stores any serde value through the approved secure-value seam.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SensitiveValueOf<T>(pub T);
+
+impl<T> SensitiveValueOf<T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> std::ops::Deref for SensitiveValueOf<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> From<T> for SensitiveValueOf<T> {
+    fn from(value: T) -> Self {
+        Self(value)
+    }
+}
+
+impl<T> surrealdb::types::SurrealValue for SensitiveValueOf<T>
+where
+    T: surrealdb::types::SurrealValue,
+{
+    fn kind_of() -> Kind {
+        T::kind_of()
+    }
+
+    fn is_value(value: &surrealdb::types::Value) -> bool {
+        T::is_value(value)
+    }
+
+    fn into_value(self) -> surrealdb::types::Value {
+        self.0.into_value()
+    }
+
+    fn from_value(value: surrealdb::types::Value) -> Result<Self, surrealdb::Error> {
+        T::from_value(value).map(Self)
+    }
+}
+
 impl SensitiveShape for String {
     type Encrypted = Vec<u8>;
 
@@ -135,6 +205,31 @@ impl SensitiveShape for String {
         context: &crate::crypto::CryptoContext,
     ) -> Result<Self, crate::crypto::CryptoError> {
         crate::crypto::decrypt_string(encrypted, context)
+    }
+}
+
+impl<T> SensitiveValue for SensitiveValueOf<T>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    type Encrypted = Vec<u8>;
+
+    fn encrypt_value(
+        &self,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self::Encrypted, crate::crypto::CryptoError> {
+        let plaintext = serde_json::to_string(&self.0).map_err(|_| crate::crypto::CryptoError::Encrypt)?;
+        crate::crypto::encrypt_string(&plaintext, context)
+    }
+
+    fn decrypt_value(
+        encrypted: &Self::Encrypted,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self, crate::crypto::CryptoError> {
+        let plaintext = crate::crypto::decrypt_string(encrypted, context)?;
+        serde_json::from_str(&plaintext)
+            .map(Self)
+            .map_err(|_| crate::crypto::CryptoError::Decrypt)
     }
 }
 
@@ -157,6 +252,27 @@ where
         context: &crate::crypto::CryptoContext,
     ) -> Result<Self, crate::crypto::CryptoError> {
         <T as Sensitive>::decrypt(encrypted, context)
+    }
+}
+
+impl<T> SensitiveShape for SensitiveValueOf<T>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    type Encrypted = Vec<u8>;
+
+    fn encrypt_with_context(
+        &self,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self::Encrypted, crate::crypto::CryptoError> {
+        <Self as SensitiveValue>::encrypt_value(self, context)
+    }
+
+    fn decrypt_with_context(
+        encrypted: &Self::Encrypted,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self, crate::crypto::CryptoError> {
+        <Self as SensitiveValue>::decrypt_value(encrypted, context)
     }
 }
 

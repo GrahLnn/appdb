@@ -15,7 +15,8 @@ use appdb::query::{query_bound_checked, query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
 use appdb::{
-    Bridge, Crud, DBError, DBErrorKind, Id, Relation, Sensitive, SensitiveShape, Store,
+    Bridge, Crud, DBError, DBErrorKind, Id, Relation, Sensitive, SensitiveShape, SensitiveValueOf,
+    Store,
     StoredModel,
 };
 use serde::{Deserialize, Serialize};
@@ -597,6 +598,41 @@ struct ItPayloadState {
     value: serde_json::Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+enum ItSensitiveRuntimeSeamStatus {
+    Draft,
+    Published,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+enum ItSensitiveRuntimeSeamState {
+    Draft { note: String },
+    Published { version: u32, tags: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct ItSensitiveRuntimeSeamPayload {
+    alias: String,
+    status: ItSensitiveRuntimeSeamStatus,
+    optional_status: Option<ItSensitiveRuntimeSeamStatus>,
+    state: ItSensitiveRuntimeSeamState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+struct ItSensitiveRuntimeSeamParent {
+    id: Id,
+    alias: String,
+    #[secure]
+    payload: SensitiveValueOf<ItSensitiveRuntimeSeamPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+struct StoredSensitiveRuntimeSeamParentRow {
+    id: RecordId,
+    alias: String,
+    payload: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItPlainEnumProfile {
     id: Id,
@@ -709,6 +745,17 @@ async fn load_sensitive_override_profile_raw(id: &str) -> StoredSensitiveOverrid
         .await
         .expect("sensitive override profile row should load")
         .expect("sensitive override profile row should exist")
+}
+
+async fn load_sensitive_runtime_seam_parent_raw(id: &str) -> StoredSensitiveRuntimeSeamParentRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItSensitiveRuntimeSeamParent::table_name())
+        .bind("id", id.to_owned());
+
+    query_bound_return::<StoredSensitiveRuntimeSeamParentRow>(stmt)
+        .await
+        .expect("sensitive runtime seam parent raw row should load")
+        .expect("sensitive runtime seam parent raw row should exist")
 }
 
 async fn load_nested_sensitive_parent_raw(id: &str) -> StoredNestedSensitiveParentRow {
@@ -5821,6 +5868,90 @@ fn plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many() {
             .expect("second batch row should reload");
         assert_eq!(reloaded_batch_first, batch_first);
         assert_eq!(reloaded_batch_second, batch_second);
+    });
+}
+
+#[test]
+fn sensitive_enum_shape_runtime_seam_supports_store_roundtrip_without_secure_enum_syntax() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItSensitiveRuntimeSeamParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let saved = ItSensitiveRuntimeSeamParent::save(ItSensitiveRuntimeSeamParent {
+            id: Id::from("sensitive-enum-seam-save"),
+            alias: "secure-enum-parent".to_owned(),
+            payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                alias: "secure-enum-payload".to_owned(),
+                status: ItSensitiveRuntimeSeamStatus::Draft,
+                optional_status: Some(ItSensitiveRuntimeSeamStatus::Published),
+                state: ItSensitiveRuntimeSeamState::Published {
+                    version: 9,
+                    tags: vec!["stable".to_owned(), "tagged".to_owned()],
+                },
+            }),
+        })
+        .await
+        .expect("save should roundtrip enum-bearing sensitive payload");
+
+        let loaded = ItSensitiveRuntimeSeamParent::get("sensitive-enum-seam-save")
+            .await
+            .expect("get should reload enum-bearing sensitive payload");
+        assert_eq!(loaded, saved);
+
+        let batch_first = ItSensitiveRuntimeSeamParent {
+            id: Id::from("sensitive-enum-seam-batch-1"),
+            alias: "secure-enum-batch-one".to_owned(),
+            payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                alias: "payload-one".to_owned(),
+                status: ItSensitiveRuntimeSeamStatus::Published,
+                optional_status: None,
+                state: ItSensitiveRuntimeSeamState::Draft {
+                    note: "batch-note".to_owned(),
+                },
+            }),
+        };
+        let batch_second = ItSensitiveRuntimeSeamParent {
+            id: Id::from("sensitive-enum-seam-batch-2"),
+            alias: "secure-enum-batch-two".to_owned(),
+            payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                alias: "payload-two".to_owned(),
+                status: ItSensitiveRuntimeSeamStatus::Draft,
+                optional_status: Some(ItSensitiveRuntimeSeamStatus::Draft),
+                state: ItSensitiveRuntimeSeamState::Published {
+                    version: 3,
+                    tags: vec!["canary".to_owned()],
+                },
+            }),
+        };
+
+        let saved_many =
+            ItSensitiveRuntimeSeamParent::save_many(vec![batch_first.clone(), batch_second.clone()])
+                .await
+                .expect("save_many should preserve enum-bearing sensitive row association");
+        assert_eq!(saved_many, vec![batch_first.clone(), batch_second.clone()]);
+
+        let listed = ItSensitiveRuntimeSeamParent::list()
+            .await
+            .expect("list should return all sensitive enum-bearing rows");
+        assert_eq!(listed.len(), 3);
+        assert!(listed.contains(&saved));
+        assert!(listed.contains(&batch_first));
+        assert!(listed.contains(&batch_second));
+
+        let raw = load_sensitive_runtime_seam_parent_raw("sensitive-enum-seam-save").await;
+        assert_eq!(raw.alias, "secure-enum-parent");
+        assert_ne!(
+            raw.payload,
+            serde_json::to_vec(&*saved.payload).expect("payload should serialize")
+        );
+        let raw_text = String::from_utf8_lossy(&raw.payload);
+        assert!(!raw_text.contains("Draft"));
+        assert!(!raw_text.contains("Published"));
+        assert!(!raw_text.contains("stable"));
     });
 }
 
