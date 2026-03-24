@@ -8,7 +8,7 @@ use surrealdb::opt::PatchOp;
 use surrealdb::types::{RecordId, RecordIdKey, Table, Value as SurrealDbValue};
 
 use crate::connection::get_db;
-use crate::error::DBError;
+use crate::error::{classify_db_error_text, DBError, DBErrorKind};
 use crate::model::meta::{HasId, ModelMeta, UniqueLookupMeta};
 use crate::query::builder::QueryKind;
 use crate::serde_utils::id::parse_record_id_or_plain_string;
@@ -96,6 +96,18 @@ fn record_id_key_to_json_value(key: &RecordIdKey) -> Value {
 fn normalize_foreign_shapes(value: &mut serde_json::Value) {
     crate::rewrite_foreign_json_value(value);
     crate::decode_stored_record_links(value);
+}
+
+fn decode_error<T>(row: Value, err: serde_json::Error) -> anyhow::Error
+where
+    T: ModelMeta,
+{
+    let classified = classify_db_error_text(format!(
+        "failed to decode stored `{}` row: {err}; row={row}",
+        T::storage_table()
+    ));
+    debug_assert_eq!(classified.kind, DBErrorKind::Decode);
+    classified.into_db_error().into()
 }
 
 fn normalize_root_record_id_string<T>(value: &mut serde_json::Value)
@@ -258,7 +270,7 @@ where
         }
     }
 
-    serde_json::from_value(row).map_err(|err| DBError::Decode(err.to_string()).into())
+    serde_json::from_value(row.clone()).map_err(|err| decode_error::<T>(row, err))
 }
 
 pub(crate) async fn record_exists(record: RecordId) -> Result<bool> {

@@ -55,6 +55,12 @@ pub enum DBErrorKind {
     Other,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassifiedDBError {
+    pub kind: DBErrorKind,
+    pub message: String,
+}
+
 impl DBError {
     pub fn kind(&self) -> DBErrorKind {
         match self {
@@ -73,18 +79,36 @@ impl DBError {
     }
 }
 
+impl ClassifiedDBError {
+    pub fn into_db_error(self) -> DBError {
+        match self.kind {
+            DBErrorKind::NotFound => DBError::NotFound,
+            DBErrorKind::MissingTable => DBError::MissingTable(self.message),
+            DBErrorKind::Conflict => DBError::Conflict(self.message),
+            DBErrorKind::Decode => DBError::Decode(self.message),
+            DBErrorKind::Transport => DBError::Transport(self.message),
+            DBErrorKind::Engine => DBError::Surreal(self.message),
+            DBErrorKind::Other => DBError::Surreal(self.message),
+        }
+    }
+}
+
 pub fn classify_db_error_message(message: String) -> DBError {
+    classify_db_error_text(message).into_db_error()
+}
+
+pub fn classify_db_error_text(message: String) -> ClassifiedDBError {
     let lower = message.to_ascii_lowercase();
-    if lower.contains("record not found") {
-        DBError::NotFound
+    let kind = if lower.contains("record not found") {
+        DBErrorKind::NotFound
     } else if lower.contains("does not exist") && lower.contains("table") {
-        DBError::MissingTable(message)
+        DBErrorKind::MissingTable
     } else if lower.contains("already exists")
         || lower.contains("duplicate key")
         || lower.contains("constraint violation")
         || lower.contains("conflict")
     {
-        DBError::Conflict(message)
+        DBErrorKind::Conflict
     } else if lower.contains("failed to deserialize")
         || lower.contains("invalid type")
         || lower.contains("missing field")
@@ -92,16 +116,18 @@ pub fn classify_db_error_message(message: String) -> DBError {
         || lower.contains("expected ")
         || lower.contains("decode")
     {
-        DBError::Decode(message)
+        DBErrorKind::Decode
     } else if lower.contains("transport")
         || lower.contains("connection")
         || lower.contains("socket")
         || lower.contains("timed out")
     {
-        DBError::Transport(message)
+        DBErrorKind::Transport
     } else {
-        DBError::Surreal(message)
-    }
+        DBErrorKind::Engine
+    };
+
+    ClassifiedDBError { kind, message }
 }
 
 pub fn classify_db_error(err: &anyhow::Error) -> DBError {

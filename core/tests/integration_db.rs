@@ -7,6 +7,7 @@ use appdb::crypto::{
     clear_crypto_context_registry, register_crypto_context_for, CryptoContext, SensitiveFieldTag,
     SensitiveModelTag,
 };
+use appdb::error::classify_db_error_text;
 use appdb::graph::{GraphCrud, GraphRepo};
 use appdb::model::meta::{register_table, HasId, ModelMeta, ResolveRecordId, UniqueLookupMeta};
 use appdb::model::relation::relation_name;
@@ -1195,6 +1196,28 @@ fn decode_raw_row_invalid_shape_returns_typed_decode_error() {
 
         assert_eq!(typed.kind(), DBErrorKind::Decode);
     });
+}
+
+#[test]
+fn typed_db_error_classifier_distinguishes_all_validated_categories() {
+    let missing_table = classify_db_error_text("The table it_missing does not exist".to_owned());
+    assert_eq!(missing_table.kind, DBErrorKind::MissingTable);
+
+    let not_found = classify_db_error_text("Record not found".to_owned());
+    assert_eq!(not_found.kind, DBErrorKind::NotFound);
+
+    let conflict = classify_db_error_text("Database conflict: record already exists".to_owned());
+    assert_eq!(conflict.kind, DBErrorKind::Conflict);
+
+    let decode =
+        classify_db_error_text("failed to decode stored row: missing field `payload`".to_owned());
+    assert_eq!(decode.kind, DBErrorKind::Decode);
+
+    let transport = classify_db_error_text("transport connection timed out".to_owned());
+    assert_eq!(transport.kind, DBErrorKind::Transport);
+
+    let engine = classify_db_error_text("surreal engine exploded".to_owned());
+    assert_eq!(engine.kind, DBErrorKind::Engine);
 }
 
 #[test]
