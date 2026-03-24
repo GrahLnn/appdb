@@ -586,6 +586,26 @@ struct StoredVecNestedSensitiveParentRow {
     children: Vec<EncryptedItNestedSensitiveChild>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct ItPlainStatus {
+    kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct ItPayloadState {
+    kind: String,
+    value: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItPlainEnumProfile {
+    id: Id,
+    name: String,
+    status: ItPlainStatus,
+    optional_status: Option<ItPlainStatus>,
+    state: ItPayloadState,
+}
+
 impl ModelMeta for ItRecordUser {
     fn table_name() -> &'static str {
         static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
@@ -5714,6 +5734,93 @@ fn store_sensitive_auto_crypto_overrides_and_default_isolation_hold_across_inter
         let _ = std::fs::remove_dir_all(local_appdata);
         clear_crypto_context_registry();
         reset_default_crypto_config();
+    });
+}
+
+#[test]
+fn plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItPlainEnumProfile>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let saved = ItPlainEnumProfile::save(ItPlainEnumProfile {
+            id: Id::from("plain-enum-save"),
+            name: "plain-one".to_owned(),
+            status: ItPlainStatus { kind: "Draft".to_owned() },
+            optional_status: Some(ItPlainStatus { kind: "Published".to_owned() }),
+            state: ItPayloadState {
+                kind: "Draft".to_owned(),
+                value: serde_json::json!({ "note": "draft-note" }),
+            },
+        })
+        .await
+        .expect("save should roundtrip plain enum fields");
+
+        assert_eq!(
+            saved,
+            ItPlainEnumProfile {
+                id: Id::from("plain-enum-save"),
+                name: "plain-one".to_owned(),
+                status: ItPlainStatus { kind: "Draft".to_owned() },
+                optional_status: Some(ItPlainStatus { kind: "Published".to_owned() }),
+                state: ItPayloadState {
+                    kind: "Draft".to_owned(),
+                    value: serde_json::json!({ "note": "draft-note" }),
+                },
+            }
+        );
+
+        let loaded = ItPlainEnumProfile::get("plain-enum-save")
+            .await
+            .expect("get should reload plain enum fields");
+        assert_eq!(loaded, saved);
+
+        let batch_first = ItPlainEnumProfile {
+            id: Id::from("plain-enum-batch-1"),
+            name: "plain-batch-one".to_owned(),
+            status: ItPlainStatus { kind: "Published".to_owned() },
+            optional_status: None,
+            state: ItPayloadState {
+                kind: "Published".to_owned(),
+                value: serde_json::json!({ "version": 7, "tags": ["release", "stable"] }),
+            },
+        };
+        let batch_second = ItPlainEnumProfile {
+            id: Id::from("plain-enum-batch-2"),
+            name: "plain-batch-two".to_owned(),
+            status: ItPlainStatus { kind: "Draft".to_owned() },
+            optional_status: Some(ItPlainStatus { kind: "Draft".to_owned() }),
+            state: ItPayloadState {
+                kind: "Draft".to_owned(),
+                value: serde_json::json!({ "note": "batch-draft" }),
+            },
+        };
+
+        let saved_many = ItPlainEnumProfile::save_many(vec![batch_first.clone(), batch_second.clone()])
+            .await
+            .expect("save_many should preserve enum row association");
+        assert_eq!(saved_many, vec![batch_first.clone(), batch_second.clone()]);
+
+        let listed = ItPlainEnumProfile::list()
+            .await
+            .expect("list should return all enum-bearing rows");
+        assert_eq!(listed.len(), 3);
+        assert!(listed.contains(&saved));
+        assert!(listed.contains(&batch_first));
+        assert!(listed.contains(&batch_second));
+
+        let reloaded_batch_first = ItPlainEnumProfile::get("plain-enum-batch-1")
+            .await
+            .expect("first batch row should reload");
+        let reloaded_batch_second = ItPlainEnumProfile::get("plain-enum-batch-2")
+            .await
+            .expect("second batch row should reload");
+        assert_eq!(reloaded_batch_first, batch_first);
+        assert_eq!(reloaded_batch_second, batch_second);
     });
 }
 
