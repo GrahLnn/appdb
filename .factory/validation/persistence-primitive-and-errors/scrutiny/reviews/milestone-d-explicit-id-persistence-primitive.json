@@ -1,39 +1,34 @@
 {
   "featureId": "milestone-d-explicit-id-persistence-primitive",
-  "reviewedAt": "2026-03-24T05:25:55.619429+00:00",
+  "reviewedAt": "2026-03-24T07:29:09Z",
   "commitId": "665414a62b2bc3e31baa9e00398286dc17a62ec5",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "fail",
   "codeReview": {
-    "summary": "The reviewed commit only tightens typed DB-error consumption at a few call sites and test assertions; it does not implement the assigned explicit-id primitive unification because Repo::save still owns a separate explicit-id UPSERT transaction path instead of delegating to the canonical primitive already used by create_at/upsert_at.",
+    "summary": "The reviewed worker session does not satisfy the feature contract because its cited commit only covers typed error classification. The current repository now has a canonical explicit-id primitive and Repo::save delegation, but those required behaviors are not owned by the reviewed feature commit.",
     "issues": [
       {
         "file": "core/src/repository/mod.rs",
-        "line": 663,
+        "line": 182,
         "severity": "blocking",
-        "description": "Repo::save still builds and executes its own explicit-id UPSERT transaction (BEGIN/UPSERT/COMMIT plus post-hydrate cleanup) rather than delegating to persist_explicit_id_primitive. That leaves save on a separate persistence seam, so save, upsert_at, and create_at do not yet share one canonical low-level explicit-id primitive as the feature requires."
+        "description": "The canonical explicit-id helper exists in the current tree at persist_explicit_id_primitive, but the reviewed feature-owned commit 665414a62b2bc3e31baa9e00398286dc17a62ec5 does not introduce or modify it. git show 665414a changes only core/src/error.rs, core/src/lib.rs, and core/tests/integration_db.rs, so the shared low-level explicit-id primitive is not auditable from the cited implementation artifact."
       },
       {
         "file": "core/src/repository/mod.rs",
-        "line": 187,
+        "line": 658,
         "severity": "blocking",
-        "description": "persist_explicit_id_primitive exists and is used by create_at/upsert_at, but the reviewed commit does not connect Repo::save to it or otherwise remove the duplicated explicit-id write owner. The feature description explicitly requires save to delegate to the same primitive instead of retaining a separate UPSERT transaction path."
+        "description": "The feature contract explicitly requires Repo::save to delegate explicit-id writes through the same primitive as create_at/upsert_at, but the reviewed commit 665414a does not touch Repo::save. That delegation appears only later at core/src/repository/mod.rs:659-661 in commit c11c0f9, so the worker handoff points at the wrong commit for the claimed behavior."
       }
     ]
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The rust-library-worker skill tells workers to converge explicit-id persistence onto one canonical primitive, but it does not explicitly tell them to verify that Repo::save itself delegates to that primitive before declaring success. This gap allowed a verification-only worker handoff to mark the feature complete even though the runtime still had a second explicit-id write owner.",
-      "evidence": "Skill step 16 in C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md says to converge on one canonical low-level write primitive, while current runtime code still has persist_explicit_id_primitive at core/src/repository/mod.rs:187 and a separate Repo::save UPSERT path at core/src/repository/mod.rs:663-687. The worker transcript/handoff for session 02aa3764-624d-4377-b6a5-c9bcfbce3990 reports success without any code change."
-    },
-    {
-      "area": "conventions",
-      "observation": "The repo/mission guidance already states that the existing working-tree state may be authoritative, but there is no matching mission-level rule that a worker must reject feature completion when the inspected baseline still contradicts the feature contract. In this case the worker treated baseline presence plus passing tests as sufficient even though diff/code inspection still showed the required delegation missing.",
-      "evidence": "Mission AGENTS at C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\AGENTS.md says the dirty working tree is authoritative baseline context, and the 02aa3764 handoff states verification-only success because the refactor was already present. However code inspection of core/src/repository/mod.rs:663-687 shows Repo::save still has its own explicit-id UPSERT transaction path, contradicting the feature description in features.json."
+      "observation": "The rust-library-worker procedure does not clearly require workers to prove that the feature-owned commit actually contains the scoped runtime seam when they switch into verification-only mode against an authoritative dirty baseline.",
+      "evidence": "C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md step 16 requires one canonical explicit-id primitive, but session 02aa3764-624d-4377-b6a5-c9bcfbce3990 handed off commit 665414a62b2bc3e31baa9e00398286dc17a62ec5 without any repository edit. git show --stat 665414a lists only core/src/error.rs, core/src/lib.rs, and core/tests/integration_db.rs, while the required Repo::save delegation lands later in commit c11c0f9."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Reviewed the feature handoff, transcript skeleton, commit 665414a62b2bc3e31baa9e00398286dc17a62ec5, and the current repository/runtime files. The reviewed commit does not implement the requested explicit-id persistence unification: save still uses a separate explicit-id write path, so the feature fails despite passing validators."
+  "summary": "Fail: the reviewed session cites commit 665414a as implementing the explicit-id persistence primitive feature, but that commit only adopts typed DB error classification. The actual Repo::save delegation to the shared explicit-id primitive landed later in commit c11c0f9, so this feature submission remains an ownership/evidence mismatch."
 }

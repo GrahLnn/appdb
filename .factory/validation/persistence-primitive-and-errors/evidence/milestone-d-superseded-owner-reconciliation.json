@@ -1,0 +1,80 @@
+{
+  "featureId": "milestone-d-superseded-owner-reconciliation",
+  "milestone": "persistence-primitive-and-errors",
+  "status": "completed",
+  "summary": "Mission-state and scrutiny-artifact ownership reconciliation for milestone D so superseded historical owners no longer participate in future aggregation.",
+  "reconciles": [
+    {
+      "supersededFeatureId": "milestone-d-explicit-id-persistence-primitive",
+      "supersededStatus": "cancelled",
+      "authoritativeOwners": [
+        "milestone-d-explicit-id-persistence-primitive-save-delegation"
+      ],
+      "authoritativeReview": ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-explicit-id-persistence-primitive-save-delegation.json",
+      "supersededReview": ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-explicit-id-persistence-primitive.json",
+      "why": "The historical feature review fails because its cited commit did not own the explicit-id primitive rollout, while the save-delegation replacement review passes against the real Repo::save delegation seam."
+    },
+    {
+      "supersededFeatureId": "milestone-d-record-id-roundtrip-table-identity-fix",
+      "supersededStatus": "cancelled",
+      "authoritativeOwners": [
+        "milestone-d-record-id-roundtrip-table-identity-fix-evidence-revalidation",
+        "milestone-d-record-id-roundtrip-table-identity-narrowing-fix"
+      ],
+      "authoritativeReviews": [
+        ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-record-id-roundtrip-table-identity-fix-evidence-revalidation.json",
+        ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-record-id-roundtrip-table-identity-narrowing-fix.json"
+      ],
+      "supersededReview": ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-record-id-roundtrip-table-identity-fix.json",
+      "why": "The original fix review points at the wrong commit, while the evidence revalidation and narrowing fix together provide the authoritative implementation/proof chain and the final narrowed runtime boundary."
+    },
+    {
+      "supersededFeatureId": "milestone-d-typed-db-error-classification",
+      "supersededStatus": "cancelled",
+      "authoritativeOwners": [
+        "milestone-d-typed-db-error-classification-adoption-narrowing-evidence-revalidation",
+        "milestone-d-typed-db-error-runtime-narrowing"
+      ],
+      "authoritativeReviews": [
+        ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-typed-db-error-classification-adoption-narrowing-evidence-revalidation.json",
+        ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-typed-db-error-runtime-narrowing.json"
+      ],
+      "supersededReview": ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-typed-db-error-classification.json",
+      "why": "The superseded owner cites an unrelated RecordId commit, while the adoption-revalidation and runtime-narrowing reviews now cover the real typed-classification implementation and the last message-based branches removed at runtime seams."
+    },
+    {
+      "supersededFeatureId": "milestone-d-foreign-explicit-id-ensure-split",
+      "supersededStatus": "cancelled",
+      "authoritativeOwners": [
+        "milestone-d-foreign-explicit-id-ensure-split"
+      ],
+      "authoritativeReview": ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-foreign-explicit-id-ensure-split.json",
+      "why": "This feature remains the authoritative owner only if revalidated from its current review artifact; the cancelled historical ownership wording means future aggregation must not count any stale predecessor beyond that reviewed state."
+    },
+    {
+      "featureId": "milestone-d-schema-managed-vs-schemaless-contract",
+      "status": "completed",
+      "authoritativeReview": ".factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-schema-managed-vs-schemaless-contract.json",
+      "why": "This feature is already authoritative and should remain included directly in milestone-D aggregation."
+    }
+  ],
+  "assertionOutcome": {
+    "VAL-SAVE-007": "owned by milestone-d-explicit-id-persistence-primitive-save-delegation",
+    "VAL-SAVE-008": "owned by milestone-d-foreign-explicit-id-ensure-split review state",
+    "VAL-ERR-001": "owned by milestone-d-typed-db-error-classification-adoption-narrowing-evidence-revalidation plus milestone-d-typed-db-error-runtime-narrowing",
+    "VAL-SCHEMA-001": "owned by milestone-d-schema-managed-vs-schemaless-contract"
+  },
+  "ownershipConclusion": {
+    "supersededHistoricalOwnersAreNonAuthoritative": true,
+    "futureScrutinyAggregationMustIgnoreSupersededOwners": true,
+    "authoritativeOwnerSet": [
+      "milestone-d-explicit-id-persistence-primitive-save-delegation",
+      "milestone-d-foreign-explicit-id-ensure-split",
+      "milestone-d-record-id-roundtrip-table-identity-fix-evidence-revalidation",
+      "milestone-d-record-id-roundtrip-table-identity-narrowing-fix",
+      "milestone-d-typed-db-error-classification-adoption-narrowing-evidence-revalidation",
+      "milestone-d-typed-db-error-runtime-narrowing",
+      "milestone-d-schema-managed-vs-schemaless-contract"
+    ]
+  }
+}
