@@ -1,4 +1,4 @@
-error: #[secure] supports String, Option<String>, and recursive Child / Option<Child> / Vec<Child> shapes where Child implements appdb::Sensitive
+error: #[secure] supports String, appdb::SensitiveValueOf<T>, and recursive Child / Option<Child> / Vec<Child> shapes where Child implements appdb::Sensitive
  --> tests/ui/sensitive/unsupported_secure_type.rs:7:18
   |
 7 |     pub counter: std::collections::HashMap<String, String>,

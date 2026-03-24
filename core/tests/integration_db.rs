@@ -5956,6 +5956,423 @@ fn sensitive_enum_shape_runtime_seam_supports_store_roundtrip_without_secure_enu
 }
 
 #[test]
+fn sensitive_contained_enum_fields_roundtrip_through_save_get_list_and_save_many() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItSensitiveRuntimeSeamParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let saved_row = ItSensitiveRuntimeSeamParent {
+            id: Id::from("sensitive-enum-contract-save"),
+            alias: "contract-parent".to_owned(),
+            payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                alias: "contract-payload".to_owned(),
+                status: ItSensitiveRuntimeSeamStatus::Draft,
+                optional_status: Some(ItSensitiveRuntimeSeamStatus::Published),
+                state: ItSensitiveRuntimeSeamState::Published {
+                    version: 11,
+                    tags: vec!["contract".to_owned(), "release".to_owned()],
+                },
+            }),
+        };
+
+        let saved = ItSensitiveRuntimeSeamParent::save(saved_row.clone())
+            .await
+            .expect("save should roundtrip sensitive-contained enum fields");
+        assert_eq!(saved, saved_row);
+
+        let loaded = ItSensitiveRuntimeSeamParent::get("sensitive-enum-contract-save")
+            .await
+            .expect("get should reload sensitive-contained enum fields");
+        assert_eq!(loaded, saved_row);
+
+        let batch_first = ItSensitiveRuntimeSeamParent {
+            id: Id::from("sensitive-enum-contract-batch-1"),
+            alias: "contract-batch-one".to_owned(),
+            payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                alias: "batch-payload-one".to_owned(),
+                status: ItSensitiveRuntimeSeamStatus::Published,
+                optional_status: None,
+                state: ItSensitiveRuntimeSeamState::Draft {
+                    note: "batch-contract-note".to_owned(),
+                },
+            }),
+        };
+        let batch_second = ItSensitiveRuntimeSeamParent {
+            id: Id::from("sensitive-enum-contract-batch-2"),
+            alias: "contract-batch-two".to_owned(),
+            payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                alias: "batch-payload-two".to_owned(),
+                status: ItSensitiveRuntimeSeamStatus::Draft,
+                optional_status: Some(ItSensitiveRuntimeSeamStatus::Draft),
+                state: ItSensitiveRuntimeSeamState::Published {
+                    version: 4,
+                    tags: vec!["contract-canary".to_owned()],
+                },
+            }),
+        };
+
+        let saved_many =
+            ItSensitiveRuntimeSeamParent::save_many(vec![batch_first.clone(), batch_second.clone()])
+                .await
+                .expect("save_many should preserve sensitive enum row association");
+        assert_eq!(saved_many, vec![batch_first.clone(), batch_second.clone()]);
+
+        let listed = ItSensitiveRuntimeSeamParent::list()
+            .await
+            .expect("list should return all sensitive enum-bearing rows");
+        assert_eq!(listed.len(), 3);
+        assert!(listed.contains(&saved_row));
+        assert!(listed.contains(&batch_first));
+        assert!(listed.contains(&batch_second));
+
+        assert_eq!(
+            ItSensitiveRuntimeSeamParent::get("sensitive-enum-contract-batch-1")
+                .await
+                .expect("first batch row should reload"),
+            batch_first
+        );
+        assert_eq!(
+            ItSensitiveRuntimeSeamParent::get("sensitive-enum-contract-batch-2")
+                .await
+                .expect("second batch row should reload"),
+            batch_second
+        );
+
+        let raw = load_sensitive_runtime_seam_parent_raw("sensitive-enum-contract-save").await;
+        assert_eq!(raw.alias, "contract-parent");
+        assert_ne!(
+            raw.payload,
+            serde_json::to_vec(&*saved_row.payload).expect("payload should serialize")
+        );
+        let raw_text = String::from_utf8_lossy(&raw.payload);
+        assert!(!raw_text.contains("Draft"));
+        assert!(!raw_text.contains("Published"));
+        assert!(!raw_text.contains("contract"));
+        assert!(!raw_text.contains("release"));
+    });
+}
+
+#[test]
+fn enum_roundtrip_remains_correct_when_nested_overrides_are_present() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItNestedOverrideParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItSensitiveRuntimeSeamParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let nested_parent = ItNestedOverrideParent {
+            id: Id::from("nested-override-enum-parent"),
+            alias: "nested-override-enum".to_owned(),
+            left: ItNestedOverrideLeaf {
+                label: "left-enum-leaf".to_owned(),
+                secret: "left-enum-secret".to_owned(),
+            },
+            right: ItNestedOverrideLeaf {
+                label: "right-enum-leaf".to_owned(),
+                secret: "right-enum-secret".to_owned(),
+            },
+        };
+        ItNestedOverrideParent::save(nested_parent.clone())
+            .await
+            .expect("nested override save should succeed");
+
+        let enum_saved = ItSensitiveRuntimeSeamParent::save(ItSensitiveRuntimeSeamParent {
+            id: Id::from("nested-override-enum-save"),
+            alias: "enum-with-overrides".to_owned(),
+            payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                alias: "enum-save-payload".to_owned(),
+                status: ItSensitiveRuntimeSeamStatus::Published,
+                optional_status: Some(ItSensitiveRuntimeSeamStatus::Draft),
+                state: ItSensitiveRuntimeSeamState::Published {
+                    version: 21,
+                    tags: vec!["overrides".to_owned(), "exact".to_owned()],
+                },
+            }),
+        })
+        .await
+        .expect("enum save should still succeed with nested overrides present");
+
+        let enum_batch_first = ItSensitiveRuntimeSeamParent {
+            id: Id::from("nested-override-enum-batch-1"),
+            alias: "enum-batch-one".to_owned(),
+            payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                alias: "enum-batch-payload-one".to_owned(),
+                status: ItSensitiveRuntimeSeamStatus::Draft,
+                optional_status: None,
+                state: ItSensitiveRuntimeSeamState::Draft {
+                    note: "override-batch-note".to_owned(),
+                },
+            }),
+        };
+        let enum_batch_second = ItSensitiveRuntimeSeamParent {
+            id: Id::from("nested-override-enum-batch-2"),
+            alias: "enum-batch-two".to_owned(),
+            payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                alias: "enum-batch-payload-two".to_owned(),
+                status: ItSensitiveRuntimeSeamStatus::Published,
+                optional_status: Some(ItSensitiveRuntimeSeamStatus::Published),
+                state: ItSensitiveRuntimeSeamState::Published {
+                    version: 22,
+                    tags: vec!["override".to_owned(), "batch".to_owned()],
+                },
+            }),
+        };
+
+        let saved_many = ItSensitiveRuntimeSeamParent::save_many(vec![
+            enum_batch_first.clone(),
+            enum_batch_second.clone(),
+        ])
+        .await
+        .expect("save_many should keep exact enum fidelity while nested overrides coexist");
+        assert_eq!(saved_many, vec![enum_batch_first.clone(), enum_batch_second.clone()]);
+
+        assert_eq!(
+            ItNestedOverrideParent::get("nested-override-enum-parent")
+                .await
+                .expect("nested override row should still decrypt"),
+            nested_parent
+        );
+        assert_eq!(
+            ItSensitiveRuntimeSeamParent::get("nested-override-enum-save")
+                .await
+                .expect("enum row should reload exactly"),
+            enum_saved
+        );
+        assert_eq!(
+            ItSensitiveRuntimeSeamParent::get("nested-override-enum-batch-1")
+                .await
+                .expect("first enum batch row should reload"),
+            enum_batch_first
+        );
+        assert_eq!(
+            ItSensitiveRuntimeSeamParent::get("nested-override-enum-batch-2")
+                .await
+                .expect("second enum batch row should reload"),
+            enum_batch_second
+        );
+
+        let enum_list = ItSensitiveRuntimeSeamParent::list()
+            .await
+            .expect("enum list should succeed with nested overrides present");
+        assert!(enum_list.contains(&enum_saved));
+        assert!(enum_list.contains(&enum_batch_first));
+        assert!(enum_list.contains(&enum_batch_second));
+
+        let nested_raw = load_nested_override_parent_raw("nested-override-enum-parent").await;
+        assert_ne!(nested_raw.left.secret, b"left-enum-secret");
+        assert_ne!(nested_raw.right.secret, b"right-enum-secret");
+
+        let enum_raw = load_sensitive_runtime_seam_parent_raw("nested-override-enum-save").await;
+        let enum_raw_text = String::from_utf8_lossy(&enum_raw.payload);
+        assert!(!enum_raw_text.contains("Published"));
+        assert!(!enum_raw_text.contains("overrides"));
+        assert!(!enum_raw_text.contains("exact"));
+    });
+}
+
+#[test]
+fn save_many_mixed_sensitive_rows_preserve_auto_ensure_and_isolation_semantics() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        clear_crypto_context_registry();
+        reset_default_crypto_config();
+
+        let local_appdata = std::env::temp_dir().join(format!(
+            "appdb_integration_cross_batch_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before epoch")
+                .as_nanos()
+        ));
+        unsafe {
+            std::env::set_var("LOCALAPPDATA", &local_appdata);
+        }
+
+        Repo::<ItSensitiveProfile>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedOverrideParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItSensitiveRuntimeSeamParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        set_default_crypto_config("integration-cross-batch-svc", "integration-cross-batch-acct");
+
+        let default_rows = vec![
+            ItSensitiveProfile {
+                id: Id::from("cross-batch-default-1"),
+                alias: "default-cross-1".to_owned(),
+                secret: "default-cross-secret-1".to_owned(),
+                note: Some("default-cross-note-1".to_owned()),
+            },
+            ItSensitiveProfile {
+                id: Id::from("cross-batch-default-2"),
+                alias: "default-cross-2".to_owned(),
+                secret: "default-cross-secret-2".to_owned(),
+                note: None,
+            },
+        ];
+        let default_saved = ItSensitiveProfile::save_many(default_rows.clone())
+            .await
+            .expect("default sensitive save_many should auto-ensure");
+        assert_eq!(default_saved, default_rows);
+
+        let nested_rows = vec![
+            ItNestedOverrideParent {
+                id: Id::from("cross-batch-nested-1"),
+                alias: "nested-cross-1".to_owned(),
+                left: ItNestedOverrideLeaf {
+                    label: "nested-left-1".to_owned(),
+                    secret: "nested-left-secret-1".to_owned(),
+                },
+                right: ItNestedOverrideLeaf {
+                    label: "nested-right-1".to_owned(),
+                    secret: "nested-right-secret-1".to_owned(),
+                },
+            },
+            ItNestedOverrideParent {
+                id: Id::from("cross-batch-nested-2"),
+                alias: "nested-cross-2".to_owned(),
+                left: ItNestedOverrideLeaf {
+                    label: "nested-left-2".to_owned(),
+                    secret: "nested-left-secret-2".to_owned(),
+                },
+                right: ItNestedOverrideLeaf {
+                    label: "nested-right-2".to_owned(),
+                    secret: "nested-right-secret-2".to_owned(),
+                },
+            },
+        ];
+        let nested_saved = ItNestedOverrideParent::save_many(nested_rows.clone())
+            .await
+            .expect("nested override save_many should preserve leaf isolation");
+        assert_eq!(nested_saved, nested_rows);
+
+        let enum_rows = vec![
+            ItSensitiveRuntimeSeamParent {
+                id: Id::from("cross-batch-enum-1"),
+                alias: "enum-cross-1".to_owned(),
+                payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                    alias: "enum-cross-payload-1".to_owned(),
+                    status: ItSensitiveRuntimeSeamStatus::Draft,
+                    optional_status: Some(ItSensitiveRuntimeSeamStatus::Published),
+                    state: ItSensitiveRuntimeSeamState::Published {
+                        version: 31,
+                        tags: vec!["cross".to_owned(), "enum".to_owned()],
+                    },
+                }),
+            },
+            ItSensitiveRuntimeSeamParent {
+                id: Id::from("cross-batch-enum-2"),
+                alias: "enum-cross-2".to_owned(),
+                payload: SensitiveValueOf::from(ItSensitiveRuntimeSeamPayload {
+                    alias: "enum-cross-payload-2".to_owned(),
+                    status: ItSensitiveRuntimeSeamStatus::Published,
+                    optional_status: None,
+                    state: ItSensitiveRuntimeSeamState::Draft {
+                        note: "cross-batch-enum-note".to_owned(),
+                    },
+                }),
+            },
+        ];
+        let enum_saved = ItSensitiveRuntimeSeamParent::save_many(enum_rows.clone())
+            .await
+            .expect("enum-bearing save_many should preserve exact row/value association");
+        assert_eq!(enum_saved, enum_rows);
+
+        assert_eq!(
+            ItSensitiveProfile::list()
+                .await
+                .expect("default list should succeed"),
+            default_rows
+        );
+        assert_eq!(
+            ItNestedOverrideParent::list()
+                .await
+                .expect("nested override list should succeed"),
+            nested_rows
+        );
+        assert_eq!(
+            ItSensitiveRuntimeSeamParent::list()
+                .await
+                .expect("enum list should succeed"),
+            enum_rows
+        );
+
+        assert_sensitive_row_encrypted(
+            &load_sensitive_profile_raw("cross-batch-default-1").await,
+            "default-cross-1",
+            "default-cross-secret-1",
+            Some("default-cross-note-1"),
+        );
+        assert_sensitive_row_encrypted(
+            &load_sensitive_profile_raw("cross-batch-default-2").await,
+            "default-cross-2",
+            "default-cross-secret-2",
+            None,
+        );
+
+        let nested_raw = load_nested_override_parent_raw("cross-batch-nested-1").await;
+        let left_ctx = appdb::crypto::resolve_crypto_context_for::<
+            AppdbSensitiveFieldTagItNestedOverrideParentLeft,
+        >()
+        .expect("left override context should resolve");
+        let right_ctx = appdb::crypto::resolve_crypto_context_for::<
+            AppdbSensitiveFieldTagItNestedOverrideParentRight,
+        >()
+        .expect("right override context should resolve");
+        assert_eq!(
+            ItNestedOverrideLeaf::decrypt_with_context(&nested_raw.left, &left_ctx)
+                .expect("left nested row should decrypt with left context"),
+            nested_rows[0].left
+        );
+        assert_eq!(
+            ItNestedOverrideLeaf::decrypt_with_context(&nested_raw.right, &right_ctx)
+                .expect("right nested row should decrypt with right context"),
+            nested_rows[0].right
+        );
+        assert!(matches!(
+            ItNestedOverrideLeaf::decrypt_with_context(&nested_raw.left, &right_ctx),
+            Err(appdb::crypto::CryptoError::Decrypt)
+        ));
+        assert!(matches!(
+            ItNestedOverrideLeaf::decrypt_with_context(&nested_raw.right, &left_ctx),
+            Err(appdb::crypto::CryptoError::Decrypt)
+        ));
+
+        let enum_raw = load_sensitive_runtime_seam_parent_raw("cross-batch-enum-1").await;
+        assert_ne!(
+            enum_raw.payload,
+            serde_json::to_vec(&*enum_rows[0].payload).expect("payload should serialize")
+        );
+        let enum_raw_text = String::from_utf8_lossy(&enum_raw.payload);
+        assert!(!enum_raw_text.contains("Published"));
+        assert!(!enum_raw_text.contains("cross"));
+        assert!(!enum_raw_text.contains("enum"));
+
+        unsafe {
+            std::env::remove_var("LOCALAPPDATA");
+        }
+        let _ = std::fs::remove_dir_all(local_appdata);
+        clear_crypto_context_registry();
+        reset_default_crypto_config();
+    });
+}
+
+#[test]
 fn store_sensitive_later_first_use_models_pick_up_new_global_defaults() {
     let _guard = acquire_test_lock();
     run_async(async {
