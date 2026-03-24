@@ -1,0 +1,60 @@
+{
+  "milestone": "post-0-2-6-followup",
+  "round": 3,
+  "status": "pass",
+  "validatorsRun": {
+    "format": {
+      "passed": true,
+      "command": "cargo fmt --all -- --check",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    },
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Document an explicit evidence-only or verification-only path for rust-library-worker when the required implementation already exists in the checked-out baseline, so workers can complete fix/revalidation assignments without looking like procedure violations.",
+      "evidence": "Three follow-up reviews (milestone-c-reconnect-public-id-hydration-normalization, milestone-c-reconnect-public-id-hydration-normalization-evidence-revalidation, milestone-c-typed-stored-row-record-id-decode-seam-implementation) all reported followedProcedure=false only because the correct in-scope work was validating already-landed code and backfilling evidence rather than writing new runtime changes.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "Clarify how workers should isolate feature commits in detached-head mission sessions when unrelated files are already staged, including when to stop and escalate versus when to repair staging before commit.",
+      "evidence": "Reviews for milestone-c-store-schemaless-bootstrap, milestone-c-strict-record-link-string-classification, and milestone-c-strict-record-link-string-classification-get-record-proof all found commits that included unrelated pre-staged .factory artifacts alongside the intended feature change.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Add a services.yaml rule for isolating mission-artifact staging from code feature commits.",
+      "reason": "rejected: this is normative workflow guidance for workers, not an operational command/service definition for services.yaml"
+    },
+    {
+      "observation": "Apply a library fact about missing handoff/transcript artifacts for a specific worker session.",
+      "reason": "rejected: this is a per-mission process traceability issue, not durable codebase knowledge for .factory/library/"
+    }
+  ],
+  "previousRound": ".factory/validation/post-0-2-6-followup/scrutiny/synthesis.json"
+}

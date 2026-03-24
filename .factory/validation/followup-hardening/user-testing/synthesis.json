@@ -1,0 +1,24 @@
+{
+  "milestone": "followup-hardening",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-G-DELETE-001",
+    "VAL-G-DELETE-002",
+    "VAL-G-FOREIGN-001",
+    "VAL-G-FOREIGN-002",
+    "VAL-G-PROTOCOL-001",
+    "VAL-G-PROTOCOL-002",
+    "VAL-G-PROTOCOL-003"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}
