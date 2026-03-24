@@ -86,6 +86,17 @@ pub trait Sensitive: Sized {
     fn decrypt_with_runtime_resolver(
         encrypted: &Self::Encrypted,
     ) -> Result<Self, crate::crypto::CryptoError>;
+
+    /// Stable enumerable metadata for this model's secure fields.
+    fn secure_fields() -> &'static [crate::crypto::SensitiveFieldMetadata];
+
+    /// Returns the index of one secure field tag inside [`Self::secure_fields`].
+    fn secure_field_index(field_tag: &'static str) -> usize {
+        Self::secure_fields()
+            .iter()
+            .position(|meta| meta.field_tag == field_tag)
+            .expect("generated secure field metadata should contain every secure field tag")
+    }
 }
 
 /// Runtime conversion seam between the caller-facing model and the stored representation.

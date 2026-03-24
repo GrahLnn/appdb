@@ -1,0 +1,5 @@
+error: unsupported crypto attribute; expected `service` or `account`
+ --> tests/ui/sensitive/type_crypto_unknown_key.rs:5:10
+  |
+5 | #[crypto(provider = "nope")]
+  |          ^^^^^^^^^^^^^^^^^

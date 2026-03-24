@@ -77,6 +77,82 @@ pub trait SensitiveFieldTag {
 
     /// Stable field tag for the secure field.
     fn field_tag() -> &'static str;
+
+    /// Generated crypto metadata for this secure field.
+    fn crypto_metadata() -> &'static SensitiveFieldMetadata {
+        static DEFAULT: SensitiveFieldMetadata = SensitiveFieldMetadata {
+            model_tag: "",
+            field_tag: "",
+            service: None,
+            account: None,
+        };
+        &DEFAULT
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Stable generated metadata for one secure field and its crypto configuration surface.
+pub struct SensitiveFieldMetadata {
+    pub model_tag: &'static str,
+    pub field_tag: &'static str,
+    pub service: Option<&'static str>,
+    pub account: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Process-wide default crypto strategy used by generated sensitive metadata.
+pub struct DefaultCryptoConfig {
+    pub service: String,
+    pub account: String,
+}
+
+const DEFAULT_CRYPTO_SERVICE: &str = "appdb";
+const DEFAULT_CRYPTO_ACCOUNT: &str = "master-sensitive";
+
+static DEFAULT_CRYPTO_CONFIG: LazyLock<RwLock<DefaultCryptoConfig>> = LazyLock::new(|| {
+    RwLock::new(DefaultCryptoConfig {
+        service: DEFAULT_CRYPTO_SERVICE.to_owned(),
+        account: DEFAULT_CRYPTO_ACCOUNT.to_owned(),
+    })
+});
+
+/// Returns the current process-wide default crypto service/account pair.
+pub fn default_crypto_config() -> DefaultCryptoConfig {
+    DEFAULT_CRYPTO_CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+/// Replaces the process-wide default crypto service/account pair.
+pub fn set_default_crypto_config(service: impl Into<String>, account: impl Into<String>) {
+    *DEFAULT_CRYPTO_CONFIG
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = DefaultCryptoConfig {
+        service: service.into(),
+        account: account.into(),
+    };
+}
+
+/// Sets only the default crypto service, preserving the current default account.
+pub fn set_default_crypto_service(service: impl Into<String>) {
+    DEFAULT_CRYPTO_CONFIG
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .service = service.into();
+}
+
+/// Sets only the default crypto account, preserving the current default service.
+pub fn set_default_crypto_account(account: impl Into<String>) {
+    DEFAULT_CRYPTO_CONFIG
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .account = account.into();
+}
+
+/// Resets process-wide crypto defaults back to built-in values.
+pub fn reset_default_crypto_config() {
+    set_default_crypto_config(DEFAULT_CRYPTO_SERVICE, DEFAULT_CRYPTO_ACCOUNT);
 }
 
 type ResolverKey = (&'static str, &'static str);
