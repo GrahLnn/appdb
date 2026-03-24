@@ -1,5 +1,6 @@
 commands:
-  test: cargo test --workspace -- --test-threads 8
+  install: cargo fetch --locked
+  test: cargo test --workspace -- --test-threads 12
   lint: cargo clippy --workspace --all-targets -- -D warnings
   build: cargo check --workspace --all-targets
   typecheck: cargo check --workspace --all-targets
