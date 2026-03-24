@@ -404,11 +404,7 @@ where
 {
     match value.resolve_record_id().await {
         Ok(record_id) if record_id == explicit_record_id => {
-            if persistence.exists_record(record_id.clone()).await? {
-                Ok(record_id)
-            } else {
-                save_foreign_created(persistence.ensure_at(explicit_record_id, value).await?).await
-            }
+            persist_foreign_upsert_at(persistence, record_id, value).await
         }
         Ok(record_id) => Err(crate::error::DBError::InvalidModel(format!(
             "foreign explicit id mismatch: serialized explicit id `{:?}` diverged from resolved record id `{:?}`",
@@ -439,13 +435,35 @@ where
         + Sync,
 {
     match value.resolve_record_id().await {
-        Ok(record_id) => Ok(record_id),
+        Ok(record_id) => persist_foreign_upsert_at(persistence, record_id, value).await,
         Err(err) => match crate::error::classify_db_error(&err) {
             crate::error::DBError::NotFound => {
                 save_foreign_created(persistence.create(value).await?).await
             }
             other => Err(other.into()),
         },
+    }
+}
+
+async fn persist_foreign_upsert_at<P, T>(
+    persistence: &P,
+    record_id: surrealdb::types::RecordId,
+    value: T,
+) -> anyhow::Result<surrealdb::types::RecordId>
+where
+    P: ForeignPersistence,
+    T: model::meta::ModelMeta
+        + model::meta::ResolveRecordId
+        + repository::Crud
+        + ForeignModel
+        + Clone
+        + Send
+        + Sync,
+{
+    if persistence.exists_record(record_id.clone()).await? {
+        Ok(persistence.ensure_at(record_id, value).await?.resolve_record_id().await?)
+    } else {
+        save_foreign_created(persistence.ensure_at(record_id, value).await?).await
     }
 }
 

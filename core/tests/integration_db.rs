@@ -2318,6 +2318,193 @@ fn save_many_failure_leaves_no_batch_orphans() {
 }
 
 #[test]
+fn save_many_reuses_existing_recursive_foreign_graphs_without_duplication() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecursiveForeignParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedLookupChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let seeded = ItRecursiveForeignParent::save(ItRecursiveForeignParent {
+            id: Id::from("recursive-save-many-shared"),
+            children: Some(vec![
+                vec![ItNestedLookupChild {
+                    code: "recursive-save-many-a".to_owned(),
+                    note: Some("seed-a".to_owned()),
+                }],
+                vec![ItNestedLookupChild {
+                    code: "recursive-save-many-b".to_owned(),
+                    note: Some("seed-b".to_owned()),
+                }],
+            ]),
+        })
+        .await
+        .expect("seed recursive foreign save should succeed");
+
+        let updated = ItRecursiveForeignParent {
+            id: Id::from("recursive-save-many-shared"),
+            children: Some(vec![
+                vec![
+                    ItNestedLookupChild {
+                        code: "recursive-save-many-a".to_owned(),
+                        note: Some("seed-a".to_owned()),
+                    },
+                    ItNestedLookupChild {
+                        code: "recursive-save-many-c".to_owned(),
+                        note: Some("created-c".to_owned()),
+                    },
+                ],
+                vec![ItNestedLookupChild {
+                    code: "recursive-save-many-b".to_owned(),
+                    note: Some("seed-b".to_owned()),
+                }],
+            ]),
+        };
+        let created = ItRecursiveForeignParent {
+            id: Id::from("recursive-save-many-created"),
+            children: Some(vec![vec![ItNestedLookupChild {
+                code: "recursive-save-many-d".to_owned(),
+                note: Some("created-d".to_owned()),
+            }]]),
+        };
+
+        let saved = ItRecursiveForeignParent::save_many(vec![updated.clone(), created.clone()])
+            .await
+            .expect("save_many should recursively upsert recursive foreign graphs");
+        let loaded_updated = ItRecursiveForeignParent::get("recursive-save-many-shared")
+            .await
+            .expect("updated parent should load");
+        let loaded_created = ItRecursiveForeignParent::get("recursive-save-many-created")
+            .await
+            .expect("created parent should load");
+        let raw_updated = load_recursive_foreign_parent_raw("recursive-save-many-shared").await;
+        let raw_created = load_recursive_foreign_parent_raw("recursive-save-many-created").await;
+        let all_children = Repo::<ItNestedLookupChild>::list()
+            .await
+            .expect("lookup child list should succeed");
+
+        assert_eq!(saved, vec![updated.clone(), created.clone()]);
+        assert_eq!(loaded_updated, updated);
+        assert_eq!(loaded_created, created);
+        assert_ne!(seeded, loaded_updated, "seeded parent should be updated in place");
+        assert_eq!(all_children.len(), 4, "existing recursive children should be reused, not duplicated");
+
+        let expected_updated_ids = vec![
+            vec![
+                Repo::<ItNestedLookupChild>::find_unique_id_for(&updated
+                    .children
+                    .as_ref()
+                    .expect("updated children should exist")[0][0])
+                .await
+                .expect("updated child a should resolve"),
+                Repo::<ItNestedLookupChild>::find_unique_id_for(&updated
+                    .children
+                    .as_ref()
+                    .expect("updated children should exist")[0][1])
+                .await
+                .expect("updated child c should resolve"),
+            ],
+            vec![
+                Repo::<ItNestedLookupChild>::find_unique_id_for(&updated
+                    .children
+                    .as_ref()
+                    .expect("updated children should exist")[1][0])
+                .await
+                .expect("updated child b should resolve"),
+            ],
+        ];
+        let expected_created_ids = vec![vec![
+            Repo::<ItNestedLookupChild>::find_unique_id_for(&created
+                .children
+                .as_ref()
+                .expect("created children should exist")[0][0])
+            .await
+            .expect("created child d should resolve"),
+        ]];
+
+        assert_eq!(raw_updated.children, Some(expected_updated_ids));
+        assert_eq!(raw_created.children, Some(expected_created_ids));
+    });
+}
+
+#[test]
+fn save_many_duplicate_parent_ids_fail_before_writes_or_foreign_side_effects() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecursiveForeignParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedLookupChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let rows = vec![
+            ItRecursiveForeignParent {
+                id: Id::from("duplicate-batch-parent"),
+                children: Some(vec![vec![ItNestedLookupChild {
+                    code: "duplicate-batch-a".to_owned(),
+                    note: Some("first".to_owned()),
+                }]]),
+            },
+            ItRecursiveForeignParent {
+                id: Id::from("duplicate-batch-parent"),
+                children: Some(vec![vec![ItNestedLookupChild {
+                    code: "duplicate-batch-b".to_owned(),
+                    note: Some("second".to_owned()),
+                }]]),
+            },
+        ];
+
+        let err = ItRecursiveForeignParent::save_many(rows)
+            .await
+            .expect_err("duplicate parent ids should fail before any writes");
+        let typed = DBError::from(err);
+
+        assert_eq!(typed.kind(), DBErrorKind::Conflict);
+        assert!(
+            typed
+                .to_string()
+                .contains("duplicate record id in one batch"),
+            "unexpected duplicate batch error: {typed}"
+        );
+        assert!(
+            !Repo::<ItRecursiveForeignParent>::exists_record(RecordId::new(
+                ItRecursiveForeignParent::table_name(),
+                "duplicate-batch-parent"
+            ))
+            .await
+            .expect("parent existence check should succeed"),
+            "duplicate batch should not persist any parent rows"
+        );
+        assert!(
+            !Repo::<ItNestedLookupChild>::exists_record(RecordId::new(
+                ItNestedLookupChild::table_name(),
+                "duplicate-batch-a"
+            ))
+            .await
+            .expect("first child existence check should succeed"),
+            "duplicate batch should not leave the first foreign side effect"
+        );
+        assert!(
+            !Repo::<ItNestedLookupChild>::exists_record(RecordId::new(
+                ItNestedLookupChild::table_name(),
+                "duplicate-batch-b"
+            ))
+            .await
+            .expect("second child existence check should succeed"),
+            "duplicate batch should not leave the second foreign side effect"
+        );
+    });
+}
+
+#[test]
 fn failed_save_can_retry_cleanly_with_same_identifiers() {
     let _guard = acquire_test_lock();
     run_async(async {
@@ -4283,6 +4470,73 @@ fn nested_foreign_models_roundtrip_through_get() {
             branch_raw.leaf,
             RecordId::new(ItNestedForeignLeaf::table_name(), "nested-foreign-leaf")
         );
+    });
+}
+
+#[test]
+fn nested_foreign_models_upsert_existing_child_branches() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        ensure_tables_exist(&[
+            ItNestedForeignLeaf::table_name(),
+            ItNestedForeignBranch::table_name(),
+            ItNestedForeignRoot::table_name(),
+        ])
+        .await;
+
+        Repo::<ItNestedForeignRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignBranch>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNestedForeignLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        ItNestedForeignRoot::save(ItNestedForeignRoot {
+            id: Id::from("nested-existing-root"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("nested-existing-branch"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("nested-existing-leaf"),
+                    code: "nested-existing-code".to_owned(),
+                },
+            },
+        })
+        .await
+        .expect("seed save should succeed");
+
+        let updated = ItNestedForeignRoot {
+            id: Id::from("nested-existing-root"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("nested-existing-branch"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("nested-existing-leaf"),
+                    code: "nested-existing-code-updated".to_owned(),
+                },
+            },
+        };
+
+        let saved = ItNestedForeignRoot::save(updated.clone())
+            .await
+            .expect("save should upsert existing nested foreign branches");
+        let loaded = ItNestedForeignRoot::get("nested-existing-root")
+            .await
+            .expect("get should hydrate updated nested foreign graph");
+        let branch_raw = load_nested_foreign_branch_raw("nested-existing-branch").await;
+        let leaf = ItNestedForeignLeaf::get("nested-existing-leaf")
+            .await
+            .expect("leaf should load after nested upsert");
+
+        assert_eq!(saved, updated);
+        assert_eq!(loaded, updated);
+        assert_eq!(
+            branch_raw.leaf,
+            RecordId::new(ItNestedForeignLeaf::table_name(), "nested-existing-leaf")
+        );
+        assert_eq!(leaf.code, "nested-existing-code-updated");
     });
 }
 
