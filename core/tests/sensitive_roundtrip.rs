@@ -4,7 +4,7 @@ use appdb::crypto::{
     set_default_crypto_service, CryptoContext, CryptoError, SensitiveFieldTag,
     SensitiveModelTag,
 };
-use appdb::{Sensitive, SensitiveShape};
+use appdb::{Sensitive, SensitiveShape, SensitiveValueOf};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
@@ -112,6 +112,34 @@ struct OverrideNestedSensitiveLeaf {
 
     #[secure]
     pub secret: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+enum RuntimeSeamStatus {
+    Draft,
+    Published,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+enum RuntimeSeamState {
+    Draft { note: String },
+    Published { version: u32, tags: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct RuntimeSeamPayload {
+    pub alias: String,
+    pub status: RuntimeSeamStatus,
+    pub optional_status: Option<RuntimeSeamStatus>,
+    pub state: RuntimeSeamState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+struct RuntimeSeamParent {
+    pub alias: String,
+
+    #[secure]
+    pub payload: SensitiveValueOf<RuntimeSeamPayload>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
@@ -560,6 +588,51 @@ fn sensitive_nested_override_sibling_contexts_do_not_cross_decrypt() {
             .expect("runtime resolver should still decrypt the full parent"),
         parent
     );
+
+    unsafe {
+        std::env::remove_var("LOCALAPPDATA");
+    }
+    let _ = std::fs::remove_dir_all(local_appdata);
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+}
+
+#[test]
+fn sensitive_enum_bearing_values_roundtrip_inside_secure_container_runtime_seam() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+    let local_appdata = crypto_test_local_appdata("enum-runtime-seam");
+    unsafe {
+        std::env::set_var("LOCALAPPDATA", &local_appdata);
+    }
+
+    let parent = RuntimeSeamParent {
+        alias: "enum-parent".into(),
+        payload: SensitiveValueOf::from(RuntimeSeamPayload {
+            alias: "enum-payload".into(),
+            status: RuntimeSeamStatus::Draft,
+            optional_status: Some(RuntimeSeamStatus::Published),
+            state: RuntimeSeamState::Published {
+                version: 7,
+                tags: vec!["release".into(), "stable".into()],
+            },
+        }),
+    };
+
+    let encrypted = parent
+        .encrypt_with_runtime_resolver()
+        .expect("enum-bearing payload should encrypt inside secure container");
+    assert_ne!(
+        encrypted.payload,
+        serde_json::to_vec(&*parent.payload).expect("payload should serialize")
+    );
+
+    let decrypted = RuntimeSeamParent::decrypt_with_runtime_resolver(&encrypted)
+        .expect("enum-bearing payload should decrypt from secure container");
+    assert_eq!(decrypted, parent);
 
     unsafe {
         std::env::remove_var("LOCALAPPDATA");

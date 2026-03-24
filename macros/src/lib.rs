@@ -1324,6 +1324,10 @@ fn secure_shape_supported(ty: &Type) -> bool {
         return true;
     }
 
+    if sensitive_value_wrapper_inner_type(ty).is_some() {
+        return true;
+    }
+
     if let Some(inner) = option_inner_type(ty) {
         return secure_shape_supported(inner);
     }
@@ -1339,7 +1343,7 @@ fn secure_shape_error_message(ty: &Type) -> &'static str {
     if invalid_secure_leaf_type(ty).is_some() {
         "#[secure] child shapes require a direct named Sensitive type leaf with only Option<_> and Vec<_> wrappers"
     } else {
-        "#[secure] supports String, Option<String>, and recursive Child / Option<Child> / Vec<Child> shapes where Child implements appdb::Sensitive"
+        "#[secure] supports String, appdb::SensitiveValueOf<T>, and recursive Child / Option<Child> / Vec<Child> shapes where Child implements appdb::Sensitive"
     }
 }
 
@@ -1428,6 +1432,23 @@ fn vec_inner_type(ty: &Type) -> Option<&Type> {
     };
     let segment = path.segments.last()?;
     if segment.ident != "Vec" {
+        return None;
+    }
+    let PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    let GenericArgument::Type(inner) = args.args.first()? else {
+        return None;
+    };
+    Some(inner)
+}
+
+fn sensitive_value_wrapper_inner_type(ty: &Type) -> Option<&Type> {
+    let Type::Path(TypePath { path, .. }) = ty else {
+        return None;
+    };
+    let segment = path.segments.last()?;
+    if segment.ident != "SensitiveValueOf" {
         return None;
     }
     let PathArguments::AngleBracketed(args) = &segment.arguments else {
