@@ -1,0 +1,28 @@
+{
+  "milestone": "m2-nested-sensitive",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-CROSS-001",
+    "VAL-CROSS-002",
+    "VAL-NS-001",
+    "VAL-NS-002",
+    "VAL-NS-003",
+    "VAL-NS-004",
+    "VAL-NS-005",
+    "VAL-NS-006",
+    "VAL-NS-007",
+    "VAL-NS-008",
+    "VAL-NS-009"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}

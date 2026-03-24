@@ -1,0 +1,21 @@
+{
+  "featureId": "nested-sensitive-metadata-proof-fix",
+  "reviewedAt": "2026-03-24T19:04:38.094224+00:00",
+  "commitId": "f596cf45",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature adds the missing focused trybuild compile-pass proof for VAL-NS-008. The new fixture covers all approved nested secure shapes and intentionally omits non-essential traits on the plaintext child types, so the contract is satisfied explicitly.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Workers consistently fell back from GitNexus detect_changes to git diff/status review because the installed GitNexus CLI in this environment does not expose either detect-changes or detect_changes, even though repo guidance and the rust-library-worker skill expect that command.",
+      "evidence": "Handoff for nested-sensitive-metadata-proof-fix records gitnexus detect-changes --repo appdb and gitnexus detect_changes --repo appdb both exiting 1 before falling back; rust-library-worker SKILL.md step 3 and CLAUDE.md require that fallback when tooling is unavailable."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit f596cf45 and the worker handoff/transcript skeleton for nested-sensitive-metadata-proof-fix. The implementation is appropriately scoped to a new trybuild pass fixture plus harness registration, and it directly proves VAL-NS-008 without introducing unrelated changes."
+}

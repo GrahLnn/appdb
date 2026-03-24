@@ -1,0 +1,92 @@
+{
+  "milestone": "m2-nested-sensitive",
+  "surface": "cargo-test",
+  "assertions": [
+    {
+      "id": "VAL-NS-001",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test sensitive_roundtrip -- --nocapture: sensitive_nested_child_roundtrip_inherits_parent_runtime_context",
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test integration_db store_sensitive_nested_child_shapes_roundtrip_with_plaintext_results_and_encrypted_rows -- --nocapture: direct nested child store path"
+      ]
+    },
+    {
+      "id": "VAL-NS-002",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test sensitive_roundtrip -- --nocapture: sensitive_nested_option_roundtrip_preserves_some_and_none",
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test integration_db store_sensitive_nested_child_shapes_roundtrip_with_plaintext_results_and_encrypted_rows -- --nocapture: optional some/none store path"
+      ]
+    },
+    {
+      "id": "VAL-NS-003",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test integration_db store_sensitive_nested_child_shapes_roundtrip_with_plaintext_results_and_encrypted_rows -- --nocapture: vec nested child store path preserves order and length"
+      ]
+    },
+    {
+      "id": "VAL-NS-004",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test integration_db store_sensitive_nested_child_shapes_roundtrip_with_plaintext_results_and_encrypted_rows -- --nocapture: save/get/list returned plaintext parent models"
+      ]
+    },
+    {
+      "id": "VAL-NS-005",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test integration_db store_sensitive_nested_child_shapes_roundtrip_with_plaintext_results_and_encrypted_rows -- --nocapture: raw rows asserted encrypted child leaves at rest"
+      ]
+    },
+    {
+      "id": "VAL-NS-006",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test sensitive_roundtrip -- --nocapture: sensitive_crypto_metadata_exposes_defaults_and_overrides"
+      ]
+    },
+    {
+      "id": "VAL-NS-007",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test sensitive_roundtrip -- --nocapture: metadata exposes model/field identifiers and override config only, with no plaintext/key material in assertions"
+      ]
+    },
+    {
+      "id": "VAL-NS-008",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test sensitive_compile -- --nocapture: tests/ui/sensitive/nested_trait_bounds_compile_pass.rs passed"
+      ]
+    },
+    {
+      "id": "VAL-NS-009",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test sensitive_compile -- --nocapture: unsupported nested wrapper compile-fail fixtures passed"
+      ]
+    },
+    {
+      "id": "VAL-CROSS-001",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test sensitive_roundtrip -- --nocapture: nested runtime auto-init under defaults",
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test integration_db store_sensitive_nested_child_shapes_roundtrip_with_plaintext_results_and_encrypted_rows -- --nocapture: nested store CRUD without manual registration"
+      ]
+    },
+    {
+      "id": "VAL-CROSS-002",
+      "status": "pass",
+      "evidence": [
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test sensitive_roundtrip -- --nocapture: sensitive_nested_override_sibling_contexts_do_not_cross_decrypt",
+        "cargo test --manifest-path C:\\Users\\admin\\appdb\\core\\Cargo.toml --test integration_db store_sensitive_nested_field_account_overrides_keep_sibling_contexts_isolated -- --nocapture: wrong-context decrypt returns CryptoError::Decrypt"
+      ]
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "cargo test"
+  ]
+}

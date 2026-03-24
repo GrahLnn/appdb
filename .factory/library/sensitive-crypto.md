@@ -21,5 +21,6 @@ Mission-specific facts and conventions for automatic crypto handling.
 - Treat these as two different seams:
   1. top-level secure field resolver initialization / auto-registration
   2. nested recursive encryption/decryption under an already-resolved parent context
+- Current limitation discovered during m3 planning: enum-bearing values inside a secure container need their own supported container/runtime seam; they should not be forced to implement `Sensitive` themselves, and this is distinct from direct `#[secure] Enum` syntax (which remains out of scope).
 - Metadata exposure should enumerate secure fields without exposing plaintext values or key material.
 - Direct `#[secure] Enum` syntax is out of scope; enum work is limited to roundtrip stability in approved plain/sensitive-contained cases.
