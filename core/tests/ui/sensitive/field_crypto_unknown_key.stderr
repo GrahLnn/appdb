@@ -1,0 +1,5 @@
+error: unsupported field crypto attribute; expected `field_account`
+ --> tests/ui/sensitive/field_crypto_unknown_key.rs:7:14
+  |
+7 |     #[crypto(account = "wrong-place")]
+  |              ^^^^^^^^^^^^^^^^^^^^^^^

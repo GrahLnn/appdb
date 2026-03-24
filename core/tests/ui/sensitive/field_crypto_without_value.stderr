@@ -1,0 +1,5 @@
+error: expected `=`
+ --> tests/ui/sensitive/field_crypto_without_value.rs:7:27
+  |
+7 |     #[crypto(field_account)]
+  |                           ^

@@ -1,11 +1,12 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
+use std::collections::HashSet;
 use syn::{
     parse_macro_input, Attribute, Data, DeriveInput, Error, Field, Fields, GenericArgument,
-    PathArguments, Type, TypePath,
+    Meta, PathArguments, Type, TypePath,
 };
 
-#[proc_macro_derive(Sensitive, attributes(secure))]
+#[proc_macro_derive(Sensitive, attributes(secure, crypto))]
 pub fn derive_sensitive(input: TokenStream) -> TokenStream {
     match derive_sensitive_impl(parse_macro_input!(input as DeriveInput)) {
         Ok(tokens) => tokens.into(),
@@ -13,7 +14,7 @@ pub fn derive_sensitive(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(Store, attributes(unique, secure, foreign, table_as))]
+#[proc_macro_derive(Store, attributes(unique, secure, foreign, table_as, crypto))]
 pub fn derive_store(input: TokenStream) -> TokenStream {
     match derive_store_impl(parse_macro_input!(input as DeriveInput)) {
         Ok(tokens) => tokens.into(),
@@ -714,6 +715,7 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
     let struct_ident = input.ident;
     let encrypted_ident = format_ident!("Encrypted{}", struct_ident);
     let vis = input.vis;
+    let type_crypto_config = type_crypto_config(&input.attrs)?;
     let named_fields = match input.data {
         Data::Struct(data) => match data.fields {
             Fields::Named(fields) => fields.named,
@@ -739,6 +741,7 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
     let mut runtime_encrypt_assignments = Vec::new();
     let mut runtime_decrypt_assignments = Vec::new();
     let mut field_tag_structs = Vec::new();
+    let mut secure_field_meta_entries = Vec::new();
 
     for field in named_fields.iter() {
         let ident = field.ident.clone().expect("named field");
@@ -755,6 +758,20 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
                 to_pascal_case(&ident.to_string())
             );
             let field_tag_literal = ident.to_string();
+            let field_crypto_config = field_crypto_config(&field.attrs)?;
+            let effective_account = field_crypto_config
+                .field_account
+                .clone()
+                .or_else(|| type_crypto_config.account.clone());
+            let service_override = type_crypto_config.service.clone();
+            let account_literal = effective_account
+                .as_ref()
+                .map(|value| quote! { ::std::option::Option::Some(#value) })
+                .unwrap_or_else(|| quote! { ::std::option::Option::None });
+            let service_literal = service_override
+                .as_ref()
+                .map(|value| quote! { ::std::option::Option::Some(#value) })
+                .unwrap_or_else(|| quote! { ::std::option::Option::None });
             let encrypt_expr = secure_kind.encrypt_with_context_expr(&ident);
             let decrypt_expr = secure_kind.decrypt_with_context_expr(&ident);
             let runtime_encrypt_expr =
@@ -766,6 +783,14 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
             decrypt_assignments.push(quote! { #ident: #decrypt_expr });
             runtime_encrypt_assignments.push(quote! { #ident: #runtime_encrypt_expr });
             runtime_decrypt_assignments.push(quote! { #ident: #runtime_decrypt_expr });
+            secure_field_meta_entries.push(quote! {
+                ::appdb::crypto::SensitiveFieldMetadata {
+                    model_tag: ::std::concat!(::std::module_path!(), "::", ::std::stringify!(#struct_ident)),
+                    field_tag: #field_tag_literal,
+                    service: #service_literal,
+                    account: #account_literal,
+                }
+            });
             field_tag_structs.push(quote! {
                 #[doc(hidden)]
                 #vis struct #field_tag_ident;
@@ -777,6 +802,12 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
 
                     fn field_tag() -> &'static str {
                         #field_tag_literal
+                    }
+
+                    fn crypto_metadata() -> &'static ::appdb::crypto::SensitiveFieldMetadata {
+                        &#struct_ident::SECURE_FIELDS[
+                            <#struct_ident as ::appdb::Sensitive>::secure_field_index(#field_tag_literal)
+                        ]
                     }
                 }
             });
@@ -853,9 +884,17 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
                     #( #runtime_decrypt_assignments, )*
                 })
             }
+
+            fn secure_fields() -> &'static [::appdb::crypto::SensitiveFieldMetadata] {
+                &Self::SECURE_FIELDS
+            }
         }
 
         impl #struct_ident {
+            pub const SECURE_FIELDS: [::appdb::crypto::SensitiveFieldMetadata; #secure_field_count] = [
+                #( #secure_field_meta_entries, )*
+            ];
+
             pub fn encrypt(
                 &self,
                 context: &::appdb::crypto::CryptoContext,
@@ -881,6 +920,91 @@ fn has_secure_attr(attrs: &[Attribute]) -> bool {
 
 fn has_unique_attr(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident("unique"))
+}
+
+#[derive(Default, Clone)]
+struct TypeCryptoConfig {
+    service: Option<String>,
+    account: Option<String>,
+}
+
+#[derive(Default, Clone)]
+struct FieldCryptoConfig {
+    field_account: Option<String>,
+}
+
+fn type_crypto_config(attrs: &[Attribute]) -> syn::Result<TypeCryptoConfig> {
+    let mut config = TypeCryptoConfig::default();
+    let mut seen = HashSet::new();
+
+    for attr in attrs {
+        if !attr.path().is_ident("crypto") {
+            continue;
+        }
+
+        attr.parse_nested_meta(|meta| {
+            let key = meta
+                .path
+                .get_ident()
+                .cloned()
+                .ok_or_else(|| meta.error("unsupported crypto attribute"))?;
+
+            if !seen.insert(key.to_string()) {
+                return Err(meta.error("duplicate crypto attribute key"));
+            }
+
+            let value = meta.value()?;
+            let literal: syn::LitStr = value.parse()?;
+            match key.to_string().as_str() {
+                "service" => config.service = Some(literal.value()),
+                "account" => config.account = Some(literal.value()),
+                _ => return Err(meta.error("unsupported crypto attribute; expected `service` or `account`")),
+            }
+            Ok(())
+        })?;
+    }
+
+    Ok(config)
+}
+
+fn field_crypto_config(attrs: &[Attribute]) -> syn::Result<FieldCryptoConfig> {
+    let mut config = FieldCryptoConfig::default();
+    let mut seen = HashSet::new();
+
+    for attr in attrs {
+        if attr.path().is_ident("crypto") {
+            attr.parse_nested_meta(|meta| {
+                let key = meta
+                    .path
+                    .get_ident()
+                    .cloned()
+                    .ok_or_else(|| meta.error("unsupported crypto attribute"))?;
+
+                if !seen.insert(key.to_string()) {
+                    return Err(meta.error("duplicate crypto attribute key"));
+                }
+
+                let value = meta.value()?;
+                let literal: syn::LitStr = value.parse()?;
+                match key.to_string().as_str() {
+                    "field_account" => config.field_account = Some(literal.value()),
+                    _ => {
+                        return Err(meta.error(
+                            "unsupported field crypto attribute; expected `field_account`",
+                        ))
+                    }
+                }
+                Ok(())
+            })?;
+        } else if attr.path().is_ident("secure") && matches!(attr.meta, Meta::List(_)) {
+            return Err(Error::new_spanned(
+                attr,
+                "#[secure] does not accept arguments; use #[crypto(field_account = \"...\")] on the field",
+            ));
+        }
+    }
+
+    Ok(config)
 }
 
 fn table_alias_target(attrs: &[Attribute]) -> syn::Result<Option<Type>> {

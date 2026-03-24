@@ -1,5 +1,7 @@
 use appdb::crypto::{
-    clear_crypto_context_registry, register_crypto_context_for, CryptoContext, CryptoError,
+    clear_crypto_context_registry, default_crypto_config, register_crypto_context_for,
+    reset_default_crypto_config, set_default_crypto_account, set_default_crypto_config,
+    set_default_crypto_service, CryptoContext, CryptoError, SensitiveFieldTag,
     SensitiveModelTag,
 };
 use appdb::Sensitive;
@@ -34,6 +36,19 @@ struct ApiSecrets {
 
     #[secure]
     pub token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+#[crypto(service = "billing", account = "tenant-master")]
+struct OverrideSecrets {
+    pub alias: String,
+
+    #[secure]
+    pub api_key: String,
+
+    #[secure]
+    #[crypto(field_account = "tenant-note")]
+    pub note: Option<String>,
 }
 
 #[test]
@@ -176,4 +191,38 @@ fn sensitive_runtime_resolver_reports_missing_mapping() {
         .expect_err("missing mapping should fail");
 
     assert!(matches!(err, CryptoError::ResolverNotFound { .. }));
+}
+
+#[test]
+fn sensitive_crypto_metadata_exposes_defaults_and_overrides() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    reset_default_crypto_config();
+    set_default_crypto_config("svc-a", "acct-a");
+
+    let defaults = default_crypto_config();
+    assert_eq!(defaults.service, "svc-a");
+    assert_eq!(defaults.account, "acct-a");
+
+    let account_meta = <AppdbSensitiveFieldTagAccountSecretsPassword as SensitiveFieldTag>::crypto_metadata();
+    assert_eq!(account_meta.model_tag, <AccountSecrets as SensitiveModelTag>::model_tag());
+    assert_eq!(account_meta.field_tag, "password");
+    assert_eq!(account_meta.service, None);
+    assert_eq!(account_meta.account, None);
+    assert_eq!(AccountSecrets::SECURE_FIELDS, [*account_meta]);
+
+    let override_key = <AppdbSensitiveFieldTagOverrideSecretsApiKey as SensitiveFieldTag>::crypto_metadata();
+    let override_note = <AppdbSensitiveFieldTagOverrideSecretsNote as SensitiveFieldTag>::crypto_metadata();
+    assert_eq!(override_key.service, Some("billing"));
+    assert_eq!(override_key.account, Some("tenant-master"));
+    assert_eq!(override_note.service, Some("billing"));
+    assert_eq!(override_note.account, Some("tenant-note"));
+
+    set_default_crypto_service("svc-b");
+    set_default_crypto_account("acct-b");
+    let mutated = default_crypto_config();
+    assert_eq!(mutated.service, "svc-b");
+    assert_eq!(mutated.account, "acct-b");
+    reset_default_crypto_config();
 }

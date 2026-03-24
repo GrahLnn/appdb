@@ -14,7 +14,11 @@ fn sensitive_macro_rules_are_enforced() {
     tests.compile_fail("tests/ui/store/derive_bridge_multi_field_variant.rs");
     tests.compile_fail("tests/ui/store/derive_bridge_payload_without_bridge.rs");
     tests.compile_fail("tests/ui/sensitive/no_secure_fields.rs");
+    tests.pass("tests/ui/sensitive/crypto_attributes_supported.rs");
     tests.compile_fail("tests/ui/sensitive/unsupported_secure_type.rs");
+    tests.compile_fail("tests/ui/sensitive/type_crypto_unknown_key.rs");
+    tests.compile_fail("tests/ui/sensitive/field_crypto_unknown_key.rs");
+    tests.compile_fail("tests/ui/sensitive/field_crypto_without_value.rs");
     tests.compile_fail("tests/ui/sensitive/secure_then_unique.rs");
     tests.compile_fail("tests/ui/sensitive/unique_then_secure.rs");
     tests.compile_fail("tests/ui/sensitive/no_legal_non_secure_lookup.rs");
