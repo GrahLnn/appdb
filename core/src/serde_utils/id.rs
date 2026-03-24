@@ -217,39 +217,23 @@ pub fn parse_record_id_or_plain_string<'a>(
     }
 }
 
-pub fn normalize_public_id_value(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(id) = map.get_mut("id") {
-                let normalized = match id {
-                    serde_json::Value::String(text) => parse_record_id_or_plain_string(text, None)
-                        .ok()
-                        .map(|record| {
-                            serde_json::Value::String(record_id_to_plain_string(&record))
-                        }),
-                    serde_json::Value::Object(_) => serde_json::from_value::<RecordId>(id.clone())
-                        .ok()
-                        .map(|record| {
-                            serde_json::Value::String(record_id_to_plain_string(&record))
-                        }),
-                    _ => None,
-                };
+pub fn normalize_public_root_id_value(value: &mut serde_json::Value) {
+    let Some(id) = value.as_object_mut().and_then(|map| map.get_mut("id")) else {
+        return;
+    };
 
-                if let Some(normalized) = normalized {
-                    *id = normalized;
-                }
-            }
+    let normalized = match id {
+        serde_json::Value::String(text) => parse_record_id_or_plain_string(text, None)
+            .ok()
+            .map(|record| serde_json::Value::String(record_id_to_plain_string(&record))),
+        serde_json::Value::Object(_) => serde_json::from_value::<RecordId>(id.clone())
+            .ok()
+            .map(|record| serde_json::Value::String(record_id_to_plain_string(&record))),
+        _ => None,
+    };
 
-            for nested in map.values_mut() {
-                normalize_public_id_value(nested);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for nested in items {
-                normalize_public_id_value(nested);
-            }
-        }
-        _ => {}
+    if let Some(normalized) = normalized {
+        *id = normalized;
     }
 }
 

@@ -523,7 +523,7 @@ where
 
     async fn hydrate_foreign(id: surrealdb::types::RecordId) -> anyhow::Result<Self> {
         let mut value = serde_json::to_value(repository::Repo::<Self>::get_record(id).await?)?;
-        crate::serde_utils::id::normalize_public_id_value(&mut value);
+        crate::serde_utils::id::normalize_public_root_id_value(&mut value);
         Ok(serde_json::from_value(value)?)
     }
 }

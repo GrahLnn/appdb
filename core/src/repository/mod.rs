@@ -98,39 +98,26 @@ fn normalize_foreign_shapes(value: &mut serde_json::Value) {
     crate::decode_stored_record_links(value);
 }
 
-fn normalize_record_id_strings<T>(value: &mut serde_json::Value)
+fn normalize_root_record_id_string<T>(value: &mut serde_json::Value)
 where
     T: ModelMeta,
 {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(id) = map.get_mut("id") {
-                if let serde_json::Value::String(text) = id {
-                    if let Ok(record) =
-                        parse_record_id_or_plain_string(text, Some(T::storage_table()))
-                    {
-                        *id = serde_json::to_value(record).expect("record id should serialize");
-                    }
+    if let serde_json::Value::Object(map) = value {
+        if let Some(id) = map.get_mut("id") {
+            if let serde_json::Value::String(text) = id {
+                if let Ok(record) = parse_record_id_or_plain_string(text, Some(T::storage_table()))
+                {
+                    *id = serde_json::to_value(record).expect("record id should serialize");
                 }
             }
-
-            for nested in map.values_mut() {
-                normalize_record_id_strings::<T>(nested);
-            }
         }
-        serde_json::Value::Array(items) => {
-            for nested in items {
-                normalize_record_id_strings::<T>(nested);
-            }
-        }
-        _ => {}
     }
 }
 
 fn normalize_public_output_ids(value: &mut serde_json::Value) {
     let current_id = value.as_object().and_then(|map| map.get("id")).cloned();
 
-    crate::serde_utils::id::normalize_public_id_value(value);
+    crate::serde_utils::id::normalize_public_root_id_value(value);
 
     match current_id {
         Some(serde_json::Value::String(text)) if !text.contains(':') => {
@@ -259,7 +246,7 @@ where
         }
     }
 
-    normalize_record_id_strings::<T>(&mut row);
+    normalize_root_record_id_string::<T>(&mut row);
 
     if T::has_foreign_fields() {
         if let Value::Object(map) = &mut row {
