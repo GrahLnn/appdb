@@ -1,6 +1,6 @@
 {
   "milestone": "m3-roundtrip-hardening",
-  "round": 1,
+  "round": 2,
   "status": "fail",
   "validatorsRun": {
     "test": {
@@ -24,36 +24,36 @@
     "passed": 2,
     "failed": 1,
     "failedFeatures": [
-      "enum-roundtrip-plain-and-boundaries"
+      "enum-roundtrip-real-enum-proof-fix"
     ]
   },
   "blockingIssues": [
     {
-      "featureId": "enum-roundtrip-plain-and-boundaries",
+      "featureId": "enum-roundtrip-real-enum-proof-fix",
       "severity": "blocking",
-      "description": "The committed regression uses struct stand-ins instead of real Rust enums, so VAL-ER-001, VAL-ER-003, and VAL-ER-004 remain unproven for true enum discriminants, payload variants, and Option<Enum> roundtrip behavior."
+      "description": "The claimed fix commit 5854f064c65dda6e248ccc40c573bea7918314dc rewrites only scrutiny JSON artifacts and leaves core/tests/integration_db.rs using struct stand-ins (ItPlainStatus, ItPayloadState) instead of real Rust enums, so VAL-ER-001, VAL-ER-003, and VAL-ER-004 remain unproven."
     }
   ],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skill:rust-library-worker",
-      "suggestion": "On Windows, explicitly instruct workers not to execute .sh entrypoints and instead read them as text and translate steps into native commands during setup.",
-      "evidence": "Review of enum-roundtrip-sensitive-and-cross found a direct .factory/init.sh execution attempt in worker session 318fe76a-299a-4835-88bb-17c8b5544c82 despite repo/global Windows guidance forbidding .sh execution.",
+      "suggestion": "Require verification-only/fix workers to confirm that the commit they hand off actually touches the promised code or test surface before reporting success, especially when the tree is already clean.",
+      "evidence": "Review of enum-roundtrip-real-enum-proof-fix found worker session 5a49229c-8062-44d6-9b26-dd2c49d38e13 reported success on commit 5854f064c65dda6e248ccc40c573bea7918314dc even though git show --stat for that commit changes only .factory/validation/m3-roundtrip-hardening/** JSON files and no Rust sources/tests.",
       "isSystemic": true
     },
     {
       "target": "skill:rust-library-worker",
-      "suggestion": "Require workers who claim they followed the test-first procedure to record a focused failing-first proof or explicitly mark the procedure as deviated.",
-      "evidence": "Review of sensitive-enum-shape-runtime-seam found the worker reported followedProcedure=true while the transcript showed only baseline and passing focused validations, with no recorded failing-first step.",
+      "suggestion": "On Windows, explicitly instruct workers not to execute .sh entrypoints and instead read them as text and translate the steps into native commands during setup.",
+      "evidence": "Review of enum-roundtrip-sensitive-and-cross found worker session 318fe76a-299a-4835-88bb-17c8b5544c82 attempted a direct .factory/init.sh execution despite repo/global Windows guidance forbidding .sh execution.",
       "isSystemic": true
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Add a shared library note about SurrealValue-derived enum behavior in this persistence path.",
-      "reason": "Ambiguous until the underlying limitation is confirmed on HEAD rather than inferred from one worker transcript pivot; better handled after the blocking feature is corrected or root-caused."
+      "observation": "Treat the updated pass report for \u001bnum-roundtrip-plain-and-boundaries as sufficient proof that the original failure was fixed.",
+      "reason": "rejected because the paired fix review still fails on HEAD: the underlying test file continues to use struct stand-ins and the cited fix commit modifies only validation artifacts, so the pass conclusion is unsupported."
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/m3-roundtrip-hardening/scrutiny/synthesis.json"
 }
