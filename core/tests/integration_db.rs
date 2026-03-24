@@ -61,16 +61,6 @@ impl appdb::ForeignPersistence for RecordingForeignPersistence {
         Repo::<T>::create(data).await
     }
 
-    async fn create_at<T>(&self, id: RecordId, data: T) -> anyhow::Result<T>
-    where
-        T: ModelMeta + Crud + StoredModel + appdb::ForeignModel + Send,
-    {
-        self.events
-            .lock()
-            .expect("events lock poisoned")
-            .push(format!("create_at:{id:?}"));
-        Repo::<T>::create_at(id, data).await
-    }
 }
 
 static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
