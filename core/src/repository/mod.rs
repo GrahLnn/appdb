@@ -551,8 +551,7 @@ where
     {
         let key: RecordIdKey = id.into();
         let record = match key {
-            RecordIdKey::String(text) => parse_record_id_or_plain_string(&text, None)
-                .unwrap_or_else(|plain| RecordId::new(T::storage_table(), plain.to_owned())),
+            RecordIdKey::String(text) => RecordId::new(T::storage_table(), text),
             other => RecordId::new(T::storage_table(), other),
         };
         Self::delete_record(record).await

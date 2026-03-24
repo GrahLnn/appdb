@@ -3748,6 +3748,89 @@ fn delete_record_query_accepts_bound_record_id() {
 }
 
 #[test]
+fn repo_delete_string_id_does_not_cross_table_boundary() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItStringUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItRecordUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        Repo::<ItStringUser>::create(ItStringUser {
+            id: Id::from("it_record_user:cross-target"),
+            payload: "local string id".to_owned(),
+        })
+        .await
+        .expect("local string-shaped id should be created");
+        Repo::<ItRecordUser>::create_at(
+            RecordId::new("it_record_user", "cross-target"),
+            ItRecordUser {
+                id: RecordId::new("it_record_user", "cross-target"),
+                name: "foreign row".to_owned(),
+            },
+        )
+        .await
+        .expect("foreign record should be created");
+
+        Repo::<ItStringUser>::delete("it_record_user:cross-target")
+            .await
+            .expect("delete should treat string input as table-local");
+
+        let missing = Repo::<ItStringUser>::get("it_record_user:cross-target")
+            .await
+            .expect_err("local string-shaped row should be deleted");
+        assert!(matches!(
+            missing.downcast_ref::<DBError>(),
+            Some(DBError::NotFound)
+        ));
+
+        let foreign = Repo::<ItRecordUser>::get_record(RecordId::new("it_record_user", "cross-target"))
+            .await
+            .expect("foreign row should remain");
+        assert_eq!(foreign.name, "foreign row");
+    });
+}
+
+#[test]
+fn delete_record_still_accepts_explicit_full_record_id() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecordUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        Repo::<ItRecordUser>::create_at(
+            RecordId::new("it_record_user", "explicit-delete"),
+            ItRecordUser {
+                id: RecordId::new("it_record_user", "explicit-delete"),
+                name: "explicit delete".to_owned(),
+            },
+        )
+        .await
+        .expect("seed record should be created");
+
+        Repo::<ItRecordUser>::delete_record(RecordId::new("it_record_user", "explicit-delete"))
+            .await
+            .expect("explicit record delete should succeed");
+
+        let missing =
+            Repo::<ItRecordUser>::get_record(RecordId::new("it_record_user", "explicit-delete"))
+                .await
+                .expect_err("deleted row should be gone");
+        assert!(matches!(
+            missing.downcast_ref::<DBError>(),
+            Some(DBError::NotFound)
+        ));
+    });
+}
+
+#[test]
 fn transaction_runner_executes_and_returns_value() {
     let _guard = acquire_test_lock();
     run_async(async {
