@@ -66,6 +66,22 @@ struct OverrideSecrets {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+struct FirstUseDefaultsA {
+    pub alias: String,
+
+    #[secure]
+    pub secret: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+struct FirstUseDefaultsB {
+    pub alias: String,
+
+    #[secure]
+    pub secret: String,
+}
+
 #[test]
 fn sensitive_record_roundtrip_encrypts_only_secure_fields() {
     let _guard = TEST_LOCK
@@ -213,6 +229,54 @@ fn sensitive_runtime_resolver_auto_initializes_from_defaults() {
         .expect("auto-registered contexts should decrypt");
 
     assert_eq!(decrypted, card);
+    unsafe {
+        std::env::remove_var("LOCALAPPDATA");
+    }
+    let _ = std::fs::remove_dir_all(local_appdata);
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+}
+
+#[test]
+fn sensitive_runtime_resolver_first_use_models_track_global_default_changes_without_retroactive_leakage() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+    let local_appdata = crypto_test_local_appdata("first-use-default-mutation");
+    unsafe {
+        std::env::set_var("LOCALAPPDATA", &local_appdata);
+    }
+
+    set_default_crypto_config("svc-initial", "acct-initial");
+    let initial = FirstUseDefaultsA {
+        alias: "alpha".into(),
+        secret: "one".into(),
+    };
+    let encrypted_initial = initial
+        .encrypt_with_runtime_resolver()
+        .expect("first model should auto-initialize from initial defaults");
+
+    set_default_crypto_config("svc-later", "acct-later");
+    let later = FirstUseDefaultsB {
+        alias: "beta".into(),
+        secret: "two".into(),
+    };
+    let encrypted_later = later
+        .encrypt_with_runtime_resolver()
+        .expect("later first-use model should auto-initialize from mutated defaults");
+
+    assert_eq!(
+        FirstUseDefaultsA::decrypt_with_runtime_resolver(&encrypted_initial)
+            .expect("already-initialized model should still decrypt with original context"),
+        initial
+    );
+    assert_eq!(
+        FirstUseDefaultsB::decrypt_with_runtime_resolver(&encrypted_later)
+            .expect("later model should decrypt with later defaults"),
+        later
+    );
     unsafe {
         std::env::remove_var("LOCALAPPDATA");
     }

@@ -4,8 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use appdb::connection::{get_db, reinit_db, reinit_db_with_options, DbRuntime, InitDbOptions};
 use appdb::crypto::{
-    clear_crypto_context_registry, register_crypto_context_for, CryptoContext, SensitiveFieldTag,
-    SensitiveModelTag,
+    clear_crypto_context_registry, register_crypto_context_for, reset_default_crypto_config,
+    set_default_crypto_config, CryptoContext, SensitiveFieldTag, SensitiveModelTag,
 };
 use appdb::error::classify_db_error_text;
 use appdb::graph::{GraphCrud, GraphRepo};
@@ -450,6 +450,18 @@ struct ItSensitiveProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+#[crypto(service = "integration-type-override", account = "integration-type-master")]
+struct ItSensitiveOverrideProfile {
+    id: Id,
+    alias: String,
+    #[secure]
+    secret: String,
+    #[secure]
+    #[crypto(field_account = "integration-field-note")]
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
 struct ItSensitiveFallbackLookup {
     alias: String,
     #[secure]
@@ -477,6 +489,14 @@ struct ItSensitiveLookupTarget {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
 struct StoredSensitiveProfileRow {
+    id: RecordId,
+    alias: String,
+    secret: Vec<u8>,
+    note: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredSensitiveOverrideProfileRow {
     id: RecordId,
     alias: String,
     secret: Vec<u8>,
@@ -573,6 +593,19 @@ async fn load_sensitive_profile_raw(id: &str) -> StoredSensitiveProfileRow {
         .await
         .expect("raw row query should succeed")
         .expect("raw row should exist")
+}
+
+async fn load_sensitive_override_profile_raw(id: &str) -> StoredSensitiveOverrideProfileRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::table($table) WHERE id = $id LIMIT 1;")
+        .bind("table", ItSensitiveOverrideProfile::table_name())
+        .bind(
+            "id",
+            RecordId::new(ItSensitiveOverrideProfile::table_name(), id),
+        );
+    query_bound_return::<StoredSensitiveOverrideProfileRow>(stmt)
+        .await
+        .expect("sensitive override profile row should load")
+        .expect("sensitive override profile row should exist")
 }
 
 async fn load_aliased_foreign_parent_raw(id: &str) -> StoredAliasedForeignParentRow {
@@ -925,6 +958,21 @@ fn assert_sensitive_row_encrypted(
         }
         (None, None) => {}
         other => panic!("unexpected note state: {other:?}"),
+    }
+}
+
+fn assert_sensitive_override_row_encrypted(
+    raw: &StoredSensitiveOverrideProfileRow,
+    alias: &str,
+    secret: &str,
+    note: Option<&str>,
+) {
+    assert_eq!(raw.alias, alias);
+    assert_ne!(raw.secret, secret.as_bytes());
+    match (&raw.note, note) {
+        (Some(ciphertext), Some(expected)) => assert_ne!(ciphertext, expected.as_bytes()),
+        (None, None) => {}
+        other => panic!("unexpected sensitive override note shape: {other:?}"),
     }
 }
 
@@ -5177,6 +5225,234 @@ fn store_sensitive_save_many_and_insert_return_plaintext_models() {
             "three",
             Some("inserted"),
         );
+    });
+}
+
+#[test]
+fn store_sensitive_auto_crypto_overrides_and_default_isolation_hold_across_interleaved_models() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        clear_crypto_context_registry();
+        reset_default_crypto_config();
+
+        let local_appdata = std::env::temp_dir().join(format!(
+            "appdb_integration_auto_crypto_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before epoch")
+                .as_nanos()
+        ));
+        unsafe {
+            std::env::set_var("LOCALAPPDATA", &local_appdata);
+        }
+
+        Repo::<ItSensitiveProfile>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItSensitiveOverrideProfile>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        set_default_crypto_config("integration-default-svc-a", "integration-default-acct-a");
+        let default_a = ItSensitiveProfile {
+            id: Id::from("s-default-a"),
+            alias: "default-a".to_owned(),
+            secret: "alpha-secret".to_owned(),
+            note: Some("alpha-note".to_owned()),
+        };
+        let saved_default_a = ItSensitiveProfile::save(default_a.clone())
+            .await
+            .expect("default sensitive save should auto-ensure from global defaults");
+
+        set_default_crypto_config("integration-default-svc-b", "integration-default-acct-b");
+        let overridden = ItSensitiveOverrideProfile {
+            id: Id::from("s-override"),
+            alias: "override".to_owned(),
+            secret: "override-secret".to_owned(),
+            note: Some("override-note".to_owned()),
+        };
+        let saved_override = ItSensitiveOverrideProfile::save(overridden.clone())
+            .await
+            .expect("type override save should ignore mutated global defaults");
+
+        let default_b = ItSensitiveProfile {
+            id: Id::from("s-default-b"),
+            alias: "default-b".to_owned(),
+            secret: "beta-secret".to_owned(),
+            note: Some("beta-note".to_owned()),
+        };
+        let saved_default_b = ItSensitiveProfile::save(default_b.clone())
+            .await
+            .expect("repeated default-model save should reuse original initialization");
+
+        assert_eq!(saved_default_a, default_a);
+        assert_eq!(saved_override, overridden);
+        assert_eq!(saved_default_b, default_b);
+
+        assert_eq!(
+            ItSensitiveProfile::get("s-default-a")
+                .await
+                .expect("default-a should decrypt"),
+            default_a
+        );
+        assert_eq!(
+            ItSensitiveProfile::get("s-default-b")
+                .await
+                .expect("default-b should decrypt"),
+            default_b
+        );
+        assert_eq!(
+            ItSensitiveOverrideProfile::get("s-override")
+                .await
+                .expect("override row should decrypt"),
+            overridden
+        );
+
+        let default_list = ItSensitiveProfile::list()
+            .await
+            .expect("default list should succeed");
+        assert!(default_list.contains(&default_a));
+        assert!(default_list.contains(&default_b));
+
+        let saved_many = ItSensitiveOverrideProfile::save_many(vec![
+            ItSensitiveOverrideProfile {
+                id: Id::from("s-override-many-1"),
+                alias: "override-many-1".to_owned(),
+                secret: "many-secret-1".to_owned(),
+                note: Some("many-note-1".to_owned()),
+            },
+            ItSensitiveOverrideProfile {
+                id: Id::from("s-override-many-2"),
+                alias: "override-many-2".to_owned(),
+                secret: "many-secret-2".to_owned(),
+                note: None,
+            },
+        ])
+        .await
+        .expect("override save_many should auto-ensure and reuse override contexts");
+        assert_eq!(saved_many[0].secret, "many-secret-1");
+        assert_eq!(saved_many[1].secret, "many-secret-2");
+
+        assert_sensitive_row_encrypted(
+            &load_sensitive_profile_raw("s-default-a").await,
+            "default-a",
+            "alpha-secret",
+            Some("alpha-note"),
+        );
+        assert_sensitive_row_encrypted(
+            &load_sensitive_profile_raw("s-default-b").await,
+            "default-b",
+            "beta-secret",
+            Some("beta-note"),
+        );
+        assert_sensitive_override_row_encrypted(
+            &load_sensitive_override_profile_raw("s-override").await,
+            "override",
+            "override-secret",
+            Some("override-note"),
+        );
+        assert_sensitive_override_row_encrypted(
+            &load_sensitive_override_profile_raw("s-override-many-1").await,
+            "override-many-1",
+            "many-secret-1",
+            Some("many-note-1"),
+        );
+
+        unsafe {
+            std::env::remove_var("LOCALAPPDATA");
+        }
+        let _ = std::fs::remove_dir_all(local_appdata);
+        clear_crypto_context_registry();
+        reset_default_crypto_config();
+    });
+}
+
+#[test]
+fn store_sensitive_later_first_use_models_pick_up_new_global_defaults() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        clear_crypto_context_registry();
+        reset_default_crypto_config();
+
+        let local_appdata = std::env::temp_dir().join(format!(
+            "appdb_integration_global_mutation_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before epoch")
+                .as_nanos()
+        ));
+        unsafe {
+            std::env::set_var("LOCALAPPDATA", &local_appdata);
+        }
+
+        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+        struct ItSensitiveLateDefaultsA {
+            id: Id,
+            alias: String,
+            #[secure]
+            secret: String,
+        }
+
+        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+        struct ItSensitiveLateDefaultsB {
+            id: Id,
+            alias: String,
+            #[secure]
+            secret: String,
+        }
+
+        Repo::<ItSensitiveLateDefaultsA>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItSensitiveLateDefaultsB>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        set_default_crypto_config("integration-late-svc-a", "integration-late-acct-a");
+        let a = ItSensitiveLateDefaultsA {
+            id: Id::from("late-a"),
+            alias: "late-a".to_owned(),
+            secret: "secret-a".to_owned(),
+        };
+        let saved_a = ItSensitiveLateDefaultsA::save(a.clone())
+            .await
+            .expect("first model should initialize under initial defaults");
+
+        set_default_crypto_config("integration-late-svc-b", "integration-late-acct-b");
+        let b = ItSensitiveLateDefaultsB {
+            id: Id::from("late-b"),
+            alias: "late-b".to_owned(),
+            secret: "secret-b".to_owned(),
+        };
+        let saved_b = ItSensitiveLateDefaultsB::save(b.clone())
+            .await
+            .expect("later first-use model should initialize under updated defaults");
+
+        assert_eq!(saved_a, a);
+        assert_eq!(saved_b, b);
+        assert_eq!(
+            ItSensitiveLateDefaultsA::get("late-a")
+                .await
+                .expect("model a should still decrypt under original context"),
+            a
+        );
+        assert_eq!(
+            ItSensitiveLateDefaultsB::get("late-b")
+                .await
+                .expect("model b should decrypt under later defaults"),
+            b
+        );
+
+        unsafe {
+            std::env::remove_var("LOCALAPPDATA");
+        }
+        let _ = std::fs::remove_dir_all(local_appdata);
+        clear_crypto_context_registry();
+        reset_default_crypto_config();
     });
 }
 
