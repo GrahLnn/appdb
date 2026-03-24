@@ -1,0 +1,33 @@
+{
+  "featureId": "milestone-g-delete-string-table-local",
+  "reviewedAt": "2026-03-24T10:51:36.431800+00:00",
+  "commitId": "16e1f07e99ce58742c11272a1f4467788ed509ca",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The runtime change in Repo::<T>::delete correctly forces string inputs onto T::storage_table() and the added regressions prove both VAL-G-DELETE-001 and VAL-G-DELETE-002. However, the reviewed commit also deletes unrelated scrutiny artifacts from the prior persistence-primitive-and-errors milestone, so the feature commit does not stay within the requested feature scope.",
+    "issues": [
+      {
+        "file": ".factory/validation/persistence-primitive-and-errors/scrutiny/synthesis.json",
+        "line": 1,
+        "severity": "blocking",
+        "description": "Commit 16e1f07 deletes prior scrutiny outputs unrelated to delete-string semantics, including synthesis and review JSON files under .factory/validation/persistence-primitive-and-errors. The feature brief was limited to tightening Repo::<T>::delete string semantics and preserving explicit delete_record behavior, so shipping this commit would unintentionally erase mission validation artifacts outside the reviewed feature scope."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill does not describe a clean review-only/evidence-only path for cases where the assigned feature is already present in the checked-out commit, so the worker had to record a procedure deviation despite doing the right thing by verifying the existing implementation.",
+      "evidence": "C:/Users/admin/appdb/.factory/skills/rust-library-worker/SKILL.md step 3 requires writing failing regressions first, but handoff.skillFeedback for session 3238c8b8-b4c4-49aa-a589-eda28537d32c says the behavior was already implemented and covered before the session started."
+    },
+    {
+      "area": "skills",
+      "observation": "The worker transcript and handoff show a detached-head/dirty-tree commit hazard that the current skill does not operationalize well; it should explicitly instruct workers how to verify or recover when unrelated tracked changes would be captured by a feature commit.",
+      "evidence": "The earlier transcript for feature session 9eae9226-69e0-43b1-bd80-272886b19c0e shows repeated reset/amend attempts after unrelated .factory validation files were pulled into commit 16e1f07, while the final handoff for session 3238c8b8-b4c4-49aa-a589-eda28537d32c notes the feature was already present and a clean new commit could not be created due to unrelated mission changes."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail. The code itself satisfies VAL-G-DELETE-001 and VAL-G-DELETE-002: Repo::<T>::delete now treats string ids as table-local and delete_record(RecordId) remains the explicit full-record path, with focused regressions covering both behaviors. But the reviewed commit 16e1f07 is not safe to accept as the feature commit because it also deletes unrelated prior scrutiny artifacts under .factory/validation/persistence-primitive-and-errors."
+}
