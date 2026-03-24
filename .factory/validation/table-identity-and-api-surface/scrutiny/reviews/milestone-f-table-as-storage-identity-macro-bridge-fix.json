@@ -1,0 +1,21 @@
+{
+  "featureId": "milestone-f-table-as-storage-identity-macro-bridge-fix",
+  "reviewedAt": "2026-03-24T03:35:12Z",
+  "commitId": "a2ad47c271f3a001c6b4004cb2d3243d781154d3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix addresses the two blocking gaps from the prior failed review. In macros/src/lib.rs, #[derive(Store)] now generates explicit-id HasId and ResolveRecordId RecordIds from ModelMeta::storage_table(), and #[derive(Bridge)] hydrate dispatch now matches each payload type by storage_table() as well. Those changes align alias-backed explicit-id identity and enum foreign hydration with the repository storage identity seam, satisfying the original failure around table_as macro identity and bridge dispatch.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill now correctly points table_as work toward explicit storage identity, but the feature transcript still shows the worker had to infer a Windows-safe replacement for the jq-based milestone listing example from general environment knowledge rather than from the skill itself.",
+      "evidence": "worker-transcripts.jsonl entry for session bcb58620-7be9-40d6-a509-23eed5926e2e records a Python one-liner fallback because the skill example references jq; SKILL.md does not yet mention a Windows-safe/Python alternative for that read-only mission inspection step."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/table-identity-and-api-surface/scrutiny/reviews/milestone-f-table-as-storage-identity.json",
+  "summary": "Pass: commit a2ad47c routes macro-generated explicit-id identity and derive(Bridge) hydrate dispatch through storage_table(), closing the prior table_as storage identity gap in alias HasId/ResolveRecordId and enum bridge dispatch."
+}

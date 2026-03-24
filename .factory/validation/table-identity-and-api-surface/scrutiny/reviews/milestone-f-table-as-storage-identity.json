@@ -1,0 +1,34 @@
+{
+  "featureId": "milestone-f-table-as-storage-identity",
+  "reviewedAt": "2026-03-24T00:00:00Z",
+  "commitId": "728f3d5bef081693db47e380d8609909e63b7a1e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The storage-table seam was introduced for repository CRUD operations and explicit foreign record construction, but macro-generated alias identity still constructs and matches RecordIds via table_name() in multiple places. That leaves alias HasId/ResolveRecordId and enum Bridge dispatch outside the new storage-identity abstraction, so the implementation does not fully satisfy the feature requirement that alias metadata and foreign hydration agree on one first-class storage identity rather than scattered table-name stitching.",
+    "issues": [
+      {
+        "file": "macros/src/lib.rs",
+        "line": 133,
+        "severity": "blocking",
+        "description": "#[derive(Store)] still generates HasId and explicit-id ResolveRecordId using ModelMeta::table_name() instead of storage_table(). For #[table_as(...)] aliases this keeps alias ids bound to the alias-facing name rather than the canonical storage identity, so compile-time metadata and explicit-id paths are still split across two table concepts."
+      },
+      {
+        "file": "macros/src/lib.rs",
+        "line": 556,
+        "severity": "blocking",
+        "description": "#[derive(Bridge)] enum hydrate dispatch still matches id.table() against each payload type's table_name() instead of storage_table(). Alias-backed foreign graphs therefore still rely on ad hoc alias-name matching rather than the new storage identity seam, contradicting the feature requirement that foreign hydration preserve one storage identity abstraction."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill says table_as work should prove storage identity explicitly, but it does not remind workers to update macro-generated identity and hydration code paths such as HasId, ResolveRecordId, and enum Bridge dispatch. That omission likely contributed to the worker stopping after repository-path replacements while leaving macro-generated table_name() seams behind.",
+      "evidence": "Skill .factory/skills/rust-library-worker/SKILL.md item 19 says to treat alias and target as one storage entity, but commit 728f3d5 still leaves macros/src/lib.rs:133-147 and macros/src/lib.rs:556 on table_name(); the worker transcript shows broad table_name()/storage_table() searching but only repository/meta/test updates were committed."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail: repository CRUD paths now use storage_table(), but macro-generated alias identity and enum bridge hydration still depend on table_name(), so #[table_as(...)] is not yet a fully unified storage-identity abstraction."
+}
