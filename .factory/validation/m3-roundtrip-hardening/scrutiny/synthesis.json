@@ -1,0 +1,59 @@
+{
+  "milestone": "m3-roundtrip-hardening",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 12",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 2,
+    "failed": 1,
+    "failedFeatures": [
+      "enum-roundtrip-plain-and-boundaries"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "enum-roundtrip-plain-and-boundaries",
+      "severity": "blocking",
+      "description": "The committed regression uses struct stand-ins instead of real Rust enums, so VAL-ER-001, VAL-ER-003, and VAL-ER-004 remain unproven for true enum discriminants, payload variants, and Option<Enum> roundtrip behavior."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skill:rust-library-worker",
+      "suggestion": "On Windows, explicitly instruct workers not to execute .sh entrypoints and instead read them as text and translate steps into native commands during setup.",
+      "evidence": "Review of enum-roundtrip-sensitive-and-cross found a direct .factory/init.sh execution attempt in worker session 318fe76a-299a-4835-88bb-17c8b5544c82 despite repo/global Windows guidance forbidding .sh execution.",
+      "isSystemic": true
+    },
+    {
+      "target": "skill:rust-library-worker",
+      "suggestion": "Require workers who claim they followed the test-first procedure to record a focused failing-first proof or explicitly mark the procedure as deviated.",
+      "evidence": "Review of sensitive-enum-shape-runtime-seam found the worker reported followedProcedure=true while the transcript showed only baseline and passing focused validations, with no recorded failing-first step.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Add a shared library note about SurrealValue-derived enum behavior in this persistence path.",
+      "reason": "Ambiguous until the underlying limitation is confirmed on HEAD rather than inferred from one worker transcript pivot; better handled after the blocking feature is corrected or root-caused."
+    }
+  ],
+  "previousRound": null
+}
