@@ -1,7 +1,7 @@
 {
   "milestone": "m1-auto-crypto-defaults",
-  "round": 2,
-  "status": "fail",
+  "round": 3,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -14,50 +14,45 @@
       "exitCode": 0
     },
     "lint": {
-      "passed": false,
+      "passed": true,
       "command": "cargo clippy --workspace --all-targets -- -D warnings",
-      "exitCode": 1
+      "exitCode": 0
     }
   },
   "reviewsSummary": {
-    "total": 2,
-    "passed": 0,
-    "failed": 2,
-    "failedFeatures": [
-      "sensitive-auto-registration-runtime",
-      "sensitive-crypto-config-surface"
-    ]
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "sensitive-auto-registration-runtime",
-      "severity": "blocking",
-      "description": "Prior review still applies: direct/runtime Store auto-registration behavior must be validated against the implemented code paths, not only metadata surfaces or manual registration tests."
-    },
-    {
-      "featureId": "sensitive-crypto-config-surface",
-      "severity": "blocking",
-      "description": "Prior review still applies: generated metadata/default-config surface must be demonstrably consumed by runtime behavior to satisfy the feature description."
-    },
-    {
-      "featureId": "m1-auto-crypto-defaults",
-      "severity": "blocking",
-      "description": "Current validator run found cargo clippy failing on core/src/crypto.rs with clippy::type_complexity for AUTO_CRYPTO_REGISTRY and clippy::needless_borrow in register_model_crypto_fields, so milestone validators are not currently green."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skills",
-      "suggestion": "Clarify scrutiny/rust worker procedures for verification-only or inherited-code sessions so workers must verify claimed behavior against actual source and validator outputs, not only prior handoffs.",
-      "evidence": "Round 1 reviews found claimed runtime behavior mismatches; round 2 also found the current workspace still fails clippy despite test and check passing.",
+      "suggestion": "Clarify rust-library-worker guidance for validation-only or lint-only follow-up sessions so workers may use verification-and-land instead of forced fail-first test creation when the code change already exists or the task is strictly validator compliance.",
+      "evidence": "Three reviewed features (save-many-clippy-key-fix, auto-crypto-registry-clippy-fix, sensitive-crypto-config-surface) noted the same gap: current skill steps emphasize failing tests first, but these accepted fixes were correctly completed via scoped verification/reacceptance or lint reproduction plus validator reruns.",
       "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "Document a concrete GitNexus fallback sequence for worker sessions when the CLI or detect_changes command is unavailable, including that direct source inspection plus git diff/status review is the required fallback.",
+      "evidence": "The sensitive-auto-registration-runtime review recorded repeated GitNexus CLI use attempts and a detect_changes failure, while current worker guidance mentions fallback only abstractly.",
+      "isSystemic": false
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Add a library note claiming SECURE_FIELDS contains fully resolved default service/account values.",
-      "reason": "wrong: reviewer evidence still shows metadata preserving explicit overrides rather than resolved defaults."
+      "observation": "Add a services.yaml entry for GitNexus commands.",
+      "reason": "rejected as ambiguous: services.yaml is for stable operational commands/workers need to run, but the observation is about policy/tool availability rather than a clearly required repo command surface."
+    },
+    {
+      "observation": "Add a library note that save_many duplicate tracking should avoid mutable-key types and use stable key representations.",
+      "reason": "rejected for now: plausible but narrow, and current evidence comes from one lint-fix feature rather than a repeated repository-wide pattern needing shared factual documentation."
+    },
+    {
+      "observation": "Add a library note that SECURE_FIELDS may preserve only explicit overrides and runtime merges in defaults later.",
+      "reason": "rejected as already adequately inferable from current source/tests and not yet a demonstrated repeated worker confusion pattern requiring shared-library promotion."
     }
   ],
   "previousRound": ".factory/validation/m1-auto-crypto-defaults/scrutiny/synthesis.json"

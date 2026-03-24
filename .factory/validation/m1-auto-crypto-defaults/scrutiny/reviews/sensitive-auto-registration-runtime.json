@@ -1,51 +1,26 @@
 {
   "featureId": "sensitive-auto-registration-runtime",
-  "reviewedAt": "2026-03-24T16:49:09Z",
-  "commitId": "6b3496e28f9d5ffa55fcb750db99f963d2197d9e",
+  "reviewedAt": "2026-03-24T17:46:52Z",
+  "commitId": "352c3689edffa33856f47a66796545341f48b7dc",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
-  "status": "fail",
+  "status": "pass",
   "codeReview": {
-    "summary": "The reviewed feature is not actually implemented by commit 6b3496e28f9d5ffa55fcb750db99f963d2197d9e. The commit only adds crypto configuration metadata and default-config APIs; runtime auto-registration/auto-ensure is still absent, and Store/runtime-resolver paths still require pre-registered crypto contexts.",
-    "issues": [
-      {
-        "file": "core/src/crypto.rs",
-        "line": 175,
-        "severity": "blocking",
-        "description": "resolve_crypto_context only reads from the manual resolver registry and returns CryptoError::ResolverNotFound when no mapping was pre-registered. There is no lazy default-provider initialization, no OnceLock-backed per-model reuse, and no code here that consumes SensitiveFieldMetadata plus global defaults to auto-create a CryptoContext."
-      },
-      {
-        "file": "macros/src/lib.rs",
-        "line": 872,
-        "severity": "blocking",
-        "description": "The generated encrypt_with_runtime_resolver/decrypt_with_runtime_resolver implementations directly call the runtime resolver for each field but do not auto-ensure readiness first. Because no generated OnceLock/ensure_crypto_ready() path exists, direct runtime-resolver operations still fail unless the caller has already registered contexts manually."
-      },
-      {
-        "file": "core/tests/sensitive_roundtrip.rs",
-        "line": 193,
-        "severity": "blocking",
-        "description": "The runtime test suite still asserts that calling encrypt_with_runtime_resolver without prior registration returns CryptoError::ResolverNotFound. This contradicts the feature contract that direct runtime-resolver paths should auto-ensure readiness using defaults/overrides."
-      },
-      {
-        "file": "core/tests/integration_db.rs",
-        "line": 567,
-        "severity": "blocking",
-        "description": "Integration coverage still depends on install_sensitive_test_contexts() to pre-register crypto contexts before Store operations. The reviewed tests verify manual setup works; they do not verify the promised behavior that save/get/list/save_many succeed without business-layer registration."
-      }
-    ]
+    "summary": "Review of commit 352c3689edffa33856f47a66796545341f48b7dc found the feature contract covered by focused regression additions only. The committed tests now exercise direct runtime-resolver auto-init, Store CRUD auto-ensure, default-vs-override isolation, and later first-use default mutation without revealing any contract gaps in the implementation under review.",
+    "issues": []
   },
   "sharedStateObservations": [
     {
-      "area": "skills",
-      "observation": "The worker marked the feature successful without checking that the cited commit actually contained runtime auto-registration behavior. The transcript shows a verification-only review of inherited code, but the inspected source still matches the prerequisite config-surface implementation rather than the requested runtime feature.",
-      "evidence": "Handoff commitId is 6b3496e28f9d5ffa55fcb750db99f963d2197d9e, and git show --stat for that commit reports only the commit header with no file changes. Current source still has ResolverNotFound behavior in core/src/crypto.rs and the failing-without-registration test in core/tests/sensitive_roundtrip.rs:193."
+      "area": "services",
+      "observation": "The worker repeatedly relied on the GitNexus CLI to satisfy repo policy, but .factory/services.yaml documents only cargo commands and no GitNexus command surface or availability expectations.",
+      "evidence": "Handoff verification commands include npx gitnexus impact resolve_crypto_context_for --repo appdb --direction upstream and failed npx gitnexus detect_changes --repo appdb --scope all; .factory/services.yaml lists only install/test/lint/build/typecheck cargo commands."
     },
     {
-      "area": "conventions",
-      "observation": "Mission/shared-state docs describe auto crypto readiness as the intended mainline pattern, but the current test helpers still normalize manual registration through install_sensitive_test_contexts(). That can mislead workers into treating the manual path as sufficient verification for auto-registration milestones.",
-      "evidence": "Mission AGENTS/environment/library docs all state automatic crypto readiness is the goal, while core/tests/integration_db.rs:567 centralizes manual register_crypto_context_for setup and the auto-registration feature transcript cites those tests as proof."
+      "area": "skills",
+      "observation": "The rust-library-worker skill tells workers to fall back when GitNexus tooling is unavailable, but it does not state the concrete CLI limitations observed here or the exact fallback sequence to use.",
+      "evidence": "The feature handoff skillFeedback suggests documenting the exact GitNexus CLI fallback command set; .factory/skills/rust-library-worker/SKILL.md only says to note the fallback and use direct source inspection plus grep/diff review."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Fail: the reviewed feature claim is unsupported. The referenced commit does not implement runtime auto-registration, direct runtime-resolver paths still fail without manual registration, and Store integration tests still rely on preinstalled crypto contexts instead of validating no-registration behavior."
+  "summary": "Reviewed the feature handoff, commit diff, transcript skeleton, mission contract, and relevant shared-state files. The commit is a test-only proof pass: it adds authoritative regressions for auto-registration runtime behavior and I found no blocking or non-blocking code issues in the reviewed implementation."
 }
