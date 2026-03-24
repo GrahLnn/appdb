@@ -1072,6 +1072,62 @@ fn create_at_duplicate_id_returns_typed_conflict() {
 }
 
 #[test]
+fn save_upsert_at_create_at_explicit_id_semantics_are_intentional() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        reinit_db_with_options(test_db_path(), InitDbOptions::default())
+            .await
+            .expect("schemaless database should initialize");
+
+        let created = Repo::<ItStringUser>::create_at(
+            RecordId::new(ItStringUser::table_name(), "explicit-id-semantics"),
+            ItStringUser {
+                id: Id::from("explicit-id-semantics"),
+                payload: "created".to_owned(),
+            },
+        )
+        .await
+        .expect("create_at should create the addressed row");
+        assert_eq!(created.payload, "created");
+
+        let saved = Repo::<ItStringUser>::save(ItStringUser {
+            id: Id::from("explicit-id-semantics"),
+            payload: "saved".to_owned(),
+        })
+        .await
+        .expect("save should ensure/update the same addressed row");
+        assert_eq!(saved.payload, "saved");
+
+        let upserted = Repo::<ItStringUser>::upsert_at(
+            RecordId::new(ItStringUser::table_name(), "explicit-id-semantics"),
+            ItStringUser {
+                id: Id::from("explicit-id-semantics"),
+                payload: "upserted".to_owned(),
+            },
+        )
+        .await
+        .expect("upsert_at should ensure/update the same addressed row");
+        assert_eq!(upserted.payload, "upserted");
+
+        let loaded = Repo::<ItStringUser>::get("explicit-id-semantics")
+            .await
+            .expect("final explicit-id row should be loadable");
+        let ids = Repo::<ItStringUser>::list_record_ids()
+            .await
+            .expect("list_record_ids should succeed");
+
+        assert_eq!(loaded.payload, "upserted");
+        assert_eq!(
+            ids,
+            vec![RecordId::new(
+                ItStringUser::table_name(),
+                "explicit-id-semantics"
+            )]
+        );
+    });
+}
+
+#[test]
 fn decode_raw_row_invalid_shape_returns_typed_decode_error() {
     let _guard = acquire_test_lock();
     run_async(async {

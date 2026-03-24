@@ -134,6 +134,61 @@ where
     Ok(content)
 }
 
+async fn persist_explicit_id_primitive<T>(record: RecordId, data: T, create_only: bool) -> Result<T>
+where
+    T: ModelMeta + StoredModel + ForeignModel,
+{
+    let db = get_db()?;
+    let content = prepare_content(T::persist_foreign(data).await?)?;
+    let statement = if create_only {
+        "BEGIN TRANSACTION; CREATE ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;"
+    } else {
+        "BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;"
+    };
+
+    let result = db
+        .query(statement)
+        .bind(("record", record.clone()))
+        .bind(("data", content))
+        .await;
+    let mut result = match result {
+        Ok(result) => result,
+        Err(err) => {
+            let typed = DBError::from(err);
+            return if create_only && matches!(typed, DBError::EmptyResult(_)) {
+                Err(DBError::Conflict("record already exists".to_owned()).into())
+            } else {
+                Err(typed.into())
+            };
+        }
+    };
+    result = match result.check() {
+        Ok(result) => result,
+        Err(err) => {
+            let typed = DBError::from(err);
+            return if create_only && matches!(typed, DBError::EmptyResult(_)) {
+                Err(DBError::Conflict("record already exists".to_owned()).into())
+            } else {
+                Err(typed.into())
+            };
+        }
+    };
+
+    let row: Option<SurrealDbValue> = result.take(1)?;
+    let row = row.ok_or_else(|| {
+        if create_only {
+            DBError::Conflict("record already exists".to_owned())
+        } else {
+            DBError::EmptyResult("persist_explicit_id_primitive")
+        }
+    })?;
+
+    let stored = decode_stored_row_value::<T>(row.into_json_value(), None)?;
+    let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
+    crate::serde_utils::id::normalize_public_id_value(&mut value);
+    Ok(serde_json::from_value(value)?)
+}
+
 fn decode_saved_row<T>(row: SurrealDbValue, id: Value) -> Result<T::Stored>
 where
     T: ForeignModel,
@@ -290,15 +345,7 @@ where
 
     /// Creates a new row at the provided record id.
     pub async fn create_at(id: RecordId, data: T) -> Result<T> {
-        let db = get_db()?;
-        let created: Option<T::Stored> = db
-            .create(id)
-            .content(T::persist_foreign(data).await?)
-            .await?;
-        match created {
-            Some(stored) => Ok(T::hydrate_foreign(stored).await?),
-            None => Err(DBError::Conflict("record already exists".to_owned()).into()),
-        }
+        persist_explicit_id_primitive::<T>(id, data, true).await
     }
 
     /// Upserts a row using [`HasId::id`] as the record id.
@@ -313,16 +360,7 @@ where
 
     /// Upserts a row at the provided record id.
     pub async fn upsert_at(id: RecordId, data: T) -> Result<T> {
-        let db = get_db()?;
-        let content = prepare_content(T::persist_foreign(data).await?)?;
-        db.query(
-            "BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;",
-        )
-            .bind(("record", id.clone()))
-            .bind(("data", content))
-            .await?
-            .check()?;
-        Self::get_record(id).await
+        persist_explicit_id_primitive::<T>(id, data, false).await
     }
 
     /// Fetches a row by full record id.
