@@ -1,11 +1,11 @@
 {
   "milestone": "hydrate-roundtrip",
-  "round": 3,
-  "status": "overridden",
+  "round": 5,
+  "status": "pass",
   "validatorsRun": {
-    "test": {
+    "format": {
       "passed": true,
-      "command": "cargo test --workspace -- --test-threads 8",
+      "command": "cargo fmt --all -- --check",
       "exitCode": 0
     },
     "typecheck": {
@@ -17,66 +17,49 @@
       "passed": true,
       "command": "cargo clippy --workspace --all-targets -- -D warnings",
       "exitCode": 0
+    },
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
     }
   },
   "reviewsSummary": {
     "total": 6,
-    "passed": 3,
-    "failed": 3,
-    "failedFeatures": [
-      "milestone-b-save-return-shared-decode-seam",
-      "milestone-b-nested-foreign-read-consistency",
-      "milestone-b-public-id-hydration-normalization"
-    ]
+    "passed": 6,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "milestone-b-save-return-shared-decode-seam",
-      "severity": "blocking",
-      "description": "successful_foreign_save_matches_all_read_entrypoints still uses list_limit(1) without a fixture that makes the target row uniquely identifiable, so the retained proof remains order-dependent rather than deterministically validating cross-entrypoint consistency for the intended row."
-    },
-    {
-      "featureId": "milestone-b-nested-foreign-read-consistency",
-      "severity": "blocking",
-      "description": "The all-read-entrypoint regression still seeds only one row before asserting list_limit(1), so it does not establish why the target row must be the limited result when multiple candidates could exist."
-    },
-    {
-      "featureId": "milestone-b-public-id-hydration-normalization",
-      "severity": "blocking",
-      "description": "The fix re-review still found that successful_foreign_save_matches_all_read_entrypoints proves only that a sole row is returned, not that list_limit deterministically identifies the intended saved row in an unambiguous multi-row fixture as required by the feature contract."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
-      "target": "skills",
-      "suggestion": "Clarify in rust-library-worker guidance that workers should confirm exact required regression test names exist before treating a zero-tests result as runtime evidence, especially for milestone-specific exact-match acceptance commands.",
-      "evidence": "The review for milestone-b-recursive-foreign-link-normalization found the first exact-match cargo test command returned 0 tests until the worker added the named regression, indicating a repeatable validation pitfall for milestone-driven exact command checks.",
+      "target": "AGENTS.md",
+      "suggestion": "Require completed feature sessions to persist a retrievable handoff artifact and transcript skeleton before a feature can be marked completed.",
+      "evidence": "Hydrate-roundtrip scrutiny still had to reconstruct some completed feature evidence from git history because mission artifacts were missing or inconsistent for multiple worker sessions.",
       "isSystemic": true
     },
     {
-      "target": "skills",
-      "suggestion": "Clarify in rust-library-worker guidance that GitNexus symbol impact lookups may fail for Rust test functions and that workers should promptly fall back to git diff or file-scoped review in that case.",
-      "evidence": "The review for milestone-b-deterministic-list-limit-proof found GitNexus impact could not resolve Rust test functions like successful_foreign_save_matches_all_read_entrypoints and foreign_read_paths_are_consistent_across_get_variants, so the worker had to switch to diff-based review.",
+      "target": "AGENTS.md",
+      "suggestion": "Document that when GitNexus tooling is unavailable in the environment, workers should explicitly record the git-diff fallback in feature handoffs so later scrutiny does not need to infer why required GitNexus checks were absent.",
+      "evidence": "Repo instructions require GitNexus impact/detect checks, but this Windows validation environment exposed no GitNexus tooling and workers repeatedly fell back to git diff/status review without consistent artifact notes.",
       "isSystemic": true
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Document the two-stage hydrate normalization contract in .factory/library during scrutiny synthesis.",
-      "reason": "rejected for now because the knowledge is useful but not required to execute current validation commands, and scrutiny should avoid adding documentation churn unless clearly necessary."
+      "observation": "Add a library note describing repository::normalize_foreign_shapes as the canonical recursive foreign normalization seam.",
+      "reason": "rejected because it is useful architectural knowledge but not required to execute current worker commands, and scrutiny should avoid extra documentation churn during validation synthesis."
     },
     {
-      "observation": "The rust-library-worker skill should be changed because list_limit fixture ambiguity escaped into multiple features.",
-      "reason": "rejected because the existing skill already requires unambiguous list_limit fixtures; the gap was enforcement in reviewed features, not missing guidance."
+      "observation": "Retain a failing review entry for milestone-b-public-id-hydration-normalization in the hydrate-roundtrip synthesis.",
+      "reason": "rejected because features.json now marks that feature as superseded/cancelled and the narrowing corrective feature owns the validated contract going forward."
+    },
+    {
+      "observation": "Retain a failing review entry for milestone-b-recursive-foreign-link-normalization in the hydrate-roundtrip synthesis.",
+      "reason": "rejected because the current milestone queue replaces the original implementation claim with milestone-b-recursive-foreign-link-normalization-evidence-revalidation, whose completed evidence fixes the scrutiny gap for VAL-HYDRATE-003."
     }
   ],
   "previousRound": "C:/Users/admin/appdb/.factory/validation/hydrate-roundtrip/scrutiny/synthesis.json",
-  "orchestratorOverride": {
-    "reason": "The shared proof fix feature milestone-b-deterministic-list-limit-proof already reworked the list/list_limit fixtures used by these hydrate assertions. Validators and focused tests pass, so the remaining blocking issues are stale review findings attached to earlier feature IDs rather than live product or proof failures.",
-    "resolvedByFeatureIds": [
-      "milestone-b-deterministic-list-limit-proof"
-    ],
-    "timestamp": "2026-03-23T13:05:00Z"
-  }
+  "orchestratorOverride": null
 }

@@ -1,0 +1,39 @@
+{
+  "featureId": "milestone-f-focused-regression-matrix-separation",
+  "reviewedAt": "2026-03-24T00:00:00Z",
+  "commitId": null,
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": false,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The worker did not produce or identify a feature-owned implementation commit/diff. The handoff explicitly states the feature remained partial because the focused regression matrix was already present from earlier commits, so there is no concrete feature implementation to review against VAL-TEST-001.",
+    "issues": [
+      {
+        "file": "C:/Users/admin/.factory/missions/fb36f232-36a4-4e47-b2c9-192ab540f0fc/handoffs/2026-03-23T19-37-25-611Z__milestone-f-focused-regression-matrix-separation__22a05869-819a-4dcd-8c12-7f006fbcac32.json",
+        "line": 1,
+        "severity": "blocking",
+        "description": "The feature has no committed implementation artifact: the handoff marks successState as partial, reports that no isolatable diff existed for this feature, and therefore provides no commitId to inspect. Without a feature-owned diff, scrutiny cannot verify that this feature itself established the focused regression matrix promised by VAL-TEST-001."
+      },
+      {
+        "file": "C:/Users/admin/.factory/missions/fb36f232-36a4-4e47-b2c9-192ab540f0fc/features.json",
+        "line": 78,
+        "severity": "blocking",
+        "description": "features.json still marks milestone-f-focused-regression-matrix-separation as completed even though the worker handoff says the work was only partially handled and required orchestrator follow-up. The mission state does not point scrutiny to a concrete commit or proof artifact for this feature."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker procedure assumes a feature can always be driven by adding failing tests first and producing a feature-scoped commit, but this cleanup feature was effectively a validation-mapping/review task after sibling milestone-f commits had already landed the underlying proofs.",
+      "evidence": "The transcript for worker session 22a05869-819a-4dcd-8c12-7f006fbcac32 ends in a partial handoff stating no feature-owned diff existed, while the skill still instructs workers in steps 6-8 and 37-41 to create failing tests, implement, isolate a diff, and commit it."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Mission state does not document how scrutiny should map proof-separation features onto already-landed sibling commits when no dedicated commit exists. This leaves validators and reviewers unable to tie VAL-TEST-001 to a concrete artifact even though the repo contains the relevant focused regressions.",
+      "evidence": "The handoff cites existing tests such as create_at_duplicate_id_returns_typed_conflict, schema_managed_runtime_applies_registered_inventory, decode_raw_row_helper_accepts_string_and_object_record_links, and successful_foreign_save_matches_all_read_entrypoints, but no mission artifact records that these proofs are intentionally satisfied by commits 728f3d5/3ff4d10 or another concrete source."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail: no feature-specific commit or diff was available to review, so the focused-regression-matrix-separation feature lacks auditable implementation evidence even though related focused regressions exist elsewhere in the repo."
+}

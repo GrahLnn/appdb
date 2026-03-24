@@ -1,0 +1,123 @@
+{
+  "featureId": "milestone-f-focused-regression-matrix-separation-evidence",
+  "assertionId": "VAL-TEST-001",
+  "status": "completed",
+  "summary": "Auditable ownership map for the already-landed focused regression matrix and related milestone-f proof surface.",
+  "supersedes": {
+    "featureId": "milestone-f-focused-regression-matrix-separation",
+    "reason": "Historical placeholder was marked completed without a feature-owned artifact or reviewable ownership trail; this corrective evidence feature now solely owns VAL-TEST-001."
+  },
+  "proofSlices": [
+    {
+      "contractSlice": "table_as storage identity is proven independently from other runtime concerns",
+      "featureId": "milestone-f-table-as-storage-identity",
+      "assertionIds": [
+        "VAL-HYDRATE-008"
+      ],
+      "commitId": "728f3d5bef081693db47e380d8609909e63b7a1e",
+      "tests": [
+        "table_as_reuses_target_table_name_and_lookup_metadata",
+        "table_as_alias_preserves_foreign_roundtrip_through_target_table",
+        "table_as_alias_with_nested_foreign_roundtrips_across_all_reads"
+      ],
+      "testFile": "core/tests/integration_db.rs",
+      "whyItMatters": "Shows alias metadata/storage/read identity as a focused proof slice instead of relying on a broad mixed foreign-save regression."
+    },
+    {
+      "contractSlice": "macro-generated alias identity and bridge dispatch use the same storage identity seam",
+      "featureId": "milestone-f-table-as-storage-identity-macro-bridge-fix",
+      "assertionIds": [
+        "VAL-HYDRATE-008"
+      ],
+      "commitId": "a2ad47c271f3a001c6b4004cb2d3243d781154d3",
+      "tests": [
+        "table_as_reuses_target_table_name_and_lookup_metadata",
+        "table_as_alias_preserves_foreign_roundtrip_through_target_table",
+        "table_as_alias_with_nested_foreign_roundtrips_across_all_reads"
+      ],
+      "testFile": "core/tests/integration_db.rs",
+      "whyItMatters": "Separates macro identity/hydration ownership from repository-path changes so scrutiny can audit the full table_as proof surface concretely."
+    },
+    {
+      "contractSlice": "public API recommendation and docs/rustdoc proof are validated separately from runtime semantics",
+      "featureId": "milestone-f-repo-public-internal-api-refactor",
+      "assertionIds": [
+        "VAL-API-001"
+      ],
+      "commitId": "3ff4d10c2a4587db5303c5a28f7507f30121e24f",
+      "tests": [
+        "cargo test -p appdb --test sensitive_compile -- --nocapture",
+        "cargo check --workspace --all-targets",
+        "cargo test --workspace -- --test-threads 8"
+      ],
+      "testFile": "README.md, core/tests/facade_exports.rs",
+      "whyItMatters": "Shows the validation matrix separates documentation/public-surface proof from runtime storage/decode behavior."
+    },
+    {
+      "contractSlice": "decode boundary normalization is proven with a dedicated focused regression rather than by alias/business graph side effects",
+      "featureId": "milestone-e-unified-raw-row-decode-boundary",
+      "assertionIds": [
+        "VAL-HYDRATE-007"
+      ],
+      "commitId": "decfa02",
+      "tests": [
+        "decode_raw_row_helper_accepts_string_and_object_record_links",
+        "raw_query_string_record_links_decode_into_foreign_models",
+        "successful_foreign_save_matches_all_read_entrypoints"
+      ],
+      "testFile": "core/tests/integration_db.rs",
+      "whyItMatters": "Demonstrates decode normalization has its own focused proof slice and is not being inferred from the milestone-f runtime proofs."
+    },
+    {
+      "contractSlice": "schema-managed vs schemaless contracts are proven independently from business graph semantics",
+      "featureId": "milestone-d-schema-managed-vs-schemaless-contract",
+      "assertionIds": [
+        "VAL-SCHEMA-001"
+      ],
+      "commitId": "2d71440",
+      "tests": [
+        "schema_managed_runtime_applies_registered_inventory",
+        "schemaless_foreign_save_bootstraps_child_tables_without_schema_side_effects",
+        "fresh_db_save_requires_no_manual_define_table"
+      ],
+      "testFile": "core/tests/integration_db.rs",
+      "whyItMatters": "Shows schema side effects are not used as implicit proof for unrelated persistence/read semantics."
+    },
+    {
+      "contractSlice": "explicit-id primitive/conflict semantics are proven independently from alias/decode/business graph behavior",
+      "featureId": "milestone-d-explicit-id-persistence-primitive",
+      "assertionIds": [
+        "VAL-SAVE-007"
+      ],
+      "commitId": null,
+      "tests": [
+        "create_at_duplicate_id_returns_typed_conflict",
+        "save_upsert_at_create_at_explicit_id_semantics_are_intentional",
+        "schemaless_upsert_at_bootstraps_plain_explicit_id_table"
+      ],
+      "testFile": "core/tests/integration_db.rs",
+      "whyItMatters": "Records that explicit-id write semantics belong to their own focused regression area rather than being folded into broad integration coverage."
+    }
+  ],
+  "focusedRegressionInventory": {
+    "runtimeFocusedTests": [
+      "create_at_duplicate_id_returns_typed_conflict",
+      "schema_managed_runtime_applies_registered_inventory",
+      "decode_raw_row_helper_accepts_string_and_object_record_links",
+      "table_as_reuses_target_table_name_and_lookup_metadata",
+      "table_as_alias_preserves_foreign_roundtrip_through_target_table",
+      "table_as_alias_with_nested_foreign_roundtrips_across_all_reads",
+      "successful_foreign_save_matches_all_read_entrypoints"
+    ],
+    "compileAndSurfaceProof": [
+      "cargo test -p appdb --test sensitive_compile -- --nocapture",
+      "cargo check --workspace --all-targets",
+      "core/tests/facade_exports.rs"
+    ]
+  },
+  "ownershipConclusion": {
+    "valTest001OwnedBy": "milestone-f-focused-regression-matrix-separation-evidence",
+    "claim": "VAL-TEST-001 is satisfied by an auditable mapping of already-landed focused proofs to their concrete owning feature commits/artifacts, rather than by inferring ownership from unrelated history.",
+    "reconcilesMissionState": true
+  }
+}

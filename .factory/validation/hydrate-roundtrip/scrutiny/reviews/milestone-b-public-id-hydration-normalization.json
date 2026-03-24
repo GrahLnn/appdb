@@ -1,0 +1,45 @@
+{
+  "featureId": "milestone-b-public-id-hydration-normalization",
+  "reviewedAt": "2026-03-24T00:00:00Z",
+  "commitId": "ef275044a3136df8b6ba29f28a843b8de2e98257",
+  "transcriptSkeletonReviewed": false,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The commit restores caller-facing plain ids after foreign hydration, but it also broadens production record-id compatibility and derive behavior beyond this feature's contract. The feature description was scoped to a post-hydration public-id normalization pass plus deterministic list/list_limit proofs; instead the implementation also changed generic RecordId decoding and Store derive-generated stored structs, and it still lacks transcript evidence for the assigned worker session.",
+    "issues": [
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\serde_utils\\id.rs",
+        "line": 182,
+        "severity": "blocking",
+        "description": "`deserialize_record_id_or_compat_string` now converts any non-parseable string into `RecordId::new(\"_\", ...)`, silently manufacturing a fake table-qualified RecordId for arbitrary strings instead of failing decode. This is outside the public-id-normalization contract and weakens stored-row correctness for every RecordId-typed field that now uses this helper."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\macros\\src\\lib.rs",
+        "line": 268,
+        "severity": "blocking",
+        "description": "The feature injects `deserialize_record_id_or_compat_string` into every derive-generated stored `RecordId` field. That is a broad stored-decode policy change, not a narrow post-hydration normalization pass, and it mutates the stored RecordId contract the feature explicitly said not to touch."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\lib.rs",
+        "line": 253,
+        "severity": "non_blocking",
+        "description": "The commit also widens `parse_record_link_string` to accept arbitrary table-agnostic unquoted record-id strings and adds the `decode_record_link_value_accepts_table_agnostic_unquoted_record_ids` regression. That behavior belongs to the later strict/field-aware record-link follow-up work, not this hydrate-roundtrip public-id-normalization feature, so the implementation diff is not cleanly scoped to the assigned contract."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The required worker transcript skeleton for completedWorkerSessionId `aca25603-b384-4150-9bb1-795eeee5e11a` was not present in `worker-transcripts.jsonl`, so transcript review could not be performed even though the feature metadata points to that session.",
+      "evidence": "`features.json` lists `completedWorkerSessionId` as `aca25603-b384-4150-9bb1-795eeee5e11a`, but grep over `C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\worker-transcripts.jsonl` returned no matching entry."
+    },
+    {
+      "area": "knowledge",
+      "observation": "This feature's review required falling back from mission handoff artifacts to git history because no handoff JSON was present for the assigned worker session. The mission shared state does not explain that some completed features may only be recoverable from git commits, which makes scrutiny evidence gathering brittle.",
+      "evidence": "No handoff file matched session `aca25603-b384-4150-9bb1-795eeee5e11a` in `...\\handoffs`, so commit `ef275044a3136df8b6ba29f28a843b8de2e98257` had to be located via `git log --grep` instead."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: the commit does restore plain caller-facing nested ids, but it also introduces broader stored RecordId compatibility changes and derive-time decode rewrites that exceed the feature's stated boundary, and the assigned worker transcript/handoff evidence is missing from mission artifacts."
+}

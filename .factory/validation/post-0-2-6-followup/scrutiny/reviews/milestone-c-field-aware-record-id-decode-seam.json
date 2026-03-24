@@ -1,21 +1,21 @@
 {
   "featureId": "milestone-c-field-aware-record-id-decode-seam",
-  "reviewedAt": "2026-03-23T19:55:04Z",
-  "commitId": "3ff4d10c2a4587db5303c5a28f7507f30121e24f",
+  "reviewedAt": "2026-03-23T20:47:59Z",
+  "commitId": "f2f2a40fed084bc08279163f1704aa6c15f31a2e",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "pass",
   "codeReview": {
-    "summary": "The field-type-aware RecordId compatibility seam is already present in the reviewed baseline: string-form compatibility now enters through deserialize_record_id_or_compat_string for RecordId-typed fields, while the generic decode_record_link_value path remains limited to explicit RecordId-style decoding. The commit delta from ef27504 to 3e529fa tightens global string classification and adds focused coverage without reintroducing ordinary-string coercion, so the feature requirements are met.",
+    "summary": "The implementation satisfies the feature contract. Repository stored-row decoding keeps arbitrary-table string-form RecordId compatibility inside the field-type-aware decode seam (decode_stored_row_value -> normalize_foreign_shapes -> decode_stored_record_links), while the global decode_record_link_value helper is explicitly documented as RecordId-only and no longer the generic rewrite path. Focused regression coverage also proves ordinary colon strings remain unchanged through save/get/get_record.",
     "issues": []
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The worker skill assumes every assigned feature requires fresh failing-test-first implementation work, but this feature was already satisfied by the checked-out milestone baseline and the worker had to switch to verification-only mode. The skill should explicitly document this already-landed-baseline case so workers can follow procedure without looking non-compliant.",
-      "evidence": "Worker handoff for session 268e1563-569b-45f2-b3b6-9dbf2d5b5d99 records followedProcedure=false solely because no edits were needed after verifying the baseline implementation at commit 3ff4d10."
+      "observation": "The rust-library-worker skill still lacks a clear verification-only path for already-landed baseline features, which forced this feature's worker to mark a procedure deviation even though no scoped code edits were necessary.",
+      "evidence": "Handoff C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\handoffs\\2026-03-23T20-33-42-205Z__milestone-c-typed-stored-row-record-id-decode-seam-implementation__75696bfe-9aa5-4ca6-aab7-8db039a1fab3.json reports followedProcedure=false only because the seam was already present in the checked-out baseline."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Pass. I reviewed the feature metadata, worker transcript skeleton, handoff, skill guidance, and the relevant commit history around ef27504 -> 3e529fa -> 3ff4d10. The code keeps arbitrary-table string-form RecordId compatibility on RecordId-typed deserialization while leaving ordinary String payloads untouched, and I found no blocking or non-blocking implementation issues for this feature."
+  "summary": "Pass. I reviewed the feature metadata, worker transcript skeleton, handoff evidence, commit diff, current runtime code, mission/shared-state files, and focused tests. The field-type-aware decode seam is present at the repository boundary, ordinary String payloads are preserved, and I found no blocking or non-blocking code defects for this feature."
 }

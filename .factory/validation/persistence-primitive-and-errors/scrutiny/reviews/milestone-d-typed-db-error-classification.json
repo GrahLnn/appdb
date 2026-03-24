@@ -1,0 +1,40 @@
+{
+  "featureId": "milestone-d-typed-db-error-classification",
+  "reviewedAt": "2026-03-24T05:26:34Z",
+  "commitId": "665414a62b2bc3e31baa9e00398286dc17a62ec5",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The commit narrows two foreign-resolution decision points and a few focused regressions to typed DBError, but it does not fully adopt typed classification across the validated repository/foreign/decode seams required by the feature. Repository runtime still classifies by reparsing strings, and some validated regressions in integration_db.rs still assert raw error text for not-found cases.",
+    "issues": [
+      {
+        "file": "core/src/error.rs",
+        "line": 108,
+        "severity": "blocking",
+        "description": "classify_db_error(&anyhow::Error) still falls back to classify_db_error_message(err.to_string()), so the new helper itself reparses raw error text instead of consuming a surfaced typed category. That means foreign-resolution branches in core/src/lib.rs are still indirectly string-driven, contrary to the feature requirement that runtime decision points stop branching on error-message strings entirely."
+      },
+      {
+        "file": "core/src/repository/mod.rs",
+        "line": 274,
+        "severity": "blocking",
+        "description": "The repository decode seam still constructs DBError::Decode(err.to_string()) directly from serde text. This feature claimed repository, foreign-resolution, and decode seams would all adopt a narrow typed classification layer, but the repository path still relies on message text rather than a shared surfaced typed category."
+      },
+      {
+        "file": "core/tests/integration_db.rs",
+        "line": 2941,
+        "severity": "blocking",
+        "description": "Validated regression coverage still includes raw string assertions for repository/not-found behavior such as err.to_string().contains(Record not found) (also at lines 2973 and 3008). The feature description and expected behavior require regressions to consume typed categories directly rather than reparsing error text, so the adoption is incomplete."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker marked followedProcedure false only because GitNexus was unavailable and fell back to diff review, but the rust-library-worker skill does not explicitly say how to document compliance with the repo-level GitNexus requirement when the tool is missing.",
+      "evidence": "Handoff skillFeedback.deviations for session 8c435011-6bd6-4edf-beb2-0d4e1fcd24d4 records the GitNexus fallback; .factory/skills/rust-library-worker/SKILL.md mentions fallback use but not how to document repo-instruction compliance in the handoff."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail: the commit improves typed error handling in a few spots, but runtime and regression adoption is incomplete because repository/decode paths and some validated tests still depend on raw error strings."
+}

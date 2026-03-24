@@ -1,0 +1,21 @@
+{
+  "featureId": "milestone-b-table-as-nested-foreign-roundtrip",
+  "reviewedAt": "2026-03-23T21:02:37.864254+00:00",
+  "commitId": "e2c1a1c9490f7676e16572ed499000333a7c0099",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature commit adds focused integration coverage for both required alias foreign scenarios and the assertions match the feature contract. The tests prove alias models reuse the target table, hydrate consistently across save/get/get_record/list/list_limit, and store nested foreign references as RecordIds at rest.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker skill still tells implementers to run targeted tests before coding and then full validators, but the transcript skeleton for this worker session could not be retrieved from worker-transcripts.jsonl in the mission artifacts, so scrutiny could not verify whether the procedure was actually followed for this feature.",
+      "evidence": "Mission artifacts contained no retrievable transcript entry for workerSessionId 3f2e9e44-69d9-4db5-a5d6-1412b8d0461e when queried from C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\worker-transcripts.jsonl, despite features.json and the handoff pointing at that completed worker session."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. Commit e2c1a1c adds the expected hydrate-roundtrip regression coverage for table_as alias foreign persistence/hydration, and the reviewed assertions line up with the feature contract. The only triage note is a mission-artifact gap: the worker transcript skeleton for the completed session was not retrievable, limiting procedural review evidence."
+}
