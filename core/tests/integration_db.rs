@@ -1130,6 +1130,58 @@ fn save_upsert_at_create_at_explicit_id_semantics_are_intentional() {
 }
 
 #[test]
+fn create_at_preserves_record_id_table_identity_for_record_id_models() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        reinit_db_with_options(test_db_path(), InitDbOptions::default())
+            .await
+            .expect("schemaless database should initialize");
+
+        let created = Repo::<ItRecordUser>::create_at(
+            RecordId::new("it_record_user", "create-return-record-id"),
+            ItRecordUser {
+                id: RecordId::new("it_record_user", "create-return-record-id"),
+                name: "created".to_owned(),
+            },
+        )
+        .await
+        .expect("create_at should preserve the full record id for RecordId-backed models");
+
+        assert_eq!(
+            created.id,
+            RecordId::new("it_record_user", "create-return-record-id")
+        );
+        assert_eq!(created.name, "created");
+    });
+}
+
+#[test]
+fn upsert_at_preserves_record_id_table_identity_for_record_id_models() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        reinit_db_with_options(test_db_path(), InitDbOptions::default())
+            .await
+            .expect("schemaless database should initialize");
+
+        let upserted = Repo::<ItRecordUser>::upsert_at(
+            RecordId::new("it_record_user", "upsert-return-record-id"),
+            ItRecordUser {
+                id: RecordId::new("it_record_user", "upsert-return-record-id"),
+                name: "upserted".to_owned(),
+            },
+        )
+        .await
+        .expect("upsert_at should preserve the full record id for RecordId-backed models");
+
+        assert_eq!(
+            upserted.id,
+            RecordId::new("it_record_user", "upsert-return-record-id")
+        );
+        assert_eq!(upserted.name, "upserted");
+    });
+}
+
+#[test]
 fn decode_raw_row_invalid_shape_returns_typed_decode_error() {
     let _guard = acquire_test_lock();
     run_async(async {
