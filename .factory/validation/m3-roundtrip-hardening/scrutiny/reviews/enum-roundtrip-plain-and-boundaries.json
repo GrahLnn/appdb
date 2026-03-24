@@ -1,34 +1,21 @@
 {
   "featureId": "enum-roundtrip-plain-and-boundaries",
-  "reviewedAt": "2026-03-24T19:56:56.629595+00:00",
-  "commitId": "8e121b0",
+  "reviewedAt": "2026-03-25T00:00:00Z",
+  "commitId": "8e121b0cb444b506422c7cd2d86fd98034bba728",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
-  "status": "fail",
+  "status": "pass",
   "codeReview": {
-    "summary": "The feature proves only a plain struct-shaped storage fallback, not actual Rust enum roundtrip behavior. It also preserves the direct secure-enum boundary only via a noisy trait-bound failure fixture rather than the macro-level supported-shape contract.",
-    "issues": [
-      {
-        "file": "core/tests/integration_db.rs",
-        "line": 591,
-        "severity": "blocking",
-        "description": "The added 'enum roundtrip' regression does not exercise Rust enums at all: `ItPlainStatus` and `ItPayloadState` are plain structs with string tags / JSON payloads, while `ItPlainEnumProfile` stores those structs. This leaves VAL-ER-001/003/004 unproven because true enum discriminant decoding, payload variant handling, and Option<Enum> behavior are never tested."
-      },
-      {
-        "file": "core/tests/ui/sensitive/secure_enum_direct_rejected.rs",
-        "line": 11,
-        "severity": "non_blocking",
-        "description": "The boundary test relies on a broad trait-bound explosion from the derive expansion instead of a focused supported-shape diagnostic. It still fails as required, but the stderr fixture is large and brittle, making the contract harder to maintain and obscuring the intended direct secure-enum boundary."
-      }
-    ]
+    "summary": "The original feature commit still only preserves the direct secure-enum compile-fail boundary plus m3 groundwork, but the follow-up fix commit 5854f064c65dda6e248ccc40c573bea7918314dc adequately addresses the original blocking gap by replacing the struct stand-ins with focused real-enum Store regressions for plain enum, Option<Enum>, and payload-enum roundtrip through save/get/list/save_many.",
+    "issues": []
   },
   "sharedStateObservations": [
     {
-      "area": "knowledge",
-      "observation": "The worker discovered that SurrealValue-derived Rust enums did not behave as initially expected for this persistence path and pivoted to struct-shaped test fixtures, but that limitation is not recorded in shared library notes even though it directly affects how enum-roundtrip features should be implemented and reviewed.",
-      "evidence": "Transcript skeleton for session c2809228-540c-464c-baf7-bf183cffbe6f shows repeated investigation into surrealdb-types enum derive internals and a later rewrite from enum fixtures to `ItPlainStatus` / `ItPayloadState` structs before committing only tests."
+      "area": "skills",
+      "observation": "The rust-library-worker skill says to add or update focused failing tests first, but the fix worker explicitly skipped that step because the needed proof was already present in the checked-out change. The skill should document this already-implemented verification-only path so workers do not have to record it as a deviation.",
+      "evidence": "Handoff for session 5a49229c-8062-44d6-9b26-dd2c49d38e13: skillFeedback.followedProcedure=false with a deviation on step 5 and a suggested skill change."
     }
   ],
-  "addressesFailureFrom": null,
-  "summary": "Review failed: the committed change adds coverage, but not for the promised Rust enum scenarios. The main regression test stores struct stand-ins instead of real enums, so the feature does not actually prove plain enum / Option<Enum> / payload enum roundtrip through Store APIs."
+  "addressesFailureFrom": ".factory/validation/m3-roundtrip-hardening/scrutiny/reviews/enum-roundtrip-plain-and-boundaries.json",
+  "summary": "Review now passes. The prior failure in commit 8e121b0 was real: core/tests/integration_db.rs used struct stand-ins (`ItPlainStatus`, `ItPayloadState`) rather than Rust enums for the plain Store proof. The follow-up fix is adequate because current coverage validates the secure-enum boundary separately while the real-enum proof feature owns and verifies the missing plain enum, Option<Enum>, and payload-enum Store roundtrip contract."
 }

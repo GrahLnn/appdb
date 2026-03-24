@@ -1,0 +1,34 @@
+{
+  "featureId": "enum-roundtrip-real-enum-proof-fix",
+  "reviewedAt": "2026-03-24T20:07:36.869715+00:00",
+  "commitId": "5854f064c65dda6e248ccc40c573bea7918314dc",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature handoff claims commit 5854f064 proves real Rust enum roundtrip behavior, but that commit contains no product or test-code changes and HEAD still uses struct stand-ins in the targeted plain Store regression. As a result, the claimed VAL-ER-001/003/004 proof remains absent.",
+    "issues": [
+      {
+        "file": "core/tests/integration_db.rs",
+        "line": 5788,
+        "severity": "blocking",
+        "description": "plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many still persists ItPlainStatus and ItPayloadState, which are struct wrappers carrying kind/\u000balue fields rather than actual Rust enums. That means the test does not prove real enum discriminant decoding, Option<Enum> handling, or payload-enum persistence through save/get/list/save_many, so VAL-ER-001, VAL-ER-003, and VAL-ER-004 remain unproven."
+      },
+      {
+        "file": ".factory/validation/m3-roundtrip-hardening/scrutiny/reviews/enum-roundtrip-plain-and-boundaries.json",
+        "line": 1,
+        "severity": "blocking",
+        "description": "The reviewed commit only rewrites existing validation JSON files and does not modify the Rust workspace at all, so it cannot satisfy a fix feature whose description promises replacement of struct stand-ins with actual enum-based proofs."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker reported success for a fix feature without adding or updating any failing-first regression and without noticing that the referenced commit changed only validation artifacts. The current rust-library-worker guidance allows verification-only handoffs when a feature appears already present, but it does not force a diff-level sanity check that the cited commit actually touches the promised code/test surface.",
+      "evidence": "worker-transcripts.jsonl session 5a49229c-8062-44d6-9b26-dd2c49d38e13 shows only read/grep/test commands plus a clean-tree handoff, while git show 5854f064c65dda6e248ccc40c573bea7918314dc changes only .factory/validation/m3-roundtrip-hardening/** JSON files."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/m3-roundtrip-hardening/scrutiny/reviews/enum-roundtrip-plain-and-boundaries.json",
+  "summary": "Fail. The supposed fix commit does not touch the enum proof tests, and the plain Store regression still uses struct stand-ins instead of real Rust enums. The original scrutiny failure is therefore not addressed."
+}

@@ -28,12 +28,13 @@ None
 6. Run the new or updated tests and confirm they fail for the intended reason before implementation. Record that failing-first proof in the handoff; if you cannot keep the failing test in-tree because the path is structurally impossible, mark that as a deviation explicitly.
 7. Implement the minimal coherent runtime/macro change needed to satisfy the feature. Prefer replacing inferior/manual paths over preserving them as the main path.
 8. If a feature appears to be “already implemented” by inherited code, do not assume success. Prove the exact contract with focused tests; if the promised behavior is missing, keep the feature in failure/partial state instead of treating the inherited path as complete.
-9. Re-run focused tests until they pass, then run broader validators appropriate to the touched surface from `.factory/services.yaml`.
-10. Verify adjacent behavior that could regress:
+9. In any verification-only or follow-up-proof session, confirm the commit surface actually touches the promised code or test files before marking success. If the feature claims to replace or strengthen a regression, the handoff must name the edited files and explain how they changed.
+10. Re-run focused tests until they pass, then run broader validators appropriate to the touched surface from `.factory/services.yaml`.
+11. Verify adjacent behavior that could regress:
    - scalar secure fields still work
    - unsupported direct secure-enum syntax stays out of scope
    - batch/save_many behavior remains correct where relevant
-11. Produce a handoff with exact commands, observed outcomes, tests added/updated, and any discovered issues or follow-up gaps.
+12. Produce a handoff with exact commands, observed outcomes, tests added/updated, touched files, and any discovered issues or follow-up gaps.
 
 ## Example Handoff
 
