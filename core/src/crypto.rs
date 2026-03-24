@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use thiserror::Error;
 #[cfg(target_os = "windows")]
 use windows::core::PCWSTR;
@@ -85,6 +85,7 @@ pub trait SensitiveFieldTag {
             field_tag: "",
             service: None,
             account: None,
+            secure_fields: &[],
         };
         &DEFAULT
     }
@@ -97,6 +98,7 @@ pub struct SensitiveFieldMetadata {
     pub field_tag: &'static str,
     pub service: Option<&'static str>,
     pub account: Option<&'static str>,
+    pub secure_fields: &'static [SensitiveFieldMetadata],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +161,8 @@ type ResolverKey = (&'static str, &'static str);
 
 static CRYPTO_RESOLVER_REGISTRY: LazyLock<RwLock<HashMap<ResolverKey, Arc<CryptoContext>>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+static AUTO_CRYPTO_REGISTRY: LazyLock<RwLock<HashMap<&'static str, Arc<OnceLock<()>>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Registers a crypto context for the generated tag of one secure field.
 pub fn register_crypto_context_for<Tag>(context: CryptoContext)
@@ -182,6 +186,10 @@ pub fn clear_crypto_context_registry() {
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clear();
+    AUTO_CRYPTO_REGISTRY
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
 }
 
 /// Resolves a previously registered crypto context by generated field tag.
@@ -189,6 +197,7 @@ pub fn resolve_crypto_context_for<Tag>() -> Result<Arc<CryptoContext>, CryptoErr
 where
     Tag: SensitiveFieldTag,
 {
+    ensure_sensitive_model_ready::<Tag>()?;
     resolve_crypto_context(CryptoTag::new(Tag::model_tag(), Tag::field_tag()))
 }
 
@@ -203,6 +212,59 @@ pub fn resolve_crypto_context(tag: CryptoTag) -> Result<Arc<CryptoContext>, Cryp
             model_tag: tag.model,
             field_tag: tag.field,
         })
+}
+
+fn ensure_sensitive_model_ready<Tag>() -> Result<(), CryptoError>
+where
+    Tag: SensitiveFieldTag,
+{
+    let model_tag = Tag::model_tag();
+    if CRYPTO_RESOLVER_REGISTRY
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .contains_key(&(model_tag, Tag::field_tag()))
+    {
+        return Ok(());
+    }
+
+    let once = {
+        let mut registry = AUTO_CRYPTO_REGISTRY
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        registry
+            .entry(model_tag)
+            .or_insert_with(|| Arc::new(OnceLock::new()))
+            .clone()
+    };
+
+    if once.get().is_none() {
+        register_model_crypto_fields::<Tag>()?;
+        let _ = once.set(());
+    }
+    Ok(())
+}
+
+fn register_model_crypto_fields<Tag>() -> Result<(), CryptoError>
+where
+    Tag: SensitiveFieldTag,
+{
+    for meta in Tag::crypto_metadata().secure_fields {
+        let context = Arc::new(build_context_for_metadata(&meta)?);
+        CRYPTO_RESOLVER_REGISTRY
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry((meta.model_tag, meta.field_tag))
+            .or_insert(context);
+    }
+    Ok(())
+}
+
+fn build_context_for_metadata(meta: &SensitiveFieldMetadata) -> Result<CryptoContext, CryptoError> {
+    let defaults = default_crypto_config();
+    let service = meta.service.unwrap_or(defaults.service.as_str());
+    let account = meta.account.unwrap_or(defaults.account.as_str());
+    let provider = KeyringKeyProvider::new(service, account)?;
+    CryptoContext::from_provider(&provider)
 }
 
 /// Source of a symmetric encryption key for [`CryptoContext`].
