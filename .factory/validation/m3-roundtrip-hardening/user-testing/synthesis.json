@@ -1,0 +1,24 @@
+{
+  "milestone": "m3-roundtrip-hardening",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-ER-001",
+    "VAL-ER-002",
+    "VAL-ER-003",
+    "VAL-ER-004",
+    "VAL-ER-005",
+    "VAL-CROSS-003",
+    "VAL-CROSS-005"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}

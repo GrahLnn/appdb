@@ -81,6 +81,17 @@ struct Profile {
 
 The model still uses the same `Store` APIs, while secure fields are encrypted before persistence and decrypted on read.
 
+Sensitive models now auto-register their crypto metadata on first runtime use, so the default `Store`/resolver paths do not require manual registration code. You can override the defaults globally with `appdb::crypto::set_default_crypto_service`, `set_default_crypto_account`, or `set_default_crypto_config`, and refine a model or field with `#[crypto(...)]`.
+
+Supported secure shapes include:
+
+- `String`
+- `Option<String>`
+- nested `Sensitive` children such as `Child`, `Option<Child>`, and `Vec<Child>`
+- enum-bearing leaves inside a secure container via `SensitiveValueOf<T>`
+
+Every `Sensitive` model also exposes stable secure-field metadata through `Model::secure_fields()`.
+
 ### Foreign fields
 
 Use `#[foreign]` on supported child model fields to persist related values as record links while hydrating them back into full models when reading.
