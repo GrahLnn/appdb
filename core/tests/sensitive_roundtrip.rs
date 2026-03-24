@@ -4,7 +4,7 @@ use appdb::crypto::{
     set_default_crypto_service, CryptoContext, CryptoError, SensitiveFieldTag,
     SensitiveModelTag,
 };
-use appdb::Sensitive;
+use appdb::{Sensitive, SensitiveShape};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
@@ -104,6 +104,28 @@ struct OptionalNestedSensitiveParent {
 
     #[secure]
     pub child: Option<NestedSensitiveChild>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+struct OverrideNestedSensitiveLeaf {
+    pub label: String,
+
+    #[secure]
+    pub secret: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+#[crypto(service = "nested-runtime", account = "runtime-master")]
+struct OverrideNestedSensitiveParent {
+    pub alias: String,
+
+    #[secure]
+    #[crypto(field_account = "runtime-left")]
+    pub left: OverrideNestedSensitiveLeaf,
+
+    #[secure]
+    #[crypto(field_account = "runtime-right")]
+    pub right: OverrideNestedSensitiveLeaf,
 }
 
 #[test]
@@ -470,6 +492,73 @@ fn sensitive_nested_option_roundtrip_preserves_some_and_none() {
         OptionalNestedSensitiveParent::decrypt_with_runtime_resolver(&encrypted_none)
             .expect("nested option none should decrypt"),
         none_parent
+    );
+
+    unsafe {
+        std::env::remove_var("LOCALAPPDATA");
+    }
+    let _ = std::fs::remove_dir_all(local_appdata);
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+}
+
+#[test]
+fn sensitive_nested_override_sibling_contexts_do_not_cross_decrypt() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+    let local_appdata = crypto_test_local_appdata("nested-override-isolation");
+    unsafe {
+        std::env::set_var("LOCALAPPDATA", &local_appdata);
+    }
+
+    let parent = OverrideNestedSensitiveParent {
+        alias: "parent".into(),
+        left: OverrideNestedSensitiveLeaf {
+            label: "left".into(),
+            secret: "left-secret".into(),
+        },
+        right: OverrideNestedSensitiveLeaf {
+            label: "right".into(),
+            secret: "right-secret".into(),
+        },
+    };
+
+    let encrypted = parent
+        .encrypt_with_runtime_resolver()
+        .expect("nested override parent should encrypt");
+
+    let left_ctx =
+        appdb::crypto::resolve_crypto_context_for::<AppdbSensitiveFieldTagOverrideNestedSensitiveParentLeft>()
+            .expect("left context should resolve");
+    let right_ctx =
+        appdb::crypto::resolve_crypto_context_for::<AppdbSensitiveFieldTagOverrideNestedSensitiveParentRight>()
+            .expect("right context should resolve");
+
+    assert_eq!(
+        OverrideNestedSensitiveLeaf::decrypt_with_context(&encrypted.left, &left_ctx)
+            .expect("left leaf should decrypt with left context"),
+        parent.left
+    );
+    assert_eq!(
+        OverrideNestedSensitiveLeaf::decrypt_with_context(&encrypted.right, &right_ctx)
+            .expect("right leaf should decrypt with right context"),
+        parent.right
+    );
+    assert!(matches!(
+        OverrideNestedSensitiveLeaf::decrypt_with_context(&encrypted.left, &right_ctx),
+        Err(CryptoError::Decrypt)
+    ));
+    assert!(matches!(
+        OverrideNestedSensitiveLeaf::decrypt_with_context(&encrypted.right, &left_ctx),
+        Err(CryptoError::Decrypt)
+    ));
+    assert_eq!(
+        OverrideNestedSensitiveParent::decrypt_with_runtime_resolver(&encrypted)
+            .expect("runtime resolver should still decrypt the full parent"),
+        parent
     );
 
     unsafe {
