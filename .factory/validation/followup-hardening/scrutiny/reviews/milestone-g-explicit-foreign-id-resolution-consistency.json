@@ -1,21 +1,21 @@
 {
   "featureId": "milestone-g-explicit-foreign-id-resolution-consistency",
-  "reviewedAt": "2026-03-24T10:42:13.595Z",
+  "reviewedAt": "2026-03-24T11:05:00Z",
   "commitId": "b2f2e585147214529b5bb035cfd184dc5a634b7d",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "pass",
   "codeReview": {
-    "summary": "The feature correctly hardens the explicit-id foreign persistence seam: matching explicit/resolved ids still follow the existing ensure-or-reuse path, while mismatches now fail deterministically before either row can be reused or created. The added regression exercises the mismatch seam directly and verifies both addressed ids remain absent, covering the intended failure boundary for VAL-G-FOREIGN-002 without regressing the existing VAL-G-FOREIGN-001 behaviors already covered by neighboring integration tests.",
+    "summary": "The feature correctly tightens explicit-id foreign persistence: matching serialized and resolved ids still reuse or ensure the explicit row, while divergent ids now fail with a deterministic InvalidModel error before any persistence. The added regression covers the divergence seam and confirms neither candidate row is written.",
     "issues": []
   },
   "sharedStateObservations": [
     {
-      "area": "skills",
-      "observation": "No skill gap observed for this feature review; the worker followed the rust-library-worker procedure, including focused regression coverage and validation, with an explicit fallback note when GitNexus tooling was unavailable.",
-      "evidence": "Handoff skillFeedback.followedProcedure=true; transcript shows targeted regression added in core/tests/integration_db.rs and targeted cargo tests plus cargo check run before handoff."
+      "area": "conventions",
+      "observation": "The mission and repo guidance require pre-edit GitNexus impact analysis, but GitNexus tooling was unavailable and the worker fell back to direct source inspection plus git diff review.",
+      "evidence": "worker-transcripts.jsonl line 3 and handoff.discoveredIssues note gitnexus_impact/gitnexus_detect_changes were unavailable; mission AGENTS.md says to use git diff fallback when tooling is unavailable."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Reviewed commit b2f2e58 and the worker transcript for milestone-g-explicit-foreign-id-resolution-consistency. The implementation satisfies VAL-G-FOREIGN-001 and VAL-G-FOREIGN-002, and I found no blocking or non-blocking code issues in the reviewed scope."
+  "summary": "Reviewed handoff, transcript skeleton, skill procedure, and commit b2f2e58. The implementation satisfies the milestone behavior: explicit/resolved foreign-id mismatches now fail deterministically and audibly at the seam, while the existing matching explicit-id and reuse flows remain covered by the retained regressions."
 }

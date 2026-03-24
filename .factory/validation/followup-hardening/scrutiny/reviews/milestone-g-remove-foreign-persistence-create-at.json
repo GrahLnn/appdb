@@ -1,21 +1,21 @@
 {
   "featureId": "milestone-g-remove-foreign-persistence-create-at",
-  "reviewedAt": "2026-03-24T10:51:25Z",
+  "reviewedAt": "2026-03-24T11:04:02Z",
   "commitId": "9f3ec69ef54ebd0f23ceffe3df9d22c2acd8b04b",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "pass",
   "codeReview": {
-    "summary": "The feature correctly narrows the public ForeignPersistence protocol by removing create_at, preserves explicit-id flows through exists_record + ensure_at, and leaves lookup-driven creation on create with no correctness issues found.",
+    "summary": "The feature cleanly narrows the foreign-persistence protocol by removing public `create_at`, updates the runtime seam to keep explicit-id writes on `ensure_at` and non-explicit creation on `create`, and updates the injected recording mock so the seam regression still proves the intended call sequence. I found no correctness gaps relative to the feature description or expected behavior.",
     "issues": []
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The worker could not load the rust-library-worker skill from the path implied by the review instructions because the skill file lives under the repo-local .factory tree, not the user-level .factory tree the generic review prompt suggests.",
-      "evidence": "Review task required reading .factory/skills/<skillName>/SKILL.md; C:\\Users\\admin\\.factory\\skills\\rust-library-worker\\SKILL.md was missing, while the worker transcript for session bbca4d1c-3ceb-47fc-b160-1e0392b90078 shows the actual workflow relied on repo-local guidance and completed successfully."
+      "observation": "The `rust-library-worker` skill still requires writing or updating a failing regression first, but this feature was a trait-surface deletion already covered by existing focused regressions. The worker had to deviate and document that no new failing test was necessary.",
+      "evidence": ".factory/skills/rust-library-worker/SKILL.md step 3 requires a failing regression first; worker handoff skillFeedback for session bbca4d1c-3ceb-47fc-b160-1e0392b90078 records a justified deviation because `foreign_resolution_can_use_injected_persistence_context` and `foreign_child_with_explicit_id_is_auto_persisted_when_missing` already covered the narrowed contract."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Reviewed handoff, commit 9f3ec69, transcript skeleton, mission guidance, and relevant source/tests. The narrowed ForeignPersistence surface satisfies VAL-G-PROTOCOL-001/002/003, and no blocking or non-blocking code defects were identified."
+  "summary": "Reviewed handoff, transcript skeleton, commit diff, and shared-state docs for feature `milestone-g-remove-foreign-persistence-create-at`. The implementation satisfies the milestone behavior: `ForeignPersistence` now exposes only `exists_record`, `ensure_at`, and `create`; runtime explicit-id foreign persistence still uses `ensure_at`; and the seam test mock was updated without preserving a parallel `create_at` path. No blocking or non-blocking code issues found."
 }
