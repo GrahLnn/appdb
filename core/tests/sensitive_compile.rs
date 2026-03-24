@@ -22,6 +22,7 @@ fn sensitive_macro_rules_are_enforced() {
     tests.compile_fail("tests/ui/sensitive/secure_then_unique.rs");
     tests.compile_fail("tests/ui/sensitive/unique_then_secure.rs");
     tests.compile_fail("tests/ui/sensitive/no_legal_non_secure_lookup.rs");
+    tests.compile_fail("tests/ui/sensitive/secure_enum_direct_rejected.rs");
     tests.pass("tests/ui/sensitive/nested_trait_bounds_compile_pass.rs");
     tests.compile_fail("tests/ui/store/multiple_id_fields.rs");
     tests.compile_fail("tests/ui/store/nested_ref_non_store_child.rs");
