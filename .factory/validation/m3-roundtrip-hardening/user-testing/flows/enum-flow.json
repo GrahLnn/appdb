@@ -1,0 +1,98 @@
+{
+  "surface": "cargo",
+  "groupId": "enum-flow",
+  "assertions": [
+    {
+      "id": "VAL-ER-001",
+      "status": "pass",
+      "evidence": [
+        "core/tests/integration_db.rs::plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many",
+        "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test integration_db plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many -- --nocapture -> ok (1 passed)",
+        "raw-row-check via load_plain_enum_profile_raw assertions for status/optional_status/state JSON values at rest"
+      ],
+      "reason": "Mapped to plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many; verified save/get/list/save_many and raw stored enum JSON."
+    },
+    {
+      "id": "VAL-ER-002",
+      "status": "pass",
+      "evidence": [
+        "core/tests/integration_db.rs::sensitive_contained_enum_fields_roundtrip_through_save_get_list_and_save_many",
+        "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test integration_db sensitive_contained_enum_fields_roundtrip_through_save_get_list_and_save_many -- --nocapture -> ok (1 passed)",
+        "raw-row-check via load_sensitive_runtime_seam_parent_raw assertions ensuring ciphertext differs from serialized plaintext and omits enum plaintext markers"
+      ],
+      "reason": "Mapped to sensitive_contained_enum_fields_roundtrip_through_save_get_list_and_save_many; verified save/get/list/save_many plus encrypted-at-rest check."
+    },
+    {
+      "id": "VAL-ER-003",
+      "status": "pass",
+      "evidence": [
+        "core/tests/integration_db.rs::plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many",
+        "core/tests/integration_db.rs::sensitive_contained_enum_fields_roundtrip_through_save_get_list_and_save_many",
+        "plain command -> ok; sensitive command -> ok",
+        "Observed Some(...) and None coverage in optional_status across plain and sensitive save/get/list/save_many cases"
+      ],
+      "reason": "Optional enum coverage is split across the plain and sensitive-contained enum tests; together they verify Some and None roundtrip behavior."
+    },
+    {
+      "id": "VAL-ER-004",
+      "status": "pass",
+      "evidence": [
+        "core/tests/integration_db.rs::plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many",
+        "core/tests/integration_db.rs::sensitive_contained_enum_fields_roundtrip_through_save_get_list_and_save_many",
+        "plain command -> ok; sensitive command -> ok",
+        "Observed payload enum variants Draft and Published with preserved note/version/tags payloads and batch row association"
+      ],
+      "reason": "Payload-carrying enum behavior is exercised by ItPayloadState in the plain test and ItSensitiveRuntimeSeamState in the sensitive-contained test."
+    },
+    {
+      "id": "VAL-ER-005",
+      "status": "pass",
+      "evidence": [
+        "core/tests/sensitive_compile.rs::sensitive_macro_rules_are_enforced",
+        "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test sensitive_compile sensitive_macro_rules_are_enforced -- --nocapture -> ok (1 passed)",
+        "trybuild compile-fail case tests/ui/sensitive/secure_enum_direct_rejected.rs [should fail to compile] ... ok"
+      ],
+      "reason": "Direct #[secure] enum syntax remains rejected by the compile-fail trybuild coverage."
+    },
+    {
+      "id": "VAL-CROSS-003",
+      "status": "pass",
+      "evidence": [
+        "core/tests/integration_db.rs::enum_roundtrip_remains_correct_when_nested_overrides_are_present",
+        "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test integration_db enum_roundtrip_remains_correct_when_nested_overrides_are_present -- --nocapture -> ok (1 passed)",
+        "raw-row-check via load_nested_override_parent_raw and load_sensitive_runtime_seam_parent_raw assertions confirming encrypted override leaves and no plaintext enum markers"
+      ],
+      "reason": "Verified enum save/get/list/save_many remain exact while nested override-encrypted leaves coexist."
+    },
+    {
+      "id": "VAL-CROSS-005",
+      "status": "pass",
+      "evidence": [
+        "core/tests/integration_db.rs::save_many_mixed_sensitive_rows_preserve_auto_ensure_and_isolation_semantics",
+        "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test integration_db save_many_mixed_sensitive_rows_preserve_auto_ensure_and_isolation_semantics -- --nocapture -> ok (1 passed)",
+        "Observed mixed save_many coverage for default sensitive rows, nested override rows, and enum-bearing rows with raw-row encryption/isolation assertions"
+      ],
+      "reason": "Mapped to save_many_mixed_sensitive_rows_preserve_auto_ensure_and_isolation_semantics; verified batch auto-ensure and isolation across mixed row classes, including enum-bearing data."
+    }
+  ],
+  "toolsUsed": [
+    "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test integration_db plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many -- --nocapture",
+    "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test integration_db sensitive_contained_enum_fields_roundtrip_through_save_get_list_and_save_many -- --nocapture",
+    "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test integration_db enum_roundtrip_remains_correct_when_nested_overrides_are_present -- --nocapture",
+    "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test integration_db save_many_mixed_sensitive_rows_preserve_auto_ensure_and_isolation_semantics -- --nocapture",
+    "cargo test --manifest-path \"C:\\Users\\admin\\appdb\\core\\Cargo.toml\" --test sensitive_compile sensitive_macro_rules_are_enforced -- --nocapture"
+  ],
+  "frictions": [
+    {
+      "description": "A combined cargo test invocation with two exact test names failed because cargo accepts only one TESTNAME filter positional argument. Recovered by running exact test-name filters separately.",
+      "resolved": true,
+      "affectedAssertions": [
+        "VAL-ER-001",
+        "VAL-ER-002",
+        "VAL-ER-003",
+        "VAL-ER-004"
+      ]
+    }
+  ],
+  "blockers": []
+}
