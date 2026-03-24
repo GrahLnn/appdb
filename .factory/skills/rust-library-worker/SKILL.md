@@ -18,13 +18,20 @@ None
 ## Work Procedure
 
 1. Read the assigned feature plus `mission.md`, mission `AGENTS.md`, `.factory/library/*.md`, and `.factory/services.yaml`.
-2. Inspect the relevant runtime and test seams before editing. If GitNexus tooling is unavailable, note the fallback and use direct source inspection.
-3. Write or update focused failing regression tests first in the relevant Rust test surface.
-4. Implement the runtime or protocol change only after the regression fails for the intended reason.
-5. Run the feature's targeted cargo tests until they pass.
-6. Run broader validators from `.factory/services.yaml` that are appropriate before handoff.
-7. Verify no inferior parallel path or compatibility shim remains when the feature intends to narrow semantics.
-8. Produce a handoff with exact commands, observed outcomes, tests added/updated, and any discovered issues.
+2. Inspect the exact runtime/macro/test seams before editing. For this repo, that often means `macros/src/lib.rs`, `core/src/crypto.rs`, `core/src/lib.rs`, and the relevant files under `core/tests/`.
+3. If GitNexus tooling is unavailable, explicitly note the fallback and use direct source inspection plus focused grep/diff review.
+4. Add or update focused failing tests first. Prefer the narrowest meaningful surface:
+   - compile/UI tests for derive syntax, unsupported shapes, and trait-bound regressions
+   - `sensitive_roundtrip` for runtime encryption/decryption behavior
+   - focused `integration_db` cases for Store/save/get/list/save_many behavior
+5. Run the new or updated tests and confirm they fail for the intended reason before implementation.
+6. Implement the minimal coherent runtime/macro change needed to satisfy the feature. Prefer replacing inferior/manual paths over preserving them as the main path.
+7. Re-run focused tests until they pass, then run broader validators appropriate to the touched surface from `.factory/services.yaml`.
+8. Verify adjacent behavior that could regress:
+   - scalar secure fields still work
+   - unsupported direct secure-enum syntax stays out of scope
+   - batch/save_many behavior remains correct where relevant
+9. Produce a handoff with exact commands, observed outcomes, tests added/updated, and any discovered issues or follow-up gaps.
 
 ## Example Handoff
 
@@ -70,3 +77,4 @@ None
 - The feature requires changing mission assertions or milestone structure.
 - Current behavior conflicts with the requested narrowing and cannot be resolved without a user-level product decision.
 - The validation path is blocked by external environment issues you cannot repair locally.
+- The feature reveals a broader design split that should become its own follow-up feature rather than being hidden behind a compatibility shim.

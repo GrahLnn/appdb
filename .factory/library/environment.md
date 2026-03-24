@@ -7,6 +7,11 @@ Environment variables, external dependencies, and setup notes.
 
 ---
 
-- No new external credentials or services are required for this follow-up mission.
+- No new external credentials or services are required for this mission.
 - Validation uses the existing Rust workspace and Cargo toolchain in the local repo.
 - Windows environment: treat `.sh` files as text instructions only.
+- Planned default crypto behavior for this mission:
+  - tests use a deterministic test provider/key path
+  - non-test default provider uses keyring
+  - default service is `appdb` unless overridden globally
+  - default account is `master-sensitive` unless overridden globally
