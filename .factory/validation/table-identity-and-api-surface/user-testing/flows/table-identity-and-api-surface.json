@@ -1,0 +1,120 @@
+{
+  "groupId": "table-identity-and-api-surface",
+  "testedAt": "2026-03-24T03:43:41.360897Z",
+  "isolation": {
+    "surface": "cargo-test",
+    "repoRoot": "C:\\Users\\admin\\appdb",
+    "missionDir": "C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc"
+  },
+  "toolsUsed": [
+    "cargo test",
+    "file review"
+  ],
+  "commandsRun": [
+    "cargo test -p appdb --test integration_db table_as_reuses_target_table_name_and_lookup_metadata -- --exact --nocapture",
+    "cargo test -p appdb --test integration_db table_as_alias_preserves_foreign_roundtrip_through_target_table -- --exact --nocapture",
+    "cargo test -p appdb --test integration_db table_as_alias_with_nested_foreign_roundtrips_across_all_reads -- --exact --nocapture",
+    "cargo test -p appdb --test facade_exports -- --nocapture"
+  ],
+  "assertions": [
+    {
+      "id": "VAL-HYDRATE-008",
+      "title": "table_as is a first-class storage identity across reads and foreign hydration",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run focused metadata/lookup table_as regression",
+          "expected": "Alias metadata and lookup helpers resolve through the target storage identity",
+          "observed": "table_as_reuses_target_table_name_and_lookup_metadata passed"
+        },
+        {
+          "action": "Run focused alias foreign roundtrip regression",
+          "expected": "save/get/list/list_limit keep alias reads consistent while storing target-table RecordIds",
+          "observed": "table_as_alias_preserves_foreign_roundtrip_through_target_table passed"
+        },
+        {
+          "action": "Run focused nested alias hydration regression",
+          "expected": "get/get_record/list/list_limit hydrate nested alias foreign graphs consistently",
+          "observed": "table_as_alias_with_nested_foreign_roundtrips_across_all_reads passed"
+        },
+        {
+          "action": "Review macro-generated identity seams",
+          "expected": "Derived HasId/ResolveRecordId and Bridge hydration use canonical storage identity",
+          "observed": "macros/src/lib.rs uses ModelMeta::storage_table() for HasId/ResolveRecordId and Bridge hydrate dispatch matches payload storage_table()"
+        }
+      ],
+      "evidence": {
+        "files": [
+          "table-identity-and-api-surface/table-identity-and-api-surface/VAL-HYDRATE-008-table-identity-tests.txt"
+        ],
+        "consoleErrors": "n/a (cargo test surface)",
+        "network": "n/a",
+        "rawStorage": "integration_db helpers/assertions cover target-table RecordId storage for alias-backed parent and nested alias rows"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-API-001",
+      "title": "README and rustdoc distinguish recommended public API from internal helpers",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Review README public API guidance",
+          "expected": "README steers callers to model-level CRUD and distinguishes internal Repo helpers",
+          "observed": "README recommends model save/save_many/create/get/list and explicitly de-emphasizes appdb::repository::Repo::<T> as internal/helper-oriented"
+        },
+        {
+          "action": "Review schema contract guidance in README",
+          "expected": "README separates schema-managed startup from schemaless persistence guarantees",
+          "observed": "README explicitly separates DbRuntime::open*/init_db* managed startup from schemaless save/upsert persistence guarantees"
+        },
+        {
+          "action": "Review generated rustdoc/API comments and compile surface",
+          "expected": "Inherent API docs and facade tests reinforce the intended public path",
+          "observed": "macros/src/lib.rs docs mark generated model methods as the recommended Store CRUD surface; cargo test -p appdb --test facade_exports passed"
+        }
+      ],
+      "evidence": {
+        "files": [
+          "table-identity-and-api-surface/table-identity-and-api-surface/VAL-API-001-api-surface-review.txt"
+        ],
+        "consoleErrors": "n/a (cargo test surface)",
+        "network": "n/a"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-TEST-001",
+      "title": "Regression matrix separates schema side effects from business semantics",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Review integration test matrix around milestone assertions",
+          "expected": "Focused regressions exist per contract area instead of one broad side-effect-heavy proof",
+          "observed": "core/tests/integration_db.rs contains separate focused tests for schema bootstrap, explicit-id persistence, decode behavior, table_as identity, and read consistency"
+        },
+        {
+          "action": "Review milestone scrutiny evidence",
+          "expected": "Mission artifacts map validation ownership to discrete proof slices",
+          "observed": "milestone-f-focused-regression-matrix-separation-evidence.json passed and synthesis.json reports the milestone reviews passed"
+        },
+        {
+          "action": "Cross-check nearby focused examples",
+          "expected": "Concrete tests independently prove schema, persistence, alias, and decode promises",
+          "observed": "Named focused tests include fresh_db_save_requires_no_manual_define_table, schemaless_foreign_save_bootstraps_child_tables_without_schema_side_effects, and three table_as-specific regressions"
+        }
+      ],
+      "evidence": {
+        "files": [
+          "table-identity-and-api-surface/table-identity-and-api-surface/VAL-TEST-001-regression-matrix-review.txt"
+        ],
+        "consoleErrors": "n/a (cargo test surface)",
+        "network": "n/a"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Validated 3 assigned assertions on the cargo-test/file-review surface: VAL-HYDRATE-008 passed via three focused table_as regressions plus macro identity review, VAL-API-001 passed via README/rustdoc/facade export evidence, and VAL-TEST-001 passed via focused regression-matrix and scrutiny evidence."
+}

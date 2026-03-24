@@ -1,0 +1,69 @@
+{
+  "milestone": "table-identity-and-api-surface",
+  "round": 2,
+  "status": "pass",
+  "validatorsRun": {
+    "format": {
+      "passed": true,
+      "command": "cargo fmt --all -- --check",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    },
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Update rust-library-worker guidance for table_as work to explicitly require auditing macro-generated identity and hydration seams (for example HasId, ResolveRecordId, and Bridge dispatch) alongside repository/runtime paths.",
+      "evidence": "Initial review of milestone-f-table-as-storage-identity found repository CRUD moved to storage_table(), but macros/src/lib.rs still used table_name() in generated explicit-id identity and enum bridge hydration paths until corrective feature milestone-f-table-as-storage-identity-macro-bridge-fix landed.",
+      "isSystemic": false
+    },
+    {
+      "target": "skills",
+      "suggestion": "Clarify in rust-library-worker that pure API-surface/documentation features may be validated with compile-surface proof plus docs/rustdoc alignment when no new runtime behavior is introduced.",
+      "evidence": "Review of milestone-f-repo-public-internal-api-refactor passed based on README/rustdoc alignment, generated inherent methods, and facade compile-surface coverage, but current skill text does not state this validation pattern.",
+      "isSystemic": false
+    },
+    {
+      "target": "skills",
+      "suggestion": "Document a Windows-safe fallback for jq-style read-only mission inspection steps (for example Python) in scrutiny/rust-library worker guidance when examples currently assume jq availability.",
+      "evidence": "Both the table-as macro fix review and the original worker transcript had to infer a Python fallback because skill examples reference jq while this Windows environment does not guarantee jq.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Define how mission state should record proof ownership when a validation-matrix feature is satisfied by already-landed sibling commits rather than a dedicated runtime commit, including the evidence-only corrective-feature pattern.",
+      "evidence": "The original milestone-f-focused-regression-matrix-separation review failed because there was no feature-owned artifact; the corrective evidence feature repaired this by adding an ownership artifact and mission-state reconciliation, but the general convention is still undocumented.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "Allow evidence-only corrective features to complete via validation artifact plus mission-state reconciliation when their purpose is ownership repair rather than new runtime behavior.",
+      "evidence": "Review of milestone-f-focused-regression-matrix-separation-evidence passed based on an evidence artifact and mission metadata updates rather than Rust code changes, but rust-library-worker procedure still assumes implementation features primarily add runtime code or tests.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": ".factory/validation/table-identity-and-api-surface/scrutiny/synthesis.json"
+}
