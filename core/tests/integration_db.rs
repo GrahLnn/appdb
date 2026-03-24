@@ -14,7 +14,10 @@ use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_checked, query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
-use appdb::{Bridge, Crud, DBError, DBErrorKind, Id, Relation, Sensitive, Store, StoredModel};
+use appdb::{
+    Bridge, Crud, DBError, DBErrorKind, Id, Relation, Sensitive, SensitiveShape, Store,
+    StoredModel,
+};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
@@ -534,6 +537,26 @@ struct ItVecNestedSensitiveParent {
     children: Vec<ItNestedSensitiveChild>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Sensitive)]
+struct ItNestedOverrideLeaf {
+    label: String,
+    #[secure]
+    secret: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+#[crypto(service = "integration-nested", account = "integration-nested-master")]
+struct ItNestedOverrideParent {
+    id: Id,
+    alias: String,
+    #[secure]
+    #[crypto(field_account = "integration-nested-left")]
+    left: ItNestedOverrideLeaf,
+    #[secure]
+    #[crypto(field_account = "integration-nested-right")]
+    right: ItNestedOverrideLeaf,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 struct StoredNestedSensitiveParentRow {
     id: RecordId,
@@ -546,6 +569,14 @@ struct StoredOptionalNestedSensitiveParentRow {
     id: RecordId,
     alias: String,
     child: Option<EncryptedItNestedSensitiveChild>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+struct StoredNestedOverrideParentRow {
+    id: RecordId,
+    alias: String,
+    left: EncryptedItNestedOverrideLeaf,
+    right: EncryptedItNestedOverrideLeaf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
@@ -691,6 +722,17 @@ async fn load_vec_nested_sensitive_parent_raw(id: &str) -> StoredVecNestedSensit
         .await
         .expect("vec nested sensitive parent raw row should load")
         .expect("vec nested sensitive parent raw row should exist")
+}
+
+async fn load_nested_override_parent_raw(id: &str) -> StoredNestedOverrideParentRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItNestedOverrideParent::table_name())
+        .bind("id", id.to_owned());
+
+    query_bound_return::<StoredNestedOverrideParentRow>(stmt)
+        .await
+        .expect("nested override parent raw row should load")
+        .expect("nested override parent raw row should exist")
 }
 
 async fn load_aliased_foreign_parent_raw(id: &str) -> StoredAliasedForeignParentRow {
@@ -4452,6 +4494,76 @@ fn store_sensitive_nested_child_shapes_roundtrip_with_plaintext_results_and_encr
         assert_eq!(raw_vec.children.len(), 2);
         assert_nested_sensitive_child_encrypted(&raw_vec.children[0], "vec-a", "vec-secret-a");
         assert_nested_sensitive_child_encrypted(&raw_vec.children[1], "vec-b", "vec-secret-b");
+    });
+}
+
+#[test]
+fn store_sensitive_nested_field_account_overrides_keep_sibling_contexts_isolated() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItNestedOverrideParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let parent = ItNestedOverrideParent {
+            id: Id::from("nested-override-parent"),
+            alias: "override-parent".to_owned(),
+            left: ItNestedOverrideLeaf {
+                label: "left-leaf".to_owned(),
+                secret: "left-secret".to_owned(),
+            },
+            right: ItNestedOverrideLeaf {
+                label: "right-leaf".to_owned(),
+                secret: "right-secret".to_owned(),
+            },
+        };
+
+        let saved = ItNestedOverrideParent::save(parent.clone())
+            .await
+            .expect("save should succeed");
+        let loaded = ItNestedOverrideParent::get("nested-override-parent")
+            .await
+            .expect("get should decrypt with generated override contexts");
+
+        assert_eq!(saved, parent);
+        assert_eq!(loaded, parent);
+
+        let raw = load_nested_override_parent_raw("nested-override-parent").await;
+        assert_eq!(raw.alias, "override-parent");
+        assert_eq!(raw.left.label, "left-leaf");
+        assert_eq!(raw.right.label, "right-leaf");
+        assert_ne!(raw.left.secret, b"left-secret");
+        assert_ne!(raw.right.secret, b"right-secret");
+
+        let left_ctx = appdb::crypto::resolve_crypto_context_for::<
+            AppdbSensitiveFieldTagItNestedOverrideParentLeft,
+        >()
+        .expect("left override context should resolve");
+        let right_ctx = appdb::crypto::resolve_crypto_context_for::<
+            AppdbSensitiveFieldTagItNestedOverrideParentRight,
+        >()
+        .expect("right override context should resolve");
+
+        assert_eq!(
+            ItNestedOverrideLeaf::decrypt_with_context(&raw.left, &left_ctx)
+                .expect("left leaf should decrypt only with left context"),
+            parent.left
+        );
+        assert_eq!(
+            ItNestedOverrideLeaf::decrypt_with_context(&raw.right, &right_ctx)
+                .expect("right leaf should decrypt only with right context"),
+            parent.right
+        );
+        assert!(matches!(
+            ItNestedOverrideLeaf::decrypt_with_context(&raw.left, &right_ctx),
+            Err(appdb::crypto::CryptoError::Decrypt)
+        ));
+        assert!(matches!(
+            ItNestedOverrideLeaf::decrypt_with_context(&raw.right, &left_ctx),
+            Err(appdb::crypto::CryptoError::Decrypt)
+        ));
     });
 }
 
