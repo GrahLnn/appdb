@@ -99,6 +99,119 @@ pub trait Sensitive: Sized {
     }
 }
 
+/// Recursive runtime seam for supported `#[secure]` shapes.
+pub trait SensitiveShape: Sized {
+    /// Stored representation for this secure shape.
+    type Encrypted: Clone
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + surrealdb::types::SurrealValue;
+
+    /// Encrypts under an already-resolved effective secure-field context.
+    fn encrypt_with_context(
+        &self,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self::Encrypted, crate::crypto::CryptoError>;
+
+    /// Decrypts under an already-resolved effective secure-field context.
+    fn decrypt_with_context(
+        encrypted: &Self::Encrypted,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self, crate::crypto::CryptoError>;
+}
+
+impl SensitiveShape for String {
+    type Encrypted = Vec<u8>;
+
+    fn encrypt_with_context(
+        &self,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self::Encrypted, crate::crypto::CryptoError> {
+        crate::crypto::encrypt_string(self, context)
+    }
+
+    fn decrypt_with_context(
+        encrypted: &Self::Encrypted,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self, crate::crypto::CryptoError> {
+        crate::crypto::decrypt_string(encrypted, context)
+    }
+}
+
+impl<T> SensitiveShape for T
+where
+    T: Sensitive,
+    T::Encrypted: Clone + serde::Serialize + serde::de::DeserializeOwned + surrealdb::types::SurrealValue,
+{
+    type Encrypted = T::Encrypted;
+
+    fn encrypt_with_context(
+        &self,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self::Encrypted, crate::crypto::CryptoError> {
+        <T as Sensitive>::encrypt(self, context)
+    }
+
+    fn decrypt_with_context(
+        encrypted: &Self::Encrypted,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self, crate::crypto::CryptoError> {
+        <T as Sensitive>::decrypt(encrypted, context)
+    }
+}
+
+impl<T> SensitiveShape for Option<T>
+where
+    T: SensitiveShape,
+{
+    type Encrypted = Option<T::Encrypted>;
+
+    fn encrypt_with_context(
+        &self,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self::Encrypted, crate::crypto::CryptoError> {
+        self.as_ref()
+            .map(|value| T::encrypt_with_context(value, context))
+            .transpose()
+    }
+
+    fn decrypt_with_context(
+        encrypted: &Self::Encrypted,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self, crate::crypto::CryptoError> {
+        encrypted
+            .as_ref()
+            .map(|value| T::decrypt_with_context(value, context))
+            .transpose()
+    }
+}
+
+impl<T> SensitiveShape for Vec<T>
+where
+    T: SensitiveShape,
+{
+    type Encrypted = Vec<T::Encrypted>;
+
+    fn encrypt_with_context(
+        &self,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self::Encrypted, crate::crypto::CryptoError> {
+        self.iter()
+            .map(|value| T::encrypt_with_context(value, context))
+            .collect()
+    }
+
+    fn decrypt_with_context(
+        encrypted: &Self::Encrypted,
+        context: &crate::crypto::CryptoContext,
+    ) -> Result<Self, crate::crypto::CryptoError> {
+        encrypted
+            .iter()
+            .map(|value| T::decrypt_with_context(value, context))
+            .collect()
+    }
+}
+
 /// Runtime conversion seam between the caller-facing model and the stored representation.
 pub trait StoredModel: Sized {
     /// The serialized representation that should be persisted at rest.

@@ -1254,36 +1254,28 @@ fn relation_name_override(attrs: &[Attribute]) -> syn::Result<Option<String>> {
 }
 
 enum SecureKind {
-    String,
-    OptionString,
+    Shape(Type),
 }
 
 impl SecureKind {
     fn encrypted_type(&self) -> proc_macro2::TokenStream {
         match self {
-            SecureKind::String => quote! { ::std::vec::Vec<u8> },
-            SecureKind::OptionString => quote! { ::std::option::Option<::std::vec::Vec<u8>> },
+            SecureKind::Shape(ty) => quote! { <#ty as ::appdb::SensitiveShape>::Encrypted },
         }
     }
 
     fn encrypt_with_context_expr(&self, ident: &syn::Ident) -> proc_macro2::TokenStream {
         match self {
-            SecureKind::String => {
-                quote! { ::appdb::crypto::encrypt_string(&self.#ident, context)? }
-            }
-            SecureKind::OptionString => {
-                quote! { ::appdb::crypto::encrypt_optional_string(&self.#ident, context)? }
+            SecureKind::Shape(ty) => {
+                quote! { <#ty as ::appdb::SensitiveShape>::encrypt_with_context(&self.#ident, context)? }
             }
         }
     }
 
     fn decrypt_with_context_expr(&self, ident: &syn::Ident) -> proc_macro2::TokenStream {
         match self {
-            SecureKind::String => {
-                quote! { ::appdb::crypto::decrypt_string(&encrypted.#ident, context)? }
-            }
-            SecureKind::OptionString => {
-                quote! { ::appdb::crypto::decrypt_optional_string(&encrypted.#ident, context)? }
+            SecureKind::Shape(ty) => {
+                quote! { <#ty as ::appdb::SensitiveShape>::decrypt_with_context(&encrypted.#ident, context)? }
             }
         }
     }
@@ -1294,16 +1286,10 @@ impl SecureKind {
         field_tag_ident: &syn::Ident,
     ) -> proc_macro2::TokenStream {
         match self {
-            SecureKind::String => {
+            SecureKind::Shape(ty) => {
                 quote! {{
                     let context = ::appdb::crypto::resolve_crypto_context_for::<#field_tag_ident>()?;
-                    ::appdb::crypto::encrypt_string(&self.#ident, context.as_ref())?
-                }}
-            }
-            SecureKind::OptionString => {
-                quote! {{
-                    let context = ::appdb::crypto::resolve_crypto_context_for::<#field_tag_ident>()?;
-                    ::appdb::crypto::encrypt_optional_string(&self.#ident, context.as_ref())?
+                    <#ty as ::appdb::SensitiveShape>::encrypt_with_context(&self.#ident, context.as_ref())?
                 }}
             }
         }
@@ -1315,16 +1301,10 @@ impl SecureKind {
         field_tag_ident: &syn::Ident,
     ) -> proc_macro2::TokenStream {
         match self {
-            SecureKind::String => {
+            SecureKind::Shape(ty) => {
                 quote! {{
                     let context = ::appdb::crypto::resolve_crypto_context_for::<#field_tag_ident>()?;
-                    ::appdb::crypto::decrypt_string(&encrypted.#ident, context.as_ref())?
-                }}
-            }
-            SecureKind::OptionString => {
-                quote! {{
-                    let context = ::appdb::crypto::resolve_crypto_context_for::<#field_tag_ident>()?;
-                    ::appdb::crypto::decrypt_optional_string(&encrypted.#ident, context.as_ref())?
+                    <#ty as ::appdb::SensitiveShape>::decrypt_with_context(&encrypted.#ident, context.as_ref())?
                 }}
             }
         }
@@ -1332,20 +1312,70 @@ impl SecureKind {
 }
 
 fn secure_kind(field: &Field) -> syn::Result<SecureKind> {
-    if is_string_type(&field.ty) {
-        return Ok(SecureKind::String);
+    if secure_shape_supported(&field.ty) {
+        return Ok(SecureKind::Shape(field.ty.clone()));
     }
 
-    if let Some(inner) = option_inner_type(&field.ty) {
-        if is_string_type(inner) {
-            return Ok(SecureKind::OptionString);
-        }
+    Err(Error::new_spanned(&field.ty, secure_shape_error_message(&field.ty)))
+}
+
+fn secure_shape_supported(ty: &Type) -> bool {
+    if is_string_type(ty) {
+        return true;
     }
 
-    Err(Error::new_spanned(
-        &field.ty,
-        "#[secure] currently supports only String and Option<String>",
-    ))
+    if let Some(inner) = option_inner_type(ty) {
+        return secure_shape_supported(inner);
+    }
+
+    if let Some(inner) = vec_inner_type(ty) {
+        return secure_shape_supported(inner);
+    }
+
+    direct_sensitive_child_type(ty).is_some()
+}
+
+fn secure_shape_error_message(ty: &Type) -> &'static str {
+    if invalid_secure_leaf_type(ty).is_some() {
+        "#[secure] child shapes require a direct named Sensitive type leaf with only Option<_> and Vec<_> wrappers"
+    } else {
+        "#[secure] supports String, Option<String>, and recursive Child / Option<Child> / Vec<Child> shapes where Child implements appdb::Sensitive"
+    }
+}
+
+fn direct_sensitive_child_type(ty: &Type) -> Option<&TypePath> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    let segment = type_path.path.segments.last()?;
+    if !matches!(segment.arguments, PathArguments::None) {
+        return None;
+    }
+
+    if is_id_type(ty) || is_string_type(ty) || is_common_non_store_leaf_type(ty) {
+        return None;
+    }
+
+    Some(type_path)
+}
+
+fn invalid_secure_leaf_type(ty: &Type) -> Option<Type> {
+    if let Some(inner) = option_inner_type(ty) {
+        return invalid_secure_leaf_type(inner);
+    }
+
+    if let Some(inner) = vec_inner_type(ty) {
+        return invalid_secure_leaf_type(inner);
+    }
+
+    let leaf = direct_sensitive_child_type(ty)?.clone();
+    let segment = leaf.path.segments.last()?;
+    if matches!(segment.arguments, PathArguments::None) {
+        None
+    } else {
+        Some(Type::Path(leaf))
+    }
 }
 
 fn is_string_type(ty: &Type) -> bool {

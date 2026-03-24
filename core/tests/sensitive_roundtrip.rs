@@ -82,6 +82,30 @@ struct FirstUseDefaultsB {
     pub secret: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+struct NestedSensitiveChild {
+    pub label: String,
+
+    #[secure]
+    pub secret: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+struct NestedSensitiveParent {
+    pub alias: String,
+
+    #[secure]
+    pub child: NestedSensitiveChild,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+struct OptionalNestedSensitiveParent {
+    pub alias: String,
+
+    #[secure]
+    pub child: Option<NestedSensitiveChild>,
+}
+
 #[test]
 fn sensitive_record_roundtrip_encrypts_only_secure_fields() {
     let _guard = TEST_LOCK
@@ -368,5 +392,90 @@ fn sensitive_crypto_metadata_exposes_defaults_and_overrides() {
     let mutated = default_crypto_config();
     assert_eq!(mutated.service, "svc-b");
     assert_eq!(mutated.account, "acct-b");
+    reset_default_crypto_config();
+}
+
+#[test]
+fn sensitive_nested_child_roundtrip_inherits_parent_runtime_context() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+    let local_appdata = crypto_test_local_appdata("nested-child");
+    unsafe {
+        std::env::set_var("LOCALAPPDATA", &local_appdata);
+    }
+
+    let parent = NestedSensitiveParent {
+        alias: "parent-a".into(),
+        child: NestedSensitiveChild {
+            label: "child-a".into(),
+            secret: "nested-secret".into(),
+        },
+    };
+
+    let encrypted = parent
+        .encrypt_with_runtime_resolver()
+        .expect("nested child should encrypt");
+    let decrypted = NestedSensitiveParent::decrypt_with_runtime_resolver(&encrypted)
+        .expect("nested child should decrypt");
+
+    assert_eq!(decrypted, parent);
+    unsafe {
+        std::env::remove_var("LOCALAPPDATA");
+    }
+    let _ = std::fs::remove_dir_all(local_appdata);
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+}
+
+#[test]
+fn sensitive_nested_option_roundtrip_preserves_some_and_none() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+    let local_appdata = crypto_test_local_appdata("nested-option");
+    unsafe {
+        std::env::set_var("LOCALAPPDATA", &local_appdata);
+    }
+
+    let some_parent = OptionalNestedSensitiveParent {
+        alias: "parent-some".into(),
+        child: Some(NestedSensitiveChild {
+            label: "child-some".into(),
+            secret: "some-secret".into(),
+        }),
+    };
+    let none_parent = OptionalNestedSensitiveParent {
+        alias: "parent-none".into(),
+        child: None,
+    };
+
+    let encrypted_some = some_parent
+        .encrypt_with_runtime_resolver()
+        .expect("nested option some should encrypt");
+    let encrypted_none = none_parent
+        .encrypt_with_runtime_resolver()
+        .expect("nested option none should encrypt");
+
+    assert_eq!(
+        OptionalNestedSensitiveParent::decrypt_with_runtime_resolver(&encrypted_some)
+            .expect("nested option some should decrypt"),
+        some_parent
+    );
+    assert_eq!(
+        OptionalNestedSensitiveParent::decrypt_with_runtime_resolver(&encrypted_none)
+            .expect("nested option none should decrypt"),
+        none_parent
+    );
+
+    unsafe {
+        std::env::remove_var("LOCALAPPDATA");
+    }
+    let _ = std::fs::remove_dir_all(local_appdata);
+    clear_crypto_context_registry();
     reset_default_crypto_config();
 }
