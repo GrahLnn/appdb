@@ -588,14 +588,19 @@ struct StoredVecNestedSensitiveParentRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
-struct ItPlainStatus {
-    kind: String,
+enum ItPlainStatus {
+    Draft { kind: String },
+    Published { kind: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
-struct ItPayloadState {
-    kind: String,
-    value: serde_json::Value,
+enum ItPayloadState {
+    Draft { kind: String, note: String },
+    Published {
+        kind: String,
+        version: u32,
+        tags: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
@@ -631,6 +636,15 @@ struct StoredSensitiveRuntimeSeamParentRow {
     id: RecordId,
     alias: String,
     payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+struct StoredPlainEnumProfileRow {
+    id: RecordId,
+    name: String,
+    status: serde_json::Value,
+    optional_status: Option<serde_json::Value>,
+    state: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
@@ -756,6 +770,17 @@ async fn load_sensitive_runtime_seam_parent_raw(id: &str) -> StoredSensitiveRunt
         .await
         .expect("sensitive runtime seam parent raw row should load")
         .expect("sensitive runtime seam parent raw row should exist")
+}
+
+async fn load_plain_enum_profile_raw(id: &str) -> StoredPlainEnumProfileRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItPlainEnumProfile::table_name())
+        .bind("id", id.to_owned());
+
+    query_bound_return::<StoredPlainEnumProfileRow>(stmt)
+        .await
+        .expect("plain enum profile raw row should load")
+        .expect("plain enum profile raw row should exist")
 }
 
 async fn load_nested_sensitive_parent_raw(id: &str) -> StoredNestedSensitiveParentRow {
@@ -5797,26 +5822,46 @@ fn plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many() {
         let saved = ItPlainEnumProfile::save(ItPlainEnumProfile {
             id: Id::from("plain-enum-save"),
             name: "plain-one".to_owned(),
-            status: ItPlainStatus { kind: "Draft".to_owned() },
-            optional_status: Some(ItPlainStatus { kind: "Published".to_owned() }),
-            state: ItPayloadState {
+            status: ItPlainStatus::Draft {
                 kind: "Draft".to_owned(),
-                value: serde_json::json!({ "note": "draft-note" }),
+            },
+            optional_status: Some(ItPlainStatus::Published {
+                kind: "Published".to_owned(),
+            }),
+            state: ItPayloadState::Draft {
+                kind: "Draft".to_owned(),
+                note: "draft-note".to_owned(),
             },
         })
         .await
         .expect("save should roundtrip plain enum fields");
+
+        let raw_saved = load_plain_enum_profile_raw("plain-enum-save").await;
+        assert_eq!(raw_saved.name, "plain-one");
+        assert_eq!(raw_saved.status, serde_json::json!({ "Draft": { "kind": "Draft" } }));
+        assert_eq!(
+            raw_saved.optional_status,
+            Some(serde_json::json!({ "Published": { "kind": "Published" } }))
+        );
+        assert_eq!(
+            raw_saved.state,
+            serde_json::json!({ "Draft": { "kind": "Draft", "note": "draft-note" } })
+        );
 
         assert_eq!(
             saved,
             ItPlainEnumProfile {
                 id: Id::from("plain-enum-save"),
                 name: "plain-one".to_owned(),
-                status: ItPlainStatus { kind: "Draft".to_owned() },
-                optional_status: Some(ItPlainStatus { kind: "Published".to_owned() }),
-                state: ItPayloadState {
+                status: ItPlainStatus::Draft {
                     kind: "Draft".to_owned(),
-                    value: serde_json::json!({ "note": "draft-note" }),
+                },
+                optional_status: Some(ItPlainStatus::Published {
+                    kind: "Published".to_owned(),
+                }),
+                state: ItPayloadState::Draft {
+                    kind: "Draft".to_owned(),
+                    note: "draft-note".to_owned(),
                 },
             }
         );
@@ -5829,21 +5874,28 @@ fn plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many() {
         let batch_first = ItPlainEnumProfile {
             id: Id::from("plain-enum-batch-1"),
             name: "plain-batch-one".to_owned(),
-            status: ItPlainStatus { kind: "Published".to_owned() },
-            optional_status: None,
-            state: ItPayloadState {
+            status: ItPlainStatus::Published {
                 kind: "Published".to_owned(),
-                value: serde_json::json!({ "version": 7, "tags": ["release", "stable"] }),
+            },
+            optional_status: None,
+            state: ItPayloadState::Published {
+                kind: "Published".to_owned(),
+                version: 7,
+                tags: vec!["release".to_owned(), "stable".to_owned()],
             },
         };
         let batch_second = ItPlainEnumProfile {
             id: Id::from("plain-enum-batch-2"),
             name: "plain-batch-two".to_owned(),
-            status: ItPlainStatus { kind: "Draft".to_owned() },
-            optional_status: Some(ItPlainStatus { kind: "Draft".to_owned() }),
-            state: ItPayloadState {
+            status: ItPlainStatus::Draft {
                 kind: "Draft".to_owned(),
-                value: serde_json::json!({ "note": "batch-draft" }),
+            },
+            optional_status: Some(ItPlainStatus::Draft {
+                kind: "Draft".to_owned(),
+            }),
+            state: ItPayloadState::Draft {
+                kind: "Draft".to_owned(),
+                note: "batch-draft".to_owned(),
             },
         };
 
