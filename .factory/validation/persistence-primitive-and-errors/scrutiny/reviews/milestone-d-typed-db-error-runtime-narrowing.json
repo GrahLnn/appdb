@@ -1,0 +1,21 @@
+{
+  "featureId": "milestone-d-typed-db-error-runtime-narrowing",
+  "reviewedAt": "2026-03-24T08:16:47.169478+00:00",
+  "commitId": "655bd8d30c67c1c92cd417d0a11f53dd89ec4e1a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation stays within the requested runtime narrowing scope: record_exists now classifies raw Surreal errors through the shared helper, and the two foreign-resolution decision points branch on typed DBError variants instead of err.to_string()-derived kind checks. Existing focused typed-error regressions still cover missing-table, conflict, decode, and classifier-category behavior, and the diff does not broaden the error model or add new string-based seams.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill requires writing or confirming failing tests first, but this feature intentionally reused already-landed typed-error regressions without a fail-first step. The worker documented the deviation, and the skill should explicitly allow existing focused regressions for narrowing-only cleanup features to avoid false procedure mismatches.",
+      "evidence": "Mission skill C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md steps 6-8 require tests-first/fail-first; handoff C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\handoffs\\2026-03-24T07-56-00-021Z__milestone-d-typed-db-error-runtime-narrowing__1093d5fb-6105-45ea-b31e-499013291f7d.json records skillFeedback.followedProcedure=false because the feature reused existing regressions."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. No blocking issues found; the commit cleanly replaces the last reviewed message-based runtime branches with typed DBError flow at the targeted repository and foreign-resolution seams."
+}

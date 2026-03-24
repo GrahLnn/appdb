@@ -1,0 +1,21 @@
+{
+  "featureId": "milestone-d-typed-db-error-classification-adoption-narrowing-evidence-revalidation",
+  "reviewedAt": "2026-03-24T08:17:47Z",
+  "commitId": "872d7a06dff888060a8192d25fd11f5920706abf",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The evidence-only follow-up stays within scope and repairs the ownership chain correctly. The feature-owned commit only adds the scrutiny review artifact, and that artifact now points at the actual typed DB classification adoption commits: runtime-seam adoption in 665414a and decode/repository adoption plus focused proof in 1dc940c, matching the prior failure and the feature contract.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill still assumes test-first code implementation, but this feature was correctly handled as evidence-only revalidation with no production edits. The skill should document an explicit evidence-revalidation path for audit-only follow-ups.",
+      "evidence": "worker-transcripts.jsonl entry for session cc988705-f83f-4dbf-968c-18b748a864ea and handoff 2026-03-24T07-48-15-343Z__milestone-d-typed-db-error-classification-adoption-narrowing-evidence-revalidation__cc988705-f83f-4dbf-968c-18b748a864ea.json both show a justified deviation from the normal test-first implementation flow because the task only repaired evidence ownership."
+    }
+  ],
+  "addressesFailureFrom": "C:\\Users\\admin\\appdb\\.factory\\validation\\persistence-primitive-and-errors\\scrutiny\\reviews\\milestone-d-typed-db-error-classification-adoption-narrowing.json",
+  "summary": "Pass: blocking evidence mismatch from the earlier review is repaired. The feature-owned artifact now cites the real typed-classification implementation/proof commits and its focused revalidation remains aligned with the feature contract."
+}

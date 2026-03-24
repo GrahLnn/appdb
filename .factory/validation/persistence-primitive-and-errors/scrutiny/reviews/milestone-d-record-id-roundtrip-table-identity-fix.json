@@ -1,39 +1,33 @@
 {
   "featureId": "milestone-d-record-id-roundtrip-table-identity-fix",
-  "reviewedAt": "2026-03-24T06:00:00Z",
-  "commitId": "f6cbcd5c9b8d7a89d3e6f6739b0a65337f666d98",
+  "reviewedAt": "2026-03-24T07:28:51Z",
+  "commitId": "1dc940ca7a1f6e0e1f9c503da2ef26ec2d773eda",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "fail",
   "codeReview": {
-    "summary": "The feature correctly fixes the targeted get_record reload seam for plain RecordId-backed models, but it broadens repository-wide id normalization into nested payloads and changes plain-string RecordId compatibility in a way that can silently coerce non-id nested `id` fields into the model storage table. That exceeds the feature contract and risks corrupting decode semantics outside the reviewed ItRecordUser roundtrip path.",
+    "summary": "The reviewed handoff claims the RecordId roundtrip table-identity fix was already present in the baseline, but the cited feature-owned commit 1dc940c does not implement that behavior. Its diff only adopts typed decode-error classification, while the actual requested get_record reinjection seam appears later in repository code and was separately revalidated through later evidence artifacts.",
     "issues": [
       {
         "file": "core/src/repository/mod.rs",
-        "line": 104,
+        "line": 415,
         "severity": "blocking",
-        "description": "`normalize_record_id_strings::<T>` recursively rewrites every nested object key named `id` using `T::storage_table()`. This is not limited to the root RecordId-backed model id that the feature is supposed to preserve. Any nested payload/object field with an `id` string under the decoded row can now be coerced into a `RecordId` for the root model table, which changes shared decode semantics beyond the targeted `Repo::get_record` seam and can mis-decode unrelated nested JSON shapes."
-      },
-      {
-        "file": "core/src/serde_utils/id.rs",
-        "line": 183,
-        "severity": "blocking",
-        "description": "`deserialize_record_id_or_compat_string` now routes plain strings through `parse_record_id_or_plain_string(..., Some('_'))`, which turns arbitrary non-record-id strings into synthetic `_:` RecordIds instead of preserving the previous behavior of failing invalid strings. The feature brief says the remaining blocker is the get_record/decode reload seam for bound RecordIds; widening generic compat deserialization to accept any plain string changes broader RecordId parsing behavior without dedicated proof in this feature."
+        "description": "The feature handoff attributes the RecordId table-identity fix to commit 1dc940c, but that commit's diff does not touch Repo::get_record or inject the caller-provided RecordId back into decode_stored_row_value. The claimed implementation/proof ownership is therefore incorrect for this feature."
       }
     ]
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The worker intentionally skipped the skill step to add/confirm a failing test from a clean baseline because the dirty tree already contained in-scope changes. The current skill mentions authoritative dirty baselines, but it still frames tests-first as the default path and does not clearly spell out how to review and constrain already-present implementation diffs for evidence-heavy follow-up features.",
-      "evidence": "worker-transcripts.jsonl entry for session 7906348d-e74d-4e89-90a9-901d50e91714: skillFeedback.deviations notes step 6-7 was bypassed because the dirty working tree was treated as authoritative."
+      "observation": "The rust-library-worker procedure does not clearly distinguish evidence-only verification from implementation work, so workers keep marking implementation features successful against an already-landed baseline without producing a feature-owned commit or explicit evidence chain.",
+      "evidence": "Worker session e90d3625-0621-4a50-9ebd-0e082a74a2e4 reported success with commit 1dc940c and no code edits even though that commit diff only covers typed decode classification. A later evidence-revalidation artifact was needed to point this feature at the actual implementation/proof commits."
     },
     {
-      "area": "knowledge",
-      "observation": "GitNexus symbol lookup was partially unreliable for helper-level symbols (`decode_stored_row_value`, `deserialize_record_id_compat`), which forced fallback to targeted diff review even though GitNexus was installed. Shared guidance notes missing `detect_changes`, but not the helper-symbol lookup mismatch, so future reviewers may lose time retrying unsupported names.",
-      "evidence": "handoff verification for commit f6cbcd5c9b8d7a89d3e6f6739b0a65337f666d98 records `gitnexus impact decode_stored_row_value` and `gitnexus impact deserialize_record_id_compat` as unresolved despite the installed CLI being available."
+      "area": "conventions",
+      "observation": "Mission review flow allowed a feature review file to remain tied to the wrong commit after the validator had already identified ownership/evidence problems, which suggests the expected repair path for mis-owned commits is not clearly encoded in mission conventions.",
+      "evidence": "The prior review at .factory/validation/persistence-primitive-and-errors/scrutiny/reviews/milestone-d-record-id-roundtrip-table-identity-fix-evidence-revalidation.json passes only after re-linking the behavior to commit f6cbcd5 and proof commit 4aec035, while the original feature handoff still points at 1dc940c."
     }
   ],
-  "addressesFailureFrom": null,
-  "summary": "Fail: the commit fixes the specific ItRecordUser roundtrip but introduces broader recursive id coercion and generic plain-string RecordId acceptance outside the assigned seam."
+  "addressesFailureFrom": "C:\\Users\\admin\\appdb\\.factory\\validation\\persistence-primitive-and-errors\\scrutiny\\reviews\\milestone-d-record-id-roundtrip-table-identity-fix-evidence-revalidation.json",
+  "summary": "Fail: the reviewed feature report is still tied to commit 1dc940c, but that commit does not implement the requested Repo::get_record RecordId table-identity fix. The actual behavior was established by later commits/evidence, so this feature's ownership remains incorrect."
 }

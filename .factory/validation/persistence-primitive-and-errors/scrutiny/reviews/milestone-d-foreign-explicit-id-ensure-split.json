@@ -1,21 +1,34 @@
 {
   "featureId": "milestone-d-foreign-explicit-id-ensure-split",
-  "reviewedAt": "2026-03-24T05:25:51Z",
-  "commitId": "48c0f52336b51a982385bc495e23676edb953b94",
+  "reviewedAt": "2026-03-24T08:18:20Z",
+  "commitId": "1dc940ca7a1f6e0e1f9c503da2ef26ec2d773eda",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
-  "status": "pass",
+  "status": "fail",
   "codeReview": {
-    "summary": "The feature commit cleanly splits foreign explicit-id persistence from lookup-driven creation. Explicit-id children now route through a dedicated ensure-at-id branch that preserves the declared RecordId, treats MissingTable and NotFound as ensure cases on fresh schemaless graphs, and leaves lookup-driven models on the separate create-based path. The supporting injected-persistence regression was updated to assert the new ensure branch directly.",
-    "issues": []
+    "summary": "The reviewed worker session confirms the explicit-id foreign ensure/find-or-create split exists in the current tree, but its cited feature-owned commit only adopts typed decode error classification and does not itself implement or prove the foreign ensure split required by the feature contract. The relevant runtime seam already exists in core/src/lib.rs, yet this session remains an evidence/ownership mismatch rather than an auditable feature implementation artifact.",
+    "issues": [
+      {
+        "file": "core/src/lib.rs",
+        "line": 382,
+        "severity": "blocking",
+        "description": "The current runtime contains the required explicit-id split in resolve_foreign_record_id_with and persist_foreign_explicit_id/persist_foreign_find_or_create, but the reviewed feature-owned commit 1dc940ca7a1f6e0e1f9c503da2ef26ec2d773eda does not touch core/src/lib.rs at all. git show 1dc940c changes only core/src/error.rs, core/src/repository/mod.rs, and core/tests/integration_db.rs, so the explicit ensure-vs-lookup branch ownership is not auditable from the cited implementation artifact."
+      },
+      {
+        "file": "core/tests/integration_db.rs",
+        "line": 1681,
+        "severity": "blocking",
+        "description": "The feature contract requires proof for explicit-id foreign create-missing, reuse-existing, and fresh schemaless behavior, but commit 1dc940c only adds the typed_db_error_classifier_distinguishes_all_validated_categories test around line 1201. The explicit-id foreign regressions the handoff relies on were already present before this session, so the reviewed commit does not own the claimed validation evidence for VAL-SAVE-008."
+      }
+    ]
   },
   "sharedStateObservations": [
     {
-      "area": "services",
-      "observation": "Project instructions require GitNexus impact/detect_changes before editing and committing, but the worker environment did not expose a usable GitNexus command path, so the worker fell back to git diff/code inspection instead.",
-      "evidence": "The worker handoff records the fallback in discoveredIssues, and the transcript shows git-based inspection around the edit using git diff/git status rather than a successful GitNexus workflow for this feature."
+      "area": "skills",
+      "observation": "The rust-library-worker procedure still lacks a concrete guard that a verification-only session must cite a feature-owned commit containing the scoped runtime seam and regressions, not merely confirm that baseline HEAD already behaves correctly.",
+      "evidence": "C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md step 17 requires explicit-id ensure and lookup-based find_or_create to remain separate, but handoff 2026-03-24T06-16-54-254Z__milestone-d-foreign-explicit-id-ensure-split__d72440b0-b354-4bcf-8939-18685ebe46a9.json points at commit 1dc940ca7a1f6e0e1f9c503da2ef26ec2d773eda, whose diff contains only typed decode classification work and no changes to core/src/lib.rs or the foreign explicit-id regressions."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Pass. Commit 48c0f52336b51a982385bc495e23676edb953b94 implements the requested explicit-id ensure split in runtime code and aligns the regression proof with the new branch semantics. No blocking or non-blocking code issues were found in the reviewed feature scope."
+  "summary": "Fail: the reviewed session validated existing behavior but attached it to commit 1dc940c, which is a typed decode-classification change rather than the foreign explicit-id ensure split. Blocking issue is feature evidence ownership, not a newly found runtime bug in current HEAD."
 }

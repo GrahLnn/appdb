@@ -1,0 +1,21 @@
+{
+  "featureId": "milestone-d-record-id-roundtrip-table-identity-fix-evidence-revalidation",
+  "reviewedAt": "2026-03-24T08:18:03Z",
+  "commitId": "f6cbcd5c9b8d7a89d3e6f6739b0a65337f666d98",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The evidence-only revalidation feature stays within scope and correctly repairs the ownership chain for the already-landed RecordId roundtrip table-identity fix. The handoff, transcript, and review artifact consistently point to the real runtime implementation in commit f6cbcd5 for requested RecordId reinjection in Repo::get_record and to the focused proof commit 4aec035 plus rerun targeted regressions for reload/delete behavior.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker procedure is still framed around implementation features and does not clearly cover evidence-only revalidation work where the task is to repair ownership/audit artifacts for already-landed behavior rather than add failing tests or new runtime code.",
+      "evidence": "The transcript skeleton and handoff for worker session 795a1137-5b52-4753-bd62-de2032f10a17 mark followedProcedure=false only because the session audited existing commits and reran focused regressions instead of performing fail-first implementation steps."
+    }
+  ],
+  "addressesFailureFrom": "C:\\Users\\admin\\appdb\\.factory\\validation\\persistence-primitive-and-errors\\scrutiny\\reviews\\milestone-d-record-id-roundtrip-table-identity-fix.json",
+  "summary": "Pass: the feature-owned evidence chain now correctly ties the existing get_record RecordId table-identity implementation to commit f6cbcd5 and the focused reload/delete proof to commit 4aec035 plus successful targeted reruns, resolving the prior mis-owned evidence gap."
+}

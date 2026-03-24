@@ -1,21 +1,21 @@
 {
   "featureId": "milestone-d-record-id-public-id-normalization-narrowing",
-  "reviewedAt": "2026-03-24T05:26:15Z",
+  "reviewedAt": "2026-03-24T00:00:00Z",
   "commitId": "4aec03508fdde7e31580859e908c78967243db36",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "pass",
   "codeReview": {
-    "summary": "The feature stays within its narrowed scope and adequately closes the prior blocking gap from the earlier RecordId roundtrip review. Commit 4aec035 adds focused regressions proving plain RecordId-backed models preserve full table-qualified ids on create_at and upsert_at returns, while the pre-existing runtime seam in core/src/repository/mod.rs already preserves RecordId object ids by restoring object-form ids after public-id normalization. The existing inherent_record_model_api_roundtrip_passes regression continues to cover the earlier get_record/delete reload path, so the combined evidence now matches the feature contract.",
+    "summary": "Feature scope is satisfied: the commit adds focused regressions for create_at and upsert_at return-path identity on plain RecordId-backed models, and the reviewed baseline normalization seam preserves object-form RecordId ids while earlier get_record/delete roundtrip coverage remains intact.",
     "issues": []
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The rust-library-worker skill does not explicitly describe an evidence-only or proof-only path for features whose runtime fix is already present in the authoritative baseline, so the worker had to mark a procedure deviation even though adding only the missing regression proof was the correct scoped action.",
-      "evidence": "Handoff C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\handoffs\\2026-03-24T05-21-31-370Z__milestone-d-record-id-public-id-normalization-narrowing__4d3f0e95-8032-4598-a1a2-4da54a6b7045.json records followedProcedure=false because the worker verified the behavior already existed in core/src/repository/mod.rs and only added the missing regressions in core/tests/integration_db.rs."
+      "observation": "The rust-library-worker skill still says workers must write tests first and confirm they fail before implementing, but this worker reasonably documented a baseline-already-fixed case and added the missing regression proof directly.",
+      "evidence": "Handoff skillFeedback notes the deviation because production behavior was already present in the authoritative baseline, while the commit 4aec03508fdde7e31580859e908c78967243db36 only adds regression tests in core/tests/integration_db.rs."
     }
   ],
-  "addressesFailureFrom": "C:\\Users\\admin\\appdb\\.factory\\validation\\persistence-primitive-and-errors\\scrutiny\\reviews\\milestone-d-record-id-roundtrip-table-identity-fix.json",
-  "summary": "Pass. I reviewed the feature metadata, handoff, transcript skeleton, recorded commit 4aec03508fdde7e31580859e908c78967243db36, the touched regression file, the current runtime normalization seam, and the earlier failing roundtrip review. The feature correctly narrows the remaining gap by adding focused create_at/upsert_at RecordId-return regressions while preserving the already-fixed get_record/delete reload behavior, and I found no blocking or non-blocking defects in this feature scope."
+  "addressesFailureFrom": null,
+  "summary": "Pass. No blocking issues found: the feature-owned commit is correctly scoped to regression coverage, verifies create_at/upsert_at preserve full RecordId identity for plain RecordId-backed models, and does not disturb the existing get_record/delete roundtrip proof."
 }
