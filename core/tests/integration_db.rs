@@ -1336,6 +1336,41 @@ fn ordinary_colon_strings_are_not_record_links() {
 }
 
 #[test]
+fn plain_root_strings_are_not_coerced_into_record_ids_on_reload() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        ensure_tables_exist(&[ItStringUser::table_name()]).await;
+
+        Repo::<ItStringUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let db = get_db().expect("db should be initialized");
+        db.query("CREATE type::record($table, $id) CONTENT { payload: $payload };")
+            .bind(("table", ItStringUser::table_name()))
+            .bind(("id", "plain-root"))
+            .bind(("payload", "alpha"))
+            .await
+            .expect("setup row should succeed");
+
+        let raw: serde_json::Value = query_bound_return(RawSqlStmt::new(format!(
+            "SELECT VALUE {{ id: payload, payload: payload }} FROM {}:`plain-root`;",
+            ItStringUser::table_name()
+        )))
+        .await
+        .expect("raw projection query should succeed")
+        .expect("raw projection row should exist");
+
+        let loaded: ItStringUser = serde_json::from_value(raw)
+            .expect("plain root strings should still decode as plain ids");
+
+        assert_eq!(loaded.id, Id::from("alpha"));
+        assert_eq!(loaded.payload, "alpha");
+    });
+}
+
+#[test]
 fn decode_record_link_value_accepts_table_agnostic_unquoted_record_ids() {
     let _guard = acquire_test_lock();
     run_async(async {
