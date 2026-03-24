@@ -1,16 +1,15 @@
 {
-  "milestone": "post-0-2-6-followup",
+  "milestone": "decode-boundary-unification",
   "round": 1,
   "status": "pass",
   "assertionsSummary": {
-    "total": 2,
-    "passed": 2,
+    "total": 1,
+    "passed": 1,
     "failed": 0,
     "blocked": 0
   },
   "passedAssertions": [
-    "VAL-SAVE-006",
-    "VAL-HYDRATE-006"
+    "VAL-HYDRATE-007"
   ],
   "failedAssertions": [],
   "blockedAssertions": [],

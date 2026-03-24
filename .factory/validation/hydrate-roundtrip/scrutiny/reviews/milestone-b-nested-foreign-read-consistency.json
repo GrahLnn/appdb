@@ -1,0 +1,21 @@
+{
+  "featureId": "milestone-b-nested-foreign-read-consistency",
+  "reviewedAt": "2026-03-23T21:03:11Z",
+  "commitId": "7e5e36ebabd831395f548b02f98c3a5663135c1c",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature commit closes the nested foreign read-consistency gap by routing read-path normalization through the shared foreign-shape rewrite before stored-record-link decode, and the focused regressions cover save/get plus get_record/list/list_limit agreement while confirming RecordId-only storage at rest.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The feature metadata and commit evidence exist, but this mission currently lacks a persisted handoff JSON and transcript entry for the completed worker session cac6a3e7-5c2a-440a-a8cb-2aacde6c11c6, so scrutiny had to reconstruct evidence from git log/git show instead of the documented handoff flow.",
+      "evidence": "\features.json marks milestone-b-nested-foreign-read-consistency completed with completedWorkerSessionId cac6a3e7-5c2a-440a-a8cb-2aacde6c11c6, but C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\handoffs has no matching file and worker-transcripts.jsonl has no matching session/feature entry."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. Commit 7e5e36ebabd831395f548b02f98c3a5663135c1c updates the shared read decode seam (core/src/repository/mod.rs:96, core/src/lib.rs:247-295) so nested foreign rows normalize both { id: ... } objects and string-form record links before hydration, and the regressions in core/tests/integration_db.rs:4068-4232 show nested save/get roundtrip plus consistent hydrated values across get, get_record, list, and list_limit while raw storage remains RecordId-based."
+}

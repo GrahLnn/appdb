@@ -1,0 +1,67 @@
+{
+  "groupId": "decode-boundary",
+  "testedAt": "2026-03-24T03:16:06.5155433+08:00",
+  "isolation": {
+    "repoRoot": "C:\\Users\\admin\\appdb",
+    "missionDir": "C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc",
+    "surface": "cargo-test",
+    "serialization": "Focused cargo tests executed with --test-threads 1 against the shared embedded DB fixture state"
+  },
+  "toolsUsed": [
+    "Read",
+    "Grep",
+    "Execute"
+  ],
+  "commandsRun": [
+    "cargo test -p appdb decode_raw_row_helper_accepts_string_and_object_record_links --test integration_db -- --test-threads 1 --nocapture",
+    "cargo test -p appdb table_as_alias_with_nested_foreign_roundtrips_across_all_reads --test integration_db -- --test-threads 1 --nocapture"
+  ],
+  "assertions": [
+    {
+      "id": "VAL-HYDRATE-007",
+      "title": "Unified raw-row decode helper handles string and object record links",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read validation-contract.md and cargo-test flow guidance",
+          "expected": "Clear focused cargo-test evidence requirements for VAL-HYDRATE-007",
+          "observed": "Contract requires terminal-output, shared save/read hydration consistency, mixed string/object record-link fixtures, and proof of a single decode helper/seam."
+        },
+        {
+          "action": "Run decode_raw_row_helper_accepts_string_and_object_record_links integration test",
+          "expected": "A focused regression proves mixed object-form branch links and string-form root links decode consistently through get/get_record/list/list_limit",
+          "observed": "Passed: 1 test, 0 failed in 0.96s. The test seeds an object-form branch link and a string-form root link via raw SQL, then asserts get/get_record/list/list_limit all return the same fully hydrated ItNestedForeignRoot graph."
+        },
+        {
+          "action": "Run table_as_alias_with_nested_foreign_roundtrips_across_all_reads integration test",
+          "expected": "Alias-backed foreign reads reuse the same decode semantics across save/get/get_record/list/list_limit",
+          "observed": "Passed: 1 test, 0 failed in 0.98s. The test verifies save return, get, get_record, list, and list_limit all match the same aliased nested holder graph while raw rows store RecordId references in target tables."
+        },
+        {
+          "action": "Inspect the decode seam in core/src/lib.rs and focused tests in core/tests/integration_db.rs",
+          "expected": "One canonical stored-row decode boundary is reused across caller-facing entry points",
+          "observed": "Confirmed a dedicated seam: core/src/lib.rs exposes decode_stored_record_links() backed by rewrite_foreign_record_link_value(), and integration_db.rs explicitly states get_record/list/list_limit should reuse the shared decode helper."
+        }
+      ],
+      "evidence": {
+        "terminalOutput": [
+          "decode_raw_row_helper_accepts_string_and_object_record_links ... ok",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 73 filtered out; finished in 0.96s",
+          "table_as_alias_with_nested_foreign_roundtrips_across_all_reads ... ok",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 73 filtered out; finished in 0.98s"
+        ],
+        "rawDbCheck": "decode_raw_row_helper_accepts_string_and_object_record_links seeds object-form leaf links and string-form branch links with raw SQL before hydrate assertions; table_as_alias_with_nested_foreign_roundtrips_across_all_reads asserts raw alias and holder rows store RecordId references in target tables.",
+        "apiResult": "Shared hydration consistency verified across save return, get(), get_record(), list(), and list_limit() for the focused decode-boundary and alias-backed nested foreign cases.",
+        "testProof": [
+          "core/src/lib.rs: decode_stored_record_links() delegates to rewrite_foreign_record_link_value() as the stored-row decode seam for record-link normalization.",
+          "core/tests/integration_db.rs: decode_raw_row_helper_accepts_string_and_object_record_links exercises mixed string/object record-link fixtures and asserts shared helper reuse across get/get_record/list/list_limit.",
+          "core/tests/integration_db.rs: table_as_alias_with_nested_foreign_roundtrips_across_all_reads proves alias-backed nested foreign reads share the same caller-facing decode semantics."
+        ]
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "VAL-HYDRATE-007 passed. Focused cargo-test evidence shows the unified stored-row decode boundary handles mixed string/object record links and preserves consistent hydration across save/get/get_record/list/list_limit, including alias-backed nested foreign reads."
+}

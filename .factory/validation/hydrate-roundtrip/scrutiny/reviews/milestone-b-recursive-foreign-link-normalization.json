@@ -1,0 +1,39 @@
+{
+  "featureId": "milestone-b-recursive-foreign-link-normalization",
+  "reviewedAt": "2026-03-23T21:02:22Z",
+  "commitId": "48c0f52336b51a982385bc495e23676edb953b94",
+  "transcriptSkeletonReviewed": false,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The reviewed commit does not implement the assigned recursive foreign-link normalization feature. Commit 48c0f52 only splits explicit-id foreign persistence into ensure-vs-create semantics in core/src/lib.rs and updates one persistence-context regression, while the canonical recursive normalization seam and the required hydrate/raw-query regressions already exist elsewhere in the baseline.",
+    "issues": [
+      {
+        "file": "core/src/lib.rs",
+        "line": 141,
+        "severity": "blocking",
+        "description": "The reviewed commit adds ForeignPersistence::ensure_at and rewires explicit-id foreign persistence, but it does not touch decode_record_link_value, decode_stored_record_links, rewrite_foreign_json_value, or any recursive foreign-link normalization code required by this feature."
+      },
+      {
+        "file": "core/tests/integration_db.rs",
+        "line": 1956,
+        "severity": "blocking",
+        "description": "The only test change updates the injected persistence-context event sequence from create_at to ensure_at. The feature contract requires proof for nested foreign payload normalization and raw-query string-form record-link hydration, but commit 48c0f52 adds none of the required regressions such as nested_foreign_models_roundtrip_through_get or raw_query_string_record_links_decode_into_foreign_models."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Mission artifacts are inconsistent for this feature: features.json marks worker session 544dee43-22c2-4960-b977-955d3d263437 as the completed worker, but worker-transcripts.jsonl has no matching transcript entry, which prevents scrutiny from checking whether the rust-library-worker procedure was followed.",
+      "evidence": "features.json assigns completedWorkerSessionId 544dee43-22c2-4960-b977-955d3d263437 to milestone-b-recursive-foreign-link-normalization, while searching C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\worker-transcripts.jsonl for that session id returned no matches."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The shared library guidance documents raw-query string-form record-link compatibility and recursive foreign decode expectations, but it does not note that the canonical normalization seam now lives in repository::normalize_foreign_shapes and is reused by both decode_stored_row_value and decode_hydrated_row.",
+      "evidence": "C:\\Users\\admin\\appdb\\core\\src\\repository\\mod.rs lines 95-107 and 146-163 show normalize_foreign_shapes calling rewrite_foreign_json_value plus decode_stored_record_links for both hydrated-row and stored-row decode paths, while .factory/library/architecture.md and nested-store.md describe the requirement only at a higher level."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail. The assigned worker/commit evidence points to an unrelated explicit-id foreign persistence change rather than the requested recursive foreign-link normalization work, and the mission transcript artifact for the recorded worker session is missing. The normalization behavior itself appears present in the current baseline, but it is not represented by the reviewed feature commit."
+}

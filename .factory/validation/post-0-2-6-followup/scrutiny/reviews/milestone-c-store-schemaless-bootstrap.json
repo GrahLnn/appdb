@@ -1,26 +1,26 @@
 {
   "featureId": "milestone-c-store-schemaless-bootstrap",
-  "reviewedAt": "2026-03-24T00:00:00Z",
+  "reviewedAt": "2026-03-23T20:48:30Z",
   "commitId": "83c9d237255cc46b5b665102e286613e0f6e012f",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "pass",
   "codeReview": {
-    "summary": "Commit 83c9d237255cc46b5b665102e286613e0f6e012f adds the focused schemaless foreign bootstrap regression and the current runtime code satisfies the feature contract: explicit-id foreign persistence routes missing-table/not-found child failures through the same Store-wide ensure path used for root saves, so a fresh schemaless parent save auto-creates both parent and child tables without any foreign-only table-definition exception.",
+    "summary": "Commit 83c9d237255cc46b5b665102e286613e0f6e012f satisfies the feature contract. Runtime support is present in core/src/lib.rs where RepoForeignPersistence.ensure_at routes explicit-id foreign persistence through Repo::<T>::upsert_at so foreign children inherit the same first-write table bootstrap semantics as root saves, and the commit adds a focused schemaless regression proving a fresh no-schema parent save auto-creates the foreign child table, stores a RecordId reference at rest, and hydrates correctly on get().",
     "issues": []
   },
   "sharedStateObservations": [
     {
-      "area": "knowledge",
-      "observation": "The shared library guidance captures the new Store-wide schemaless bootstrap rule, but it still does not record the separately-proven schema-managed vs schemaless boundary that was added immediately afterward. Workers reviewing save/bootstrap behavior must infer from README/runtime docs and the later schema_managed_runtime_applies_registered_inventory regression that managed-open schema application is a distinct contract from schemaless first-save bootstrap.",
-      "evidence": ".factory/library/architecture.md and .factory/library/nested-store.md mention schemaless bootstrap as a Store-wide rule, but neither mentions the later contract split proven by commit 2d714404380b067da999c65a8ae45cd85ece07a9 (README.md, core/src/connection/mod.rs, core/tests/integration_db.rs:1673)."
+      "area": "services",
+      "observation": "The commit that implements this feature also bundled unrelated hydrate-roundtrip scrutiny artifact additions/deletions under .factory/validation, but .factory/services.yaml documents only cargo validation commands and does not capture any convention for isolating mission-artifact staging from code feature commits.",
+      "evidence": "git show --stat 83c9d237255cc46b5b665102e286613e0f6e012f shows the intended code/test change in core/tests/integration_db.rs plus 11 unrelated .factory/validation/hydrate-roundtrip and save-atomicity review artifact edits."
     },
     {
-      "area": "knowledge",
-      "observation": "Mission artifacts for this feature are incomplete: the feature is marked completed with worker session 8a552dd5-f5e9-4310-859a-cbe2ecd9e3f2, but there is no matching handoff file.",
-      "evidence": "The feature id and completedWorkerSessionId are present in C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\features.json, and scrutiny-validator transcript skeleton evidence shows the subagent assignment for feature milestone-c-store-schemaless-bootstrap. However, C:\\Users\\admin\\.factory\\missions\\fb36f232-36a4-4e47-b2c9-192ab540f0fc\\handoffs contains no file for session 8a552dd5-f5e9-4310-859a-cbe2ecd9e3f2."
+      "area": "skills",
+      "observation": "Mission traceability for this completed feature is incomplete: the assigned worker session has no handoff file and no worker-transcripts.jsonl entry, so scrutiny could not verify the rust-library-worker fail-first procedure directly and had to rely on landed diff plus existing review evidence.",
+      "evidence": "features.json marks completedWorkerSessionId as 8a552dd5-f5e9-4310-859a-cbe2ecd9e3f2 for milestone-c-store-schemaless-bootstrap, but mission handoffs contain no filename with that session id and Grep over worker-transcripts.jsonl finds no matching entry."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Pass. I reviewed the feature definition, scrutiny-validator transcript skeleton evidence, the landed regression commit 83c9d237255cc46b5b665102e286613e0f6e012f, the relevant runtime persistence seam in core/src/lib.rs, the focused tests in core/tests/integration_db.rs, and the mission shared-state files. The feature contract is satisfied: schemaless graph saves bootstrap Store-backed foreign child tables through the same Store-wide persistence behavior already used for root models, preserve RecordId storage at rest, and hydrate correctly on follow-up reads. Mission metadata remains incomplete because the recorded worker session has no handoff artifact, but that did not reveal a code defect."
+  "summary": "Pass. I reviewed the feature metadata, available prior scrutiny evidence, commit 83c9d237255cc46b5b665102e286613e0f6e012f, the runtime foreign bootstrap seam, and the focused regression in core/tests/integration_db.rs. The feature correctly makes schemaless foreign child bootstrap a Store-wide save contract and I found no blocking or non-blocking code defects within this feature scope."
 }
