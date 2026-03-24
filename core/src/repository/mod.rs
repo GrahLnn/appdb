@@ -275,8 +275,8 @@ pub(crate) async fn record_exists(record: RecordId) -> Result<bool> {
         db.select(record).await;
     match selected {
         Ok(existing) => Ok(existing.is_some()),
-        Err(err) => match DBError::from(err) {
-            DBError::MissingTable(_) => Ok(false),
+        Err(err) => match crate::error::classify_surreal_error(err) {
+            crate::error::DBError::MissingTable(_) => Ok(false),
             other => Err(other.into()),
         },
     }

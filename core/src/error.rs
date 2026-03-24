@@ -31,7 +31,7 @@ pub enum DBError {
 
 impl From<surrealdb::Error> for DBError {
     fn from(err: surrealdb::Error) -> Self {
-        classify_db_error_message(err.to_string())
+        classify_surreal_error(err)
     }
 }
 
@@ -95,6 +95,10 @@ impl ClassifiedDBError {
 
 pub fn classify_db_error_message(message: String) -> DBError {
     classify_db_error_text(message).into_db_error()
+}
+
+pub fn classify_surreal_error(err: surrealdb::Error) -> DBError {
+    classify_db_error_message(err.to_string())
 }
 
 pub fn classify_db_error_text(message: String) -> ClassifiedDBError {
