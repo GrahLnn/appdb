@@ -426,15 +426,12 @@ where
             }
         }
         Ok(record_id) => Ok(record_id),
-        Err(err)
-            if matches!(
-                crate::error::classify_db_error(&err).kind(),
-                crate::error::DBErrorKind::MissingTable | crate::error::DBErrorKind::NotFound
-            ) =>
-        {
-            save_foreign_created(persistence.ensure_at(explicit_record_id, value).await?).await
-        }
-        Err(err) => Err(err),
+        Err(err) => match crate::error::classify_db_error(&err) {
+            crate::error::DBError::MissingTable(_) | crate::error::DBError::NotFound => {
+                save_foreign_created(persistence.ensure_at(explicit_record_id, value).await?).await
+            }
+            other => Err(other.into()),
+        },
     }
 }
 
@@ -454,15 +451,12 @@ where
 {
     match value.resolve_record_id().await {
         Ok(record_id) => Ok(record_id),
-        Err(err)
-            if matches!(
-                crate::error::classify_db_error(&err).kind(),
-                crate::error::DBErrorKind::NotFound
-            ) =>
-        {
-            save_foreign_created(persistence.create(value).await?).await
-        }
-        Err(err) => Err(err),
+        Err(err) => match crate::error::classify_db_error(&err) {
+            crate::error::DBError::NotFound => {
+                save_foreign_created(persistence.create(value).await?).await
+            }
+            other => Err(other.into()),
+        },
     }
 }
 
