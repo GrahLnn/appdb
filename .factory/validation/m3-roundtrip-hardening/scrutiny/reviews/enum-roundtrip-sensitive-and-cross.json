@@ -1,21 +1,21 @@
 {
   "featureId": "enum-roundtrip-sensitive-and-cross",
-  "reviewedAt": "2026-03-24T20:07:41.413701Z",
+  "reviewedAt": "2026-03-24T20:27:59.217638+00:00",
   "commitId": "376c1a87",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "pass",
   "codeReview": {
-    "summary": "The feature is implemented as scoped test/evidence work and it now directly proves the required sensitive-contained enum, nested-override coexistence, and mixed batch isolation contracts without changing production runtime behavior.",
+    "summary": "The feature adds focused integration proofs for the three promised m3 contracts and the current HEAD state still supports them. The reviewed tests exercise sensitive-contained enum save/get/list/save_many roundtrip with encrypted-at-rest checks, prove enum-bearing sensitive rows still roundtrip exactly while nested override rows coexist, and verify mixed save_many paths preserve auto-ensure plus wrong-context failure semantics for nested leaves.",
     "issues": []
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The rust-library-worker skill still leaves Windows init handling ambiguous. This worker attempted to execute .factory/init.sh directly via PowerShell even though mission/global guidance says .sh files must be read as text and translated to native commands.",
-      "evidence": "worker-transcripts.jsonl session 318fe76a-299a-4835-88bb-17c8b5544c82 records an Execute step invoking .factory/init.sh, while handoff.skillFeedback.deviations explicitly says Windows rejected direct .sh execution and suggests updating the skill guidance."
+      "observation": "The rust-library-worker skill still leaves Windows startup handling easy to misapply. This reviewed worker attempted to execute .factory/init.sh directly via PowerShell before falling back, even though the mission/global guidance says .sh files on Windows must be treated as text only.",
+      "evidence": "Handoff skillFeedback for worker 318fe76a-299a-4835-88bb-17c8b5544c82 records a direct .factory/init.sh execution attempt before fallback; .factory/skills/rust-library-worker/SKILL.md step 2 mentions not executing .sh directly but does not explicitly restate the expected read-and-translate startup flow."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Reviewed commit 376c1a87 and the worker transcript/handoff. The added integration regressions explicitly cover VAL-ER-002, VAL-CROSS-003, and VAL-CROSS-005, and the compile-fail stderr refresh matches the approved SensitiveValueOf<T> secure-container seam. No blocking or non-blocking code issues were found."
+  "summary": "Pass. The reviewed feature is valid: the added integration regressions directly cover VAL-ER-002, VAL-CROSS-003, and VAL-CROSS-005, and no blocking gaps were found in the claimed sensitive-contained enum or mixed-batch proofs."
 }

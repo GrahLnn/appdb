@@ -1,0 +1,21 @@
+{
+  "featureId": "enum-roundtrip-real-rust-enums-fix",
+  "reviewedAt": "2026-03-24T20:27:44.849236+00:00",
+  "commitId": "81b72f0c1809a4ed9bb1fbc41975b414bd03f9e1",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix genuinely replaces the remaining plain-path stand-in structs with real Rust enums in core/tests/integration_db.rs and the updated regression now proves save/get/list/save_many roundtrip behavior, Option<Enum> Some/None handling, payload variants, batch row association, and the persisted serde/Surreal row shape for the plain Store path. I found no blocking or non-blocking issues in the reviewed feature scope.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The prior follow-up feature \u001bnum-roundtrip-real-enum-proof-fix reported success without touching the promised Rust test surface; scrutiny only caught the gap later. The worker skill now contains a guard for verification-only/follow-up sessions to confirm that the commit surface actually touches the promised code or test files before marking success, which matches the failure pattern seen in the transcript history.",
+      "evidence": "Prior transcript/handoff for worker 5a49229c-8062-44d6-9b26-dd2c49d38e13 shows commit 5854f064c65dda6e248ccc40c573bea7918314dc while the later scrutiny transcript notes that commit touched only .factory/validation/m3-roundtrip-hardening/** JSON artifacts. Current skill file C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md step 9 now explicitly requires commit-surface confirmation for verification-only/follow-up sessions."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature handoff, transcript skeleton, commit 81b72f0, and current HEAD test file. The plain enum proof is valid: the regression now uses actual Rust enums and explicitly covers the required plain Store roundtrip scenarios without widening scope."
+}
