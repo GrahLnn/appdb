@@ -661,6 +661,11 @@ where
     /// Upserts one model using its `id` field and returns the normalized row.
     /// Saves a model by its `id` field and returns the normalized row.
     pub async fn save(data: T) -> Result<T> {
+        if !T::has_foreign_fields() && extract_record_id_key(&data).is_ok() {
+            let record = RecordId::new(T::storage_table(), extract_record_id_key(&data)?);
+            return persist_explicit_id_primitive::<T>(record, data, false).await;
+        }
+
         let db = get_db()?;
         let (stored, created_foreign_records) =
             crate::run_with_foreign_cleanup_scope(|| async { T::persist_foreign(data).await })
