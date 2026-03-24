@@ -19,7 +19,7 @@ None
 
 1. Read the assigned feature plus `mission.md`, mission `AGENTS.md`, `.factory/library/*.md`, and `.factory/services.yaml`.
 2. Inspect the exact runtime/macro/test seams before editing. For this repo, that often means `macros/src/lib.rs`, `core/src/crypto.rs`, `core/src/lib.rs`, and the relevant files under `core/tests/`.
-3. If GitNexus tooling is unavailable, explicitly note the fallback and use direct source inspection plus focused grep/diff review.
+3. If GitNexus tooling is unavailable, explicitly note the fallback and use direct source inspection plus focused grep/diff review. For this repo, that fallback is acceptable mission compliance when the callable GitNexus integration is absent in the worker session.
 4. Add or update focused failing tests first. Prefer the narrowest meaningful surface:
    - compile/UI tests for derive syntax, unsupported shapes, and trait-bound regressions
    - `sensitive_roundtrip` for runtime encryption/decryption behavior
