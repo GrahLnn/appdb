@@ -158,10 +158,13 @@ pub fn reset_default_crypto_config() {
 }
 
 type ResolverKey = (&'static str, &'static str);
+type CryptoResolverRegistry = HashMap<ResolverKey, Arc<CryptoContext>>;
+type AutoCryptoInit = Arc<OnceLock<()>>;
+type AutoCryptoRegistry = HashMap<&'static str, AutoCryptoInit>;
 
-static CRYPTO_RESOLVER_REGISTRY: LazyLock<RwLock<HashMap<ResolverKey, Arc<CryptoContext>>>> =
+static CRYPTO_RESOLVER_REGISTRY: LazyLock<RwLock<CryptoResolverRegistry>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
-static AUTO_CRYPTO_REGISTRY: LazyLock<RwLock<HashMap<&'static str, Arc<OnceLock<()>>>>> =
+static AUTO_CRYPTO_REGISTRY: LazyLock<RwLock<AutoCryptoRegistry>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Registers a crypto context for the generated tag of one secure field.
@@ -249,7 +252,7 @@ where
     Tag: SensitiveFieldTag,
 {
     for meta in Tag::crypto_metadata().secure_fields {
-        let context = Arc::new(build_context_for_metadata(&meta)?);
+        let context = Arc::new(build_context_for_metadata(meta)?);
         CRYPTO_RESOLVER_REGISTRY
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
