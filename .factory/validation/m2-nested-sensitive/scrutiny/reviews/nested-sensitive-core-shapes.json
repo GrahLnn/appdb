@@ -1,0 +1,21 @@
+{
+  "featureId": "nested-sensitive-core-shapes",
+  "reviewedAt": "2026-03-24T18:42:30.820696+00:00",
+  "commitId": "05ee508c712cd155fc1b238390079479009992c0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature implements the requested recursive nested-sensitive seam correctly. The new SensitiveShape abstraction carries the parent field's resolved crypto context into Child, Option<Child>, and Vec<Child> leaves, and the focused runtime/store tests cover plaintext caller results plus encrypted-at-rest storage for the approved shapes.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The repo now has a concrete recursive sensitive runtime seam (SensitiveShape) that is central to nested secure behavior, but .factory/library/sensitive-crypto.md still describes the rule only at a high level and does not record the actual abstraction name or where it lives. That omission makes later workers rediscover the implementation seam by source inspection.",
+      "evidence": "core/src/lib.rs:103 defines SensitiveShape; macros/src/lib.rs:1263-1307 routes secure fields through it; .factory/library/sensitive-crypto.md mentions inherited parent-field context but not the SensitiveShape seam."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. Diff and transcript match the contract for nested Child, Option<Child>, and Vec<Child> secure shapes, with no blocking or non-blocking code issues found. One shared-state knowledge gap remains: the library docs do not yet capture the concrete SensitiveShape abstraction that now underpins nested secure recursion."
+}

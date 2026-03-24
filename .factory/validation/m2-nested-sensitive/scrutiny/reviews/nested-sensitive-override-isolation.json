@@ -1,0 +1,39 @@
+{
+  "featureId": "nested-sensitive-override-isolation",
+  "reviewedAt": "2026-03-24T18:43:14.940382Z",
+  "commitId": "05ee508c712cd155fc1b238390079479009992c0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The commit implements nested sensitive recursive shapes, but it does not add any feature-specific proof for nested field-account override isolation. The reviewed tests only cover top-level multi-field scoping and top-level override/default isolation, so VAL-CROSS-002 remains unproven for nested secure leaves.",
+    "issues": [
+      {
+        "file": "core/tests/sensitive_roundtrip.rs",
+        "line": 201,
+        "severity": "blocking",
+        "description": "The only wrong-context regression exercised here is `sensitive_runtime_resolver_supports_multi_field_scoping`, which covers two top-level secure fields on `DualSecretCard`. It never constructs a nested secure leaf under a parent `#[secure]` field with a field-level account override, so it does not prove that nested leaves inherit the correct effective context or fail under a sibling leaf context as required by `nested-sensitive-override-isolation`."
+      },
+      {
+        "file": "core/tests/integration_db.rs",
+        "line": 5468,
+        "severity": "blocking",
+        "description": "`store_sensitive_auto_crypto_overrides_and_default_isolation_hold_across_interleaved_models` verifies top-level model/default override isolation only. There is no nested Store regression in this commit or surrounding HEAD that saves a parent with multiple nested secure leaves using distinct field-account overrides and then proves wrong-leaf decryption fails, so the feature contract for nested override isolation is not covered."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker marked the feature complete without adding or identifying any nested-specific regression for VAL-CROSS-002, even though the skill says workers should prove the exact contract and prefer explicit negative tests when nested override behavior is the requirement.",
+      "evidence": "Worker transcript for session 8ec2a104-a29a-4c68-951b-461b812f312b shows only verification of `sensitive_runtime_resolver_supports_multi_field_scoping` and `store_sensitive_auto_crypto_overrides_and_default_isolation_hold_across_interleaved_models`, both pre-existing non-nested tests in `core/tests/sensitive_roundtrip.rs:201` and `core/tests/integration_db.rs:5468`."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The shared library notes nested context inheritance and override precedence, but they do not record that no dedicated nested override isolation regression exists yet. That gap made it easier for a worker to treat top-level override tests as sufficient evidence for a nested-specific contract.",
+      "evidence": "`.factory/library/sensitive-crypto.md` documents nested inherited context rules and override precedence, while the reviewed codebase lacks any test matching nested field-account wrong-context failure for VAL-CROSS-002."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail: the reviewed commit does not demonstrate the assigned nested override isolation behavior. Existing evidence covers top-level field scoping and top-level override isolation, not nested secure leaves with sibling-context failure checks."
+}
