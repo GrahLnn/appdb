@@ -1,0 +1,33 @@
+{
+  "featureId": "nested-sensitive-metadata-and-bounds",
+  "reviewedAt": "2026-03-24T18:42:23.050404+00:00",
+  "commitId": "05ee508c712cd155fc1b238390079479009992c0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The commit adds recursive nested sensitive shapes and metadata exposure, but it does not add the promised compile-surface regression proving nested sensitive derives avoid unnecessary trait bounds. Metadata exposure and unsupported-wrapper compile-fail coverage are present.",
+    "issues": [
+      {
+        "file": "core/tests/sensitive_compile.rs",
+        "line": 2,
+        "severity": "blocking",
+        "description": "The trybuild suite does not include any fixture covering VAL-NS-008. There is no compile-pass case proving nested sensitive derives work when plaintext child types intentionally omit non-essential traits like PartialEq/Eq/Display, so the feature contract about slimming the generated Encrypted* trait burden is unproven."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker skill still tells workers to add or update failing tests first, but this feature was treated as verification-only because the implementation was already on HEAD. The transcript shows that behavior is currently justified and the skill may need explicit verification-only guidance for already-landed features.",
+      "evidence": "worker-transcripts.jsonl entry for session 8f8c286b-2f2f-494b-98bc-980326db7578 and handoff.skillFeedback suggestedChanges both note a no-code verification flow for already-implemented features."
+    },
+    {
+      "area": "conventions",
+      "observation": "GitNexus impact analysis was not performed because callable GitNexus tooling was unavailable, and the current mission/skill guidance relies on a fallback to source inspection plus diff review. This repo-level convention exists in AGENTS/CLAUDE but is not actionable inside worker tooling without clearer integration availability guidance.",
+      "evidence": "Mission AGENTS.md requires gitnexus_impact before edits; the worker transcript and handoff used only source inspection plus git diff/cargo validation and explicitly noted the fallback."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: metadata exposure and wrapper-boundary checks are present, but the feature contract promised compile-surface proof that nested sensitive derives no longer impose unnecessary trait bounds, and that proof is missing from the committed tests."
+}

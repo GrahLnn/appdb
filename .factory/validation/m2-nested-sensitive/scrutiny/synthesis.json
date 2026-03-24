@@ -1,0 +1,72 @@
+{
+  "milestone": "m2-nested-sensitive",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 12",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 1,
+    "failed": 2,
+    "failedFeatures": [
+      "nested-sensitive-metadata-and-bounds",
+      "nested-sensitive-override-isolation"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "nested-sensitive-metadata-and-bounds",
+      "severity": "blocking",
+      "description": "The trybuild suite does not include a compile-pass case proving nested sensitive derives work when plaintext child types intentionally omit non-essential traits like PartialEq/Eq/Display, so VAL-NS-008 remains unproven."
+    },
+    {
+      "featureId": "nested-sensitive-override-isolation",
+      "severity": "blocking",
+      "description": "The reviewed tests only cover top-level wrong-context and override/default isolation; there is no nested secure leaf regression proving sibling-context failure for field-account overrides, so VAL-CROSS-002 remains unproven."
+    },
+    {
+      "featureId": "nested-sensitive-override-isolation",
+      "severity": "blocking",
+      "description": "There is no nested Store regression that saves a parent with multiple nested secure leaves using distinct field-account overrides and then proves wrong-leaf decryption fails, leaving the feature contract uncovered in persisted paths."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skill:scrutiny-validator or rust-library-worker",
+      "suggestion": "Add explicit guidance for verification-only reviews of already-landed features so workers know when they must prove the exact contract with focused evidence instead of treating nearby pre-existing tests as sufficient.",
+      "evidence": "The metadata/bounds and override-isolation reviews both found workers completing features on HEAD using surrounding tests that did not directly prove the promised contract.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Document the concrete SensitiveShape abstraction in shared knowledge.",
+      "reason": "Useful but belongs in .factory/library, and updating docs was not necessary to complete this scrutiny synthesis."
+    },
+    {
+      "observation": "Clarify GitNexus fallback availability in worker guidance.",
+      "reason": "The repo already documents the fallback in AGENTS.md/CLAUDE.md; the review did not establish a concrete project-state change needed inside this milestone synthesis."
+    },
+    {
+      "observation": "Record that no dedicated nested override isolation regression exists yet in .factory/library/sensitive-crypto.md.",
+      "reason": "This is accurate but should be addressed by the fix feature that adds the missing regression rather than by the scrutiny synthesizer."
+    }
+  ],
+  "previousRound": null
+}
