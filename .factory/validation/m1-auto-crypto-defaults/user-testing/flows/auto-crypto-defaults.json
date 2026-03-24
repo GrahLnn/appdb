@@ -1,0 +1,87 @@
+{
+  "milestone": "m1-auto-crypto-defaults",
+  "surface": "cargo-tests",
+  "assertions": [
+    {
+      "id": "VAL-ACD-001",
+      "status": "pass",
+      "evidence": [
+        "sensitive_runtime_resolver_auto_initializes_from_defaults",
+        "store_sensitive_save_get_uses_generated_resolver_tags_without_call_site_context"
+      ]
+    },
+    {
+      "id": "VAL-ACD-002",
+      "status": "pass",
+      "evidence": [
+        "sensitive_runtime_resolver_auto_initializes_from_defaults"
+      ]
+    },
+    {
+      "id": "VAL-ACD-003",
+      "status": "pass",
+      "evidence": [
+        "store_sensitive_auto_crypto_overrides_and_default_isolation_hold_across_interleaved_models"
+      ]
+    },
+    {
+      "id": "VAL-ACD-004",
+      "status": "pass",
+      "evidence": [
+        "store_sensitive_auto_crypto_overrides_and_default_isolation_hold_across_interleaved_models"
+      ]
+    },
+    {
+      "id": "VAL-ACD-005",
+      "status": "pass",
+      "evidence": [
+        "sensitive_runtime_resolver_supports_multi_field_scoping",
+        "store_sensitive_auto_crypto_overrides_and_default_isolation_hold_across_interleaved_models"
+      ]
+    },
+    {
+      "id": "VAL-ACD-006",
+      "status": "pass",
+      "evidence": [
+        "sensitive_runtime_resolver_auto_initializes_from_defaults"
+      ]
+    },
+    {
+      "id": "VAL-ACD-007",
+      "status": "pass",
+      "evidence": [
+        "store_sensitive_save_get_uses_generated_resolver_tags_without_call_site_context",
+        "store_sensitive_list_and_list_limit_return_plaintext_models",
+        "store_sensitive_save_many_and_insert_return_plaintext_models"
+      ]
+    },
+    {
+      "id": "VAL-ACD-008",
+      "status": "pass",
+      "evidence": [
+        "sensitive_runtime_resolver_auto_initialization_failures_surface_crypto_errors"
+      ]
+    },
+    {
+      "id": "VAL-CROSS-004",
+      "status": "pass",
+      "evidence": [
+        "store_sensitive_auto_crypto_overrides_and_default_isolation_hold_across_interleaved_models"
+      ]
+    },
+    {
+      "id": "VAL-CROSS-006",
+      "status": "pass",
+      "evidence": [
+        "sensitive_runtime_resolver_first_use_models_track_global_default_changes_without_retroactive_leakage",
+        "store_sensitive_later_first_use_models_pick_up_new_global_defaults"
+      ]
+    }
+  ],
+  "toolsUsed": [
+    "cargo test --manifest-path core/Cargo.toml --test sensitive_roundtrip -- --nocapture",
+    "cargo test --manifest-path core/Cargo.toml --test integration_db store_sensitive_ -- --nocapture"
+  ],
+  "frictions": [],
+  "blockers": []
+}
