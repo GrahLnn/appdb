@@ -564,19 +564,6 @@ async fn ensure_db() {
         .expect("database should initialize");
 }
 
-fn install_sensitive_test_contexts() {
-    clear_crypto_context_registry();
-    let ctx = CryptoContext::new([7; 32]).expect("test context should be valid");
-    register_crypto_context_for::<AppdbSensitiveFieldTagItSensitiveProfileSecret>(ctx.clone());
-    register_crypto_context_for::<AppdbSensitiveFieldTagItSensitiveProfileNote>(ctx);
-
-    let ctx = CryptoContext::new([8; 32]).expect("lookup source context should be valid");
-    register_crypto_context_for::<AppdbSensitiveFieldTagItSensitiveLookupSourceSecret>(ctx);
-
-    let ctx = CryptoContext::new([9; 32]).expect("lookup target context should be valid");
-    register_crypto_context_for::<AppdbSensitiveFieldTagItSensitiveLookupTargetSecret>(ctx);
-}
-
 async fn load_sensitive_profile_raw(id: &str) -> StoredSensitiveProfileRow {
     let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
         .bind("table", ItSensitiveProfile::table_name())
@@ -3358,7 +3345,6 @@ fn mixed_sensitive_models_resolve_unique_ids_through_non_secure_fields() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItSensitiveLookupSource>::delete_all()
             .await
@@ -3704,7 +3690,6 @@ fn relation_type_api_accepts_mixed_sensitive_store_models_without_exposing_encry
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItSensitiveLookupSource>::delete_all()
             .await
@@ -4159,7 +4144,6 @@ fn store_sensitive_save_get_roundtrip_encrypts_at_rest() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItSensitiveProfile>::delete_all()
             .await
@@ -4192,7 +4176,6 @@ fn nested_ref_cross_area_regressions() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItNestedParent>::delete_all()
             .await
@@ -4926,7 +4909,6 @@ fn store_sensitive_list_and_list_limit_return_plaintext_models() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItSensitiveProfile>::delete_all()
             .await
@@ -4974,7 +4956,6 @@ fn store_sensitive_create_and_create_at_keep_plaintext_surface() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItSensitiveProfile>::delete_all()
             .await
@@ -5017,7 +4998,6 @@ fn store_create_return_id_keeps_plain_store_behavior_and_guards_sensitive_models
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItProfile>::delete_all()
             .await
@@ -5073,7 +5053,6 @@ fn store_sensitive_upsert_and_update_paths_replace_ciphertext() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItSensitiveProfile>::delete_all()
             .await
@@ -5136,7 +5115,6 @@ fn store_sensitive_save_many_and_insert_return_plaintext_models() {
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItSensitiveProfile>::delete_all()
             .await
@@ -5207,7 +5185,6 @@ fn store_sensitive_insert_ignore_and_insert_or_replace_preserve_plaintext_semant
     let _guard = acquire_test_lock();
     run_async(async {
         ensure_db().await;
-        install_sensitive_test_contexts();
 
         Repo::<ItSensitiveProfile>::delete_all()
             .await

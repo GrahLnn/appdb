@@ -6,10 +6,25 @@ use appdb::crypto::{
 };
 use appdb::Sensitive;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use surrealdb::types::SurrealValue;
 
 static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+fn crypto_test_local_appdata(label: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock before epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "appdb_sensitive_crypto_{}_{}_{}",
+        label,
+        std::process::id(),
+        nanos
+    ))
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
 struct BankCard {
@@ -175,11 +190,56 @@ fn sensitive_runtime_resolver_supports_multi_field_scoping() {
 }
 
 #[test]
-fn sensitive_runtime_resolver_reports_missing_mapping() {
+fn sensitive_runtime_resolver_auto_initializes_from_defaults() {
     let _guard = TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     clear_crypto_context_registry();
+    reset_default_crypto_config();
+    let local_appdata = crypto_test_local_appdata("defaults");
+    unsafe {
+        std::env::set_var("LOCALAPPDATA", &local_appdata);
+    }
+    let card = BankCard {
+        issuer: "ACME Bank".to_owned(),
+        number: "4111111111111111".to_owned(),
+        cvv: "123".to_owned(),
+    };
+
+    let encrypted = card
+        .encrypt_with_runtime_resolver()
+        .expect("defaults should auto-register runtime contexts");
+    let decrypted = BankCard::decrypt_with_runtime_resolver(&encrypted)
+        .expect("auto-registered contexts should decrypt");
+
+    assert_eq!(decrypted, card);
+    unsafe {
+        std::env::remove_var("LOCALAPPDATA");
+    }
+    let _ = std::fs::remove_dir_all(local_appdata);
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+}
+
+#[test]
+fn sensitive_runtime_resolver_auto_initialization_failures_surface_crypto_errors() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+    let local_appdata = crypto_test_local_appdata("invalid-key");
+    let backup_dir = local_appdata
+        .join("broken_service")
+        .join("key-backup");
+    std::fs::create_dir_all(&backup_dir).expect("backup dir should be creatable");
+    std::fs::write(backup_dir.join("broken_account.bin"), [1_u8; 7])
+        .expect("invalid backup key should be written");
+    unsafe {
+        std::env::set_var("LOCALAPPDATA", &local_appdata);
+    }
+    set_default_crypto_config("broken_service", "broken_account");
+
     let card = BankCard {
         issuer: "ACME Bank".to_owned(),
         number: "4111111111111111".to_owned(),
@@ -188,9 +248,23 @@ fn sensitive_runtime_resolver_reports_missing_mapping() {
 
     let err = card
         .encrypt_with_runtime_resolver()
-        .expect_err("missing mapping should fail");
+        .expect_err("invalid provider key should surface a crypto error");
 
-    assert!(matches!(err, CryptoError::ResolverNotFound { .. }));
+    assert!(
+        matches!(
+            err,
+            CryptoError::InvalidKeyLength
+                | CryptoError::SecretStore(_)
+                | CryptoError::ProtectedBackup(_)
+        ),
+        "unexpected error: {err:?}"
+    );
+    unsafe {
+        std::env::remove_var("LOCALAPPDATA");
+    }
+    let _ = std::fs::remove_dir_all(local_appdata);
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
 }
 
 #[test]
@@ -210,7 +284,13 @@ fn sensitive_crypto_metadata_exposes_defaults_and_overrides() {
     assert_eq!(account_meta.field_tag, "password");
     assert_eq!(account_meta.service, None);
     assert_eq!(account_meta.account, None);
-    assert_eq!(AccountSecrets::SECURE_FIELDS, [*account_meta]);
+    assert_eq!(AccountSecrets::SECURE_FIELDS.len(), 1);
+    assert_eq!(AccountSecrets::SECURE_FIELDS[0].model_tag, account_meta.model_tag);
+    assert_eq!(AccountSecrets::SECURE_FIELDS[0].field_tag, account_meta.field_tag);
+    assert_eq!(AccountSecrets::SECURE_FIELDS[0].service, account_meta.service);
+    assert_eq!(AccountSecrets::SECURE_FIELDS[0].account, account_meta.account);
+    assert_eq!(account_meta.secure_fields.len(), 1);
+    assert_eq!(account_meta.secure_fields[0].field_tag, "password");
 
     let override_key = <AppdbSensitiveFieldTagOverrideSecretsApiKey as SensitiveFieldTag>::crypto_metadata();
     let override_note = <AppdbSensitiveFieldTagOverrideSecretsNote as SensitiveFieldTag>::crypto_metadata();

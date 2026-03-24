@@ -789,6 +789,7 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
                     field_tag: #field_tag_literal,
                     service: #service_literal,
                     account: #account_literal,
+                    secure_fields: &[],
                 }
             });
             field_tag_structs.push(quote! {
@@ -805,9 +806,14 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
                     }
 
                     fn crypto_metadata() -> &'static ::appdb::crypto::SensitiveFieldMetadata {
-                        &#struct_ident::SECURE_FIELDS[
-                            <#struct_ident as ::appdb::Sensitive>::secure_field_index(#field_tag_literal)
-                        ]
+                        static FIELD_META: ::std::sync::OnceLock<::appdb::crypto::SensitiveFieldMetadata> = ::std::sync::OnceLock::new();
+                        FIELD_META.get_or_init(|| ::appdb::crypto::SensitiveFieldMetadata {
+                            model_tag: <#struct_ident as ::appdb::crypto::SensitiveModelTag>::model_tag(),
+                            field_tag: #field_tag_literal,
+                            service: #service_literal,
+                            account: #account_literal,
+                            secure_fields: &#struct_ident::SECURE_FIELDS,
+                        })
                     }
                 }
             });
