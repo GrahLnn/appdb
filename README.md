@@ -1,28 +1,19 @@
 # appdb
 
-`appdb` 是一个给 Tauri 嵌入式 SurrealDB 使用的轻量辅助库。
+`appdb` is a lightweight SurrealDB helper library for embedded applications, including Tauri-style desktop apps. It provides derive-driven model APIs, a small public surface, and optional field encryption for local-first persistence.
 
-目标只有几个：
+The workspace publishes two crates:
 
-- 用 `#[derive(Store)]` 给模型挂上直接可用的模型级 CRUD 能力
-- 用 prelude 导出一个简单的使用面
-- 保持推荐 API 以模型自身的 `save`、`get`、`list` 这种直观名字为主
-- 给需要加密的字段提供 `Sensitive` 派生支持
+- `appdb`: the main library
+- `appdb-macros`: procedural macros used by `appdb`
 
-## 工作区结构
+## Installation
 
-- `core`: 主库，发布后通过 `cargo add appdb` 使用
-- `macros`: 过程宏，供 `core` 复用并一并导出
+```bash
+cargo add appdb
+```
 
-## 常用入口
-
-- `appdb::prelude::*`: 常用类型和能力的集中导出
-- `appdb::connection`: 数据库初始化和运行时
-- `#[derive(Store)]`: 业务模型的主入口，推荐直接通过模型类型调用 CRUD
-- `appdb::graph::GraphRepo`: relation table 辅助
-- `appdb::query`: 原始 SQL 与带 bind 的查询辅助
-
-## 最小示例
+## Quick Start
 
 ```rust
 use appdb::prelude::*;
@@ -55,7 +46,23 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-## `Store` + `Sensitive` 联动
+## Core Concepts
+
+### Model-first CRUD
+
+`#[derive(Store)]` generates model-level persistence APIs such as `save`, `save_many`, `create`, `get`, and `list`. The intended public API is the model type itself rather than manually assembling repository calls.
+
+Common imports are re-exported from `appdb::prelude::*`.
+
+### Managed schema startup and schemaless persistence
+
+`init_db*` and `DbRuntime::open*` are the schema-managed startup path. They apply registered schema items such as indexes generated from `#[unique]`.
+
+Persistence itself keeps a separate contract: first saves on the default embedded runtime still support schemaless storage. Startup management and model CRUD are related, but they are not the same guarantee.
+
+### Sensitive fields
+
+`#[derive(Sensitive)]` supports encrypted fields marked with `#[secure]`.
 
 ```rust
 use appdb::prelude::*;
@@ -72,60 +79,23 @@ struct Profile {
 }
 ```
 
-对这种模型，业务代码仍然直接使用 `Profile` 调 `save` / `get` / `list` 等 Store API；`#[secure]` 字段会在仓储边界自动加密落库、读回时自动解密。第一版里 `create_return_id` 不支持敏感模型，且 `#[secure]` 字段不能参与 `#[unique]` 或自动 lookup。
+The model still uses the same `Store` APIs, while secure fields are encrypted before persistence and decrypted on read.
 
-## 推荐 public API vs internal helpers
+### Foreign fields
 
-推荐给业务调用方的主路径：
+Use `#[foreign]` on supported child model fields to persist related values as record links while hydrating them back into full models when reading.
 
-- 在模型上直接调用 `save` / `save_many` / `create` / `get` / `list`
-- 需要实例方法时，通过 `appdb::Crud` trait 提供的包装调用
-- 图关系继续使用 `GraphRepo` / relation helpers
+Supported shapes include:
 
-不推荐把下面这些当成日常业务入口：
+- `Child`
+- `Option<Child>`
+- `Vec<Child>`
 
-- `appdb::repository::Repo::<T>`：这是仓储内部构建层，主要给库内部、测试和少量高级集成 seam 使用
-- 直接围绕 internal helper 组合 public CRUD 流程
+`#[table_as(...)]` is also supported for referenced models.
 
-换句话说，`Repo` 仍然公开以保留扩展能力，但文档约定的主 API 已经收敛到模型级 Store/Crud surface，而不是 `Repo::<T>` 组合层。
+### Graph relations
 
-## `#[store(ref)]` 嵌套引用
-
-`Store` 现在支持显式嵌套引用字段：
-
-```rust
-use appdb::prelude::*;
-use appdb::Store;
-use serde::{Deserialize, Serialize};
-use surrealdb::types::SurrealValue;
-
-#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
-struct Child {
-    #[unique]
-    code: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
-struct Parent {
-    id: Id,
-    #[store(ref)]
-    child: Child,
-}
-```
-
-当前语义：
-
-- 只有显式标注 `#[store(ref)]` 的字段才走嵌套引用路径
-- 首版支持 `Child`、`Option<Child>`、`Vec<Child>`
-- 保存父对象时，会先按子对象的 `id` 或现有 lookup 规则解析子记录；找不到时自动创建子记录
-- 父表里只保存子记录的 `RecordId`（或其数组），读取父对象时会自动 hydrate 回完整子对象
-- `save` / `get` / `get_record` / `list` / `list_limit` 会保持一致的 hydrate 结果
-- 失败的 `save` / `save_many` 不应留下父子半成功残留；成功返回的对象应与后续读取结果一致
-- 原始 query 读路径支持字符串形态的 record link（例如 ``child:`c1```）回到正常 hydrate 流程
-- `#[table_as(...)]` 模型参与嵌套引用时，仍通过目标表落库并保持同样的 roundtrip 语义
-- 这一层不会扩展到 `merge` / `patch`
-
-## 图关系示例
+`GraphRepo` provides helpers around SurrealDB relation tables.
 
 ```rust
 use appdb::prelude::*;
@@ -135,9 +105,9 @@ GraphRepo::relate_at(user_a.id(), user_b.id(), rel).await?;
 let targets = GraphRepo::out_ids(user_a.id(), rel, "user").await?;
 ```
 
-## 原始查询
+### Raw SQL with bind values
 
-优先用带 bind 的形式：
+For queries outside the derive-driven CRUD surface, use the raw SQL helpers with bind values.
 
 ```rust
 use appdb::prelude::*;
@@ -146,10 +116,26 @@ let stmt = RawSqlStmt::new("RETURN $value;").bind("value", 42);
 let value: Option<i64> = query_bound_return(stmt).await?;
 ```
 
-## 说明
+## Capabilities
 
-- `DbRuntime::open*` / `init_db*` 走的是 **schema-managed** 启动路径：运行时会先应用通过 schema inventory 注册的 DDL（例如 `#[unique]` 生成的索引）。
-- 直接用默认的嵌入式运行时做首次 `save` / `upsert_at` 时，库仍然保证 **schemaless** 持久化可用；这条承诺是独立的，不能把 managed 启动时顺带应用的 schema side effects 当作它的证明。
-- 因此文档里的推荐调用顺序是：把 `init_db*` / `DbRuntime::open*` 视为 managed schema 启动入口；把模型级 `save` / `get` / `list` 视为稳定的 public CRUD surface。两者分别表达启动契约与持久化契约，不要混成“必须先走 internal repo helper 才能正确保存”。
-- 更细的行为说明已经写进源码里的 rustdoc，直接看对应函数和结构体即可。
-- 这个库偏向单机嵌入式使用场景，不追求大而全的抽象层。
+- `#[derive(Store)]` for model-level CRUD
+- `appdb::prelude::*` for common imports
+- `#[derive(Sensitive)]` and `#[secure]` for encrypted fields
+- `#[unique]`-driven schema registration
+- Foreign fields via `#[foreign]`
+- Table remapping with `#[table_as(...)]`
+- Graph relation helpers via `GraphRepo`
+- Raw SQL helpers with bind support
+
+## Workspace Layout
+
+- `core/`: source for the published `appdb` crate
+- `macros/`: source for the published `appdb-macros` crate
+
+## Development
+
+Run the standard checks from the workspace root:
+
+```bash
+cargo test
+```

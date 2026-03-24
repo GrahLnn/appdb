@@ -786,15 +786,23 @@ where
             let mut prepared = Vec::with_capacity(chunk.len());
             let mut sql = String::from("BEGIN TRANSACTION; ");
             let mut created_foreign_records = Vec::new();
+            let mut seen_records = std::collections::HashSet::with_capacity(chunk.len());
 
             for (idx, row) in chunk.iter().cloned().enumerate() {
-                let (stored_row, mut row_foreign_records) =
+                let ((record, content, id), row_foreign_records) =
                     crate::run_with_foreign_cleanup_scope(|| async {
-                        T::persist_foreign(row).await
+                        let stored_row = T::persist_foreign(row).await?;
+                        let (record, content, id) = prepare_save_parts(T::storage_table(), stored_row)?;
+                        Ok::<_, anyhow::Error>((record, content, id))
                     })
                     .await?;
-                created_foreign_records.append(&mut row_foreign_records);
-                let (record, content, id) = prepare_save_parts(T::storage_table(), stored_row)?;
+                if !seen_records.insert(record.clone()) {
+                    return Err(DBError::Conflict(format!(
+                        "save_many received duplicate record id in one batch: {record:?}"
+                    ))
+                    .into());
+                }
+                created_foreign_records.extend(row_foreign_records);
                 sql.push_str(&format!(
                     "UPSERT ONLY $record_{idx} CONTENT $data_{idx} RETURN AFTER;"
                 ));
