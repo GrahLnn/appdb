@@ -26,12 +26,13 @@ None
    - focused `integration_db` cases for Store/save/get/list/save_many behavior
 5. Run the new or updated tests and confirm they fail for the intended reason before implementation.
 6. Implement the minimal coherent runtime/macro change needed to satisfy the feature. Prefer replacing inferior/manual paths over preserving them as the main path.
-7. Re-run focused tests until they pass, then run broader validators appropriate to the touched surface from `.factory/services.yaml`.
-8. Verify adjacent behavior that could regress:
+7. If a feature appears to be “already implemented” by inherited code, do not assume success. Prove the exact contract with focused tests; if the promised behavior is missing, keep the feature in failure/partial state instead of treating the inherited path as complete.
+8. Re-run focused tests until they pass, then run broader validators appropriate to the touched surface from `.factory/services.yaml`.
+9. Verify adjacent behavior that could regress:
    - scalar secure fields still work
    - unsupported direct secure-enum syntax stays out of scope
    - batch/save_many behavior remains correct where relevant
-9. Produce a handoff with exact commands, observed outcomes, tests added/updated, and any discovered issues or follow-up gaps.
+10. Produce a handoff with exact commands, observed outcomes, tests added/updated, and any discovered issues or follow-up gaps.
 
 ## Example Handoff
 
