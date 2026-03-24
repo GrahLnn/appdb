@@ -1,0 +1,39 @@
+{
+  "featureId": "sensitive-crypto-config-surface",
+  "reviewedAt": "2026-03-24T16:49:16Z",
+  "commitId": "1bb3e3f4448be3e3337b8e9e3cb44a370932ace2",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds the requested attribute parsing, default-config APIs, and generated metadata surface, but it does not yet wire the generated metadata into any runtime hook or resolver path. The new APIs are only exercised by direct metadata inspection tests, so the default provider strategy and later auto-registration hook surface described by the feature remain unimplemented at this commit.",
+    "issues": [
+      {
+        "file": "C:\\Users\\admin\\appdb\\core\\src\\crypto.rs",
+        "line": 120,
+        "severity": "blocking",
+        "description": "The new process-wide default crypto configuration APIs (default_crypto_config, set_default_crypto_config, etc.) are not consumed anywhere in production code. Outside their own test, there are no call sites in core/src or macros/src, so changing these defaults has no effect on encryption behavior. That falls short of the feature description's required default provider strategy surface for later runtime consumption."
+      },
+      {
+        "file": "C:\\Users\\admin\\appdb\\macros\\src\\lib.rs",
+        "line": 787,
+        "severity": "blocking",
+        "description": "Generated SensitiveFieldMetadata stores only per-field overrides and leaves fields without explicit attributes as service: None and account: None. Because the generated metadata never incorporates the process-wide defaults, later runtime auto-registration cannot discover an effective service/account pair from this hook surface alone, contradicting the stated goal that the generated metadata/hooks be what later runtime auto-registration consumes."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker skill still says to add or update focused failing tests first, but this worker primarily re-verified pre-existing changes and never demonstrated a fail-then-fix loop. The skill partly acknowledges verification-only work, but the procedure remains mismatched with sessions that inherit already-implemented code.",
+      "evidence": "C:\\Users\\admin\\appdb\\.factory\\skills\\rust-library-worker\\SKILL.md step 4 requires failing tests first; worker transcript for session ae7f8583-1998-404e-b4c7-af26398e2cd2 shows only passing validation commands and handoff.skillFeedback explicitly asks to clarify verification-only expectations."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Mission shared state documents override precedence conceptually, but it does not record that the current metadata surface only preserves explicit overrides and omits effective defaults. That gap matters because later workers could assume SECURE_FIELDS already contains fully resolved configuration.",
+      "evidence": "C:\\Users\\admin\\appdb\\.factory\\library\\sensitive-crypto.md lists precedence rules, while commit 1bb3e3f in macros/src/lib.rs:787-792 emits service/account as None for defaulted fields and no library note explains that limitation."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed handoff, commit 1bb3e3f4448be3e3337b8e9e3cb44a370932ace2, transcript skeleton, skill file, mission AGENTS, services, and shared library notes. Result: fail, because the commit exposes syntax and metadata inspection APIs but does not provide a runtime-consumable default provider strategy surface: process defaults are unused in production code and generated metadata omits effective default service/account values for defaulted secure fields."
+}

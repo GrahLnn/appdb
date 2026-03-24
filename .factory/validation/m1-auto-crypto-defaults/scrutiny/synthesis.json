@@ -1,0 +1,79 @@
+{
+  "milestone": "m1-auto-crypto-defaults",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 12",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 0,
+    "failed": 2,
+    "failedFeatures": [
+      "sensitive-auto-registration-runtime",
+      "sensitive-crypto-config-surface"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "sensitive-auto-registration-runtime",
+      "severity": "blocking",
+      "description": "resolve_crypto_context only reads from the manual resolver registry and returns CryptoError::ResolverNotFound when no mapping was pre-registered. There is no lazy default-provider initialization, no OnceLock-backed per-model reuse, and no code here that consumes SensitiveFieldMetadata plus global defaults to auto-create a CryptoContext."
+    },
+    {
+      "featureId": "sensitive-auto-registration-runtime",
+      "severity": "blocking",
+      "description": "The generated encrypt_with_runtime_resolver/decrypt_with_runtime_resolver implementations directly call the runtime resolver for each field but do not auto-ensure readiness first. Because no generated OnceLock/ensure_crypto_ready() path exists, direct runtime-resolver operations still fail unless the caller has already registered contexts manually."
+    },
+    {
+      "featureId": "sensitive-auto-registration-runtime",
+      "severity": "blocking",
+      "description": "The runtime test suite still asserts that calling encrypt_with_runtime_resolver without prior registration returns CryptoError::ResolverNotFound. This contradicts the feature contract that direct runtime-resolver paths should auto-ensure readiness using defaults/overrides."
+    },
+    {
+      "featureId": "sensitive-auto-registration-runtime",
+      "severity": "blocking",
+      "description": "Integration coverage still depends on install_sensitive_test_contexts() to pre-register crypto contexts before Store operations. The reviewed tests verify manual setup works; they do not verify the promised behavior that save/get/list/save_many succeed without business-layer registration."
+    },
+    {
+      "featureId": "sensitive-crypto-config-surface",
+      "severity": "blocking",
+      "description": "The new process-wide default crypto configuration APIs (default_crypto_config, set_default_crypto_config, etc.) are not consumed anywhere in production code. Outside their own test, there are no call sites in core/src or macros/src, so changing these defaults has no effect on encryption behavior. That falls short of the feature description's required default provider strategy surface for later runtime consumption."
+    },
+    {
+      "featureId": "sensitive-crypto-config-surface",
+      "severity": "blocking",
+      "description": "Generated SensitiveFieldMetadata stores only per-field overrides and leaves fields without explicit attributes as service: None and account: None. Because the generated metadata never incorporates the process-wide defaults, later runtime auto-registration cannot discover an effective service/account pair from this hook surface alone, contradicting the stated goal that the generated metadata/hooks be what later runtime auto-registration consumes."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Clarify scrutiny/rust worker procedures for verification-only or inherited-code sessions so workers must verify that claimed commits actually implement the promised behavior, and distinguish fail-then-fix expectations from pure verification passes.",
+      "evidence": "Both reviews flagged mismatch between worker procedure and inherited-code validation; one worker reported success for runtime auto-registration even though current code and tests still require manual registration.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Add a library note claiming SECURE_FIELDS contains fully resolved default service/account values.",
+      "reason": "wrong: reviewer evidence shows current metadata only preserves explicit overrides, so documenting it as resolved defaults would be inaccurate."
+    }
+  ],
+  "previousRound": null
+}
