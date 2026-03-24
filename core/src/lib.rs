@@ -428,7 +428,7 @@ where
         Ok(record_id) => Ok(record_id),
         Err(err)
             if matches!(
-                crate::error::classify_db_error_message(err.to_string()).kind(),
+                crate::error::classify_db_error(&err).kind(),
                 crate::error::DBErrorKind::MissingTable | crate::error::DBErrorKind::NotFound
             ) =>
         {
@@ -456,7 +456,7 @@ where
         Ok(record_id) => Ok(record_id),
         Err(err)
             if matches!(
-                crate::error::classify_db_error_message(err.to_string()).kind(),
+                crate::error::classify_db_error(&err).kind(),
                 crate::error::DBErrorKind::NotFound
             ) =>
         {

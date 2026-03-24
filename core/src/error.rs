@@ -104,6 +104,13 @@ pub fn classify_db_error_message(message: String) -> DBError {
     }
 }
 
+pub fn classify_db_error(err: &anyhow::Error) -> DBError {
+    if let Some(db_err) = err.downcast_ref::<DBError>() {
+        return clone_db_error(db_err);
+    }
+    classify_db_error_message(err.to_string())
+}
+
 fn clone_db_error(err: &DBError) -> DBError {
     match err {
         DBError::Transport(message) => DBError::Transport(message.clone()),
