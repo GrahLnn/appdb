@@ -1,21 +1,21 @@
 {
   "featureId": "enum-roundtrip-plain-and-boundaries",
-  "reviewedAt": "2026-03-25T00:00:00Z",
+  "reviewedAt": "2026-03-24T20:27:47.892522+00:00",
   "commitId": "8e121b0cb444b506422c7cd2d86fd98034bba728",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
   "status": "pass",
   "codeReview": {
-    "summary": "The original feature commit still only preserves the direct secure-enum compile-fail boundary plus m3 groundwork, but the follow-up fix commit 5854f064c65dda6e248ccc40c573bea7918314dc adequately addresses the original blocking gap by replacing the struct stand-ins with focused real-enum Store regressions for plain enum, Option<Enum>, and payload-enum roundtrip through save/get/list/save_many.",
+    "summary": "The reviewed commit is correctly scoped to proof-only test work. It replaces the earlier struct stand-ins with actual Rust enums in the plain Store regression and adds a trybuild compile-fail fixture that preserves the unsupported direct secure-enum boundary. The claimed boundary proof is valid for this feature, while the real enum roundtrip proof gap noted in the earlier failed follow-up review is now closed in HEAD by this commit.",
     "issues": []
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The rust-library-worker skill says to add or update focused failing tests first, but the fix worker explicitly skipped that step because the needed proof was already present in the checked-out change. The skill should document this already-implemented verification-only path so workers do not have to record it as a deviation.",
-      "evidence": "Handoff for session 5a49229c-8062-44d6-9b26-dd2c49d38e13: skillFeedback.followedProcedure=false with a deviation on step 5 and a suggested skill change."
+      "observation": "The rust-library-worker skill was updated after the earlier failed enum-proof follow-up to require commit-surface confirmation in verification-only sessions, and this worker followed that stronger rule by touching the promised enum test surface directly. No additional shared-state gap was evident in this feature review.",
+      "evidence": "The feature commit 8e121b0cb444b506422c7cd2d86fd98034bba728 modifies core/tests/integration_db.rs, core/tests/sensitive_compile.rs, and the new UI fixture files, matching the skill guidance in .factory/skills/rust-library-worker/SKILL.md step 9."
     }
   ],
-  "addressesFailureFrom": ".factory/validation/m3-roundtrip-hardening/scrutiny/reviews/enum-roundtrip-plain-and-boundaries.json",
-  "summary": "Review now passes. The prior failure in commit 8e121b0 was real: core/tests/integration_db.rs used struct stand-ins (`ItPlainStatus`, `ItPayloadState`) rather than Rust enums for the plain Store proof. The follow-up fix is adequate because current coverage validates the secure-enum boundary separately while the real-enum proof feature owns and verifies the missing plain enum, Option<Enum>, and payload-enum Store roundtrip contract."
+  "addressesFailureFrom": null,
+  "summary": "Pass. Commit 8e121b0 adds the actual-Rust-enum plain Store regression plus the direct secure-enum compile-fail fixture, so the feature now validly preserves the secure-enum boundary and provides the intended initial m3 groundwork."
 }

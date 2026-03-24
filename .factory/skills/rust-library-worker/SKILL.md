@@ -18,17 +18,17 @@ None
 ## Work Procedure
 
 1. Read the assigned feature plus `mission.md`, mission `AGENTS.md`, `.factory/library/*.md`, and `.factory/services.yaml`.
-2. On Windows, never execute `.sh` files directly. Treat them as text instructions only and translate any needed setup into native commands.
+2. On Windows, never execute `.sh` files directly, including `.factory/init.sh`. Treat them as text instructions only and translate any needed setup into native commands.
 3. Inspect the exact runtime/macro/test seams before editing. For this repo, that often means `macros/src/lib.rs`, `core/src/crypto.rs`, `core/src/lib.rs`, and the relevant files under `core/tests/`.
 4. If GitNexus tooling is unavailable, explicitly note the fallback and use direct source inspection plus focused grep/diff review. For this repo, that fallback is acceptable mission compliance when the callable GitNexus integration is absent in the worker session.
 5. Add or update focused failing tests first. Prefer the narrowest meaningful surface:
    - compile/UI tests for derive syntax, unsupported shapes, and trait-bound regressions
    - `sensitive_roundtrip` for runtime encryption/decryption behavior
    - focused `integration_db` cases for Store/save/get/list/save_many behavior
-6. Run the new or updated tests and confirm they fail for the intended reason before implementation. Record that failing-first proof in the handoff; if you cannot keep the failing test in-tree because the path is structurally impossible, mark that as a deviation explicitly.
+6. Run the new or updated tests and confirm they fail for the intended reason before implementation. Record that failing-first proof in the handoff; if the path is structurally impossible or the only honest proof is an already-present passing regression, record that exception explicitly and explain why no failing-first step could be shown.
 7. Implement the minimal coherent runtime/macro change needed to satisfy the feature. Prefer replacing inferior/manual paths over preserving them as the main path.
 8. If a feature appears to be “already implemented” by inherited code, do not assume success. Prove the exact contract with focused tests; if the promised behavior is missing, keep the feature in failure/partial state instead of treating the inherited path as complete.
-9. In any verification-only or follow-up-proof session, confirm the commit surface actually touches the promised code or test files before marking success. If the feature claims to replace or strengthen a regression, the handoff must name the edited files and explain how they changed.
+9. In any verification-only or follow-up-proof session, confirm the commit surface actually touches the promised code or test files before marking success, especially when the tree starts clean. If the feature claims to replace or strengthen a regression, the handoff must name the edited files and explain how they changed.
 10. Re-run focused tests until they pass, then run broader validators appropriate to the touched surface from `.factory/services.yaml`.
 11. Verify adjacent behavior that could regress:
    - scalar secure fields still work
