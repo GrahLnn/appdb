@@ -1,0 +1,66 @@
+{
+  "milestone": "followup-hardening",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 8",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 2,
+    "failed": 1,
+    "failedFeatures": [
+      "milestone-g-delete-string-table-local"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "milestone-g-delete-string-table-local",
+      "severity": "blocking",
+      "description": "Commit 16e1f07 deletes prior scrutiny outputs unrelated to delete-string semantics, including synthesis and review JSON files under .factory/validation/persistence-primitive-and-errors. The feature brief was limited to tightening Repo::<T>::delete string semantics and preserving explicit delete_record behavior, so shipping this commit would unintentionally erase mission validation artifacts outside the reviewed feature scope."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "The rust-library-worker skill does not describe a clean review-only/evidence-only path for cases where the assigned feature is already present in the checked-out commit, so the worker had to record a procedure deviation despite doing the right thing by verifying the existing implementation.",
+      "evidence": "C:/Users/admin/appdb/.factory/skills/rust-library-worker/SKILL.md step 3 requires writing failing regressions first, but handoff.skillFeedback for session 3238c8b8-b4c4-49aa-a589-eda28537d32c says the behavior was already implemented and covered before the session started.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "The worker transcript and handoff show a detached-head/dirty-tree commit hazard that the current skill does not operationalize well; it should explicitly instruct workers how to verify or recover when unrelated tracked changes would be captured by a feature commit.",
+      "evidence": "The earlier transcript for feature session 9eae9226-69e0-43b1-bd80-272886b19c0e shows repeated reset/amend attempts after unrelated .factory validation files were pulled into commit 16e1f07, while the final handoff for session 3238c8b8-b4c4-49aa-a589-eda28537d32c notes the feature was already present and a clean new commit could not be created due to unrelated mission changes.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "No skill gap observed for this feature review; the worker followed the rust-library-worker procedure, including focused regression coverage and validation, with an explicit fallback note when GitNexus tooling was unavailable.",
+      "evidence": "Handoff skillFeedback.followedProcedure=true; transcript shows targeted regression added in core/tests/integration_db.rs and targeted cargo tests plus cargo check run before handoff.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "The worker could not load the rust-library-worker skill from the path implied by the review instructions because the skill file lives under the repo-local .factory tree, not the user-level .factory tree the generic review prompt suggests.",
+      "evidence": "Review task required reading .factory/skills/<skillName>/SKILL.md; C:\\Users\\admin\\.factory\\skills\\rust-library-worker\\SKILL.md was missing, while the worker transcript for session bbca4d1c-3ceb-47fc-b160-1e0392b90078 shows the actual workflow relied on repo-local guidance and completed successfully.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}

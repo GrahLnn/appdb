@@ -1,0 +1,21 @@
+{
+  "featureId": "milestone-g-explicit-foreign-id-resolution-consistency",
+  "reviewedAt": "2026-03-24T10:42:13.595Z",
+  "commitId": "b2f2e585147214529b5bb035cfd184dc5a634b7d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature correctly hardens the explicit-id foreign persistence seam: matching explicit/resolved ids still follow the existing ensure-or-reuse path, while mismatches now fail deterministically before either row can be reused or created. The added regression exercises the mismatch seam directly and verifies both addressed ids remain absent, covering the intended failure boundary for VAL-G-FOREIGN-002 without regressing the existing VAL-G-FOREIGN-001 behaviors already covered by neighboring integration tests.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "No skill gap observed for this feature review; the worker followed the rust-library-worker procedure, including focused regression coverage and validation, with an explicit fallback note when GitNexus tooling was unavailable.",
+      "evidence": "Handoff skillFeedback.followedProcedure=true; transcript shows targeted regression added in core/tests/integration_db.rs and targeted cargo tests plus cargo check run before handoff."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit b2f2e58 and the worker transcript for milestone-g-explicit-foreign-id-resolution-consistency. The implementation satisfies VAL-G-FOREIGN-001 and VAL-G-FOREIGN-002, and I found no blocking or non-blocking code issues in the reviewed scope."
+}
