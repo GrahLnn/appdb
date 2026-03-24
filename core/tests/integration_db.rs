@@ -503,6 +503,58 @@ struct StoredSensitiveOverrideProfileRow {
     note: Option<Vec<u8>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Sensitive)]
+struct ItNestedSensitiveChild {
+    label: String,
+    #[secure]
+    secret: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+struct ItNestedSensitiveParent {
+    id: Id,
+    alias: String,
+    #[secure]
+    child: ItNestedSensitiveChild,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+struct ItOptionalNestedSensitiveParent {
+    id: Id,
+    alias: String,
+    #[secure]
+    child: Option<ItNestedSensitiveChild>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+struct ItVecNestedSensitiveParent {
+    id: Id,
+    alias: String,
+    #[secure]
+    children: Vec<ItNestedSensitiveChild>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+struct StoredNestedSensitiveParentRow {
+    id: RecordId,
+    alias: String,
+    child: EncryptedItNestedSensitiveChild,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+struct StoredOptionalNestedSensitiveParentRow {
+    id: RecordId,
+    alias: String,
+    child: Option<EncryptedItNestedSensitiveChild>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+struct StoredVecNestedSensitiveParentRow {
+    id: RecordId,
+    alias: String,
+    children: Vec<EncryptedItNestedSensitiveChild>,
+}
+
 impl ModelMeta for ItRecordUser {
     fn table_name() -> &'static str {
         static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
@@ -606,6 +658,39 @@ async fn load_sensitive_override_profile_raw(id: &str) -> StoredSensitiveOverrid
         .await
         .expect("sensitive override profile row should load")
         .expect("sensitive override profile row should exist")
+}
+
+async fn load_nested_sensitive_parent_raw(id: &str) -> StoredNestedSensitiveParentRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItNestedSensitiveParent::table_name())
+        .bind("id", id.to_owned());
+
+    query_bound_return::<StoredNestedSensitiveParentRow>(stmt)
+        .await
+        .expect("nested sensitive parent raw row should load")
+        .expect("nested sensitive parent raw row should exist")
+}
+
+async fn load_optional_nested_sensitive_parent_raw(id: &str) -> StoredOptionalNestedSensitiveParentRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItOptionalNestedSensitiveParent::table_name())
+        .bind("id", id.to_owned());
+
+    query_bound_return::<StoredOptionalNestedSensitiveParentRow>(stmt)
+        .await
+        .expect("optional nested sensitive parent raw row should load")
+        .expect("optional nested sensitive parent raw row should exist")
+}
+
+async fn load_vec_nested_sensitive_parent_raw(id: &str) -> StoredVecNestedSensitiveParentRow {
+    let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
+        .bind("table", ItVecNestedSensitiveParent::table_name())
+        .bind("id", id.to_owned());
+
+    query_bound_return::<StoredVecNestedSensitiveParentRow>(stmt)
+        .await
+        .expect("vec nested sensitive parent raw row should load")
+        .expect("vec nested sensitive parent raw row should exist")
 }
 
 async fn load_aliased_foreign_parent_raw(id: &str) -> StoredAliasedForeignParentRow {
@@ -974,6 +1059,16 @@ fn assert_sensitive_override_row_encrypted(
         (None, None) => {}
         other => panic!("unexpected sensitive override note shape: {other:?}"),
     }
+}
+
+fn assert_nested_sensitive_child_encrypted(
+    raw: &EncryptedItNestedSensitiveChild,
+    expected_label: &str,
+    expected_secret: &str,
+) {
+    assert_eq!(raw.label, expected_label);
+    assert_ne!(raw.secret, expected_secret.as_bytes());
+    assert!(raw.secret.len() > expected_secret.len());
 }
 
 fn parse_record_id_value(value: serde_json::Value, context: &str) -> RecordId {
@@ -4216,6 +4311,147 @@ fn store_sensitive_save_get_roundtrip_encrypts_at_rest() {
 
         let raw = load_sensitive_profile_raw("s-save").await;
         assert_sensitive_row_encrypted(&raw, "alpha", "swordfish", Some("memo"));
+    });
+}
+
+#[test]
+fn store_sensitive_nested_child_shapes_roundtrip_with_plaintext_results_and_encrypted_rows() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItNestedSensitiveParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItOptionalNestedSensitiveParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItVecNestedSensitiveParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let direct = ItNestedSensitiveParent {
+            id: Id::from("nested-sensitive-direct"),
+            alias: "direct-parent".to_owned(),
+            child: ItNestedSensitiveChild {
+                label: "direct-child".to_owned(),
+                secret: "direct-secret".to_owned(),
+            },
+        };
+        let optional_some = ItOptionalNestedSensitiveParent {
+            id: Id::from("nested-sensitive-optional-some"),
+            alias: "optional-parent".to_owned(),
+            child: Some(ItNestedSensitiveChild {
+                label: "optional-child".to_owned(),
+                secret: "optional-secret".to_owned(),
+            }),
+        };
+        let optional_none = ItOptionalNestedSensitiveParent {
+            id: Id::from("nested-sensitive-optional-none"),
+            alias: "optional-none-parent".to_owned(),
+            child: None,
+        };
+        let vec_parent = ItVecNestedSensitiveParent {
+            id: Id::from("nested-sensitive-vec"),
+            alias: "vec-parent".to_owned(),
+            children: vec![
+                ItNestedSensitiveChild {
+                    label: "vec-a".to_owned(),
+                    secret: "vec-secret-a".to_owned(),
+                },
+                ItNestedSensitiveChild {
+                    label: "vec-b".to_owned(),
+                    secret: "vec-secret-b".to_owned(),
+                },
+            ],
+        };
+
+        let saved_direct = ItNestedSensitiveParent::save(direct.clone())
+            .await
+            .expect("direct save should succeed");
+        let saved_optional = ItOptionalNestedSensitiveParent::save(optional_some.clone())
+            .await
+            .expect("optional some save should succeed");
+        let saved_optional_none = ItOptionalNestedSensitiveParent::save(optional_none.clone())
+            .await
+            .expect("optional none save should succeed");
+        let saved_vec = ItVecNestedSensitiveParent::save(vec_parent.clone())
+            .await
+            .expect("vec save should succeed");
+
+        assert_eq!(saved_direct, direct);
+        assert_eq!(
+            ItNestedSensitiveParent::get("nested-sensitive-direct")
+                .await
+                .expect("direct get should succeed"),
+            direct
+        );
+        assert_eq!(saved_optional, optional_some);
+        assert_eq!(
+            ItOptionalNestedSensitiveParent::get("nested-sensitive-optional-some")
+                .await
+                .expect("optional some get should succeed"),
+            optional_some
+        );
+        assert_eq!(saved_optional_none, optional_none);
+        assert_eq!(
+            ItOptionalNestedSensitiveParent::get("nested-sensitive-optional-none")
+                .await
+                .expect("optional none get should succeed"),
+            optional_none
+        );
+        assert_eq!(saved_vec, vec_parent);
+        assert_eq!(
+            ItVecNestedSensitiveParent::get("nested-sensitive-vec")
+                .await
+                .expect("vec get should succeed"),
+            vec_parent
+        );
+
+        let listed_direct = ItNestedSensitiveParent::list()
+            .await
+            .expect("direct list should succeed");
+        assert_eq!(listed_direct, vec![direct.clone()]);
+        let listed_optional = ItOptionalNestedSensitiveParent::list()
+            .await
+            .expect("optional list should succeed");
+        assert!(listed_optional.contains(&optional_some));
+        assert!(listed_optional.contains(&optional_none));
+        let listed_vec = ItVecNestedSensitiveParent::list()
+            .await
+            .expect("vec list should succeed");
+        assert_eq!(listed_vec, vec![vec_parent.clone()]);
+
+        let raw_direct = load_nested_sensitive_parent_raw("nested-sensitive-direct").await;
+        assert_eq!(raw_direct.alias, "direct-parent");
+        assert_nested_sensitive_child_encrypted(
+            &raw_direct.child,
+            "direct-child",
+            "direct-secret",
+        );
+
+        let raw_optional_some =
+            load_optional_nested_sensitive_parent_raw("nested-sensitive-optional-some").await;
+        assert_eq!(raw_optional_some.alias, "optional-parent");
+        let raw_optional_child = raw_optional_some
+            .child
+            .expect("optional some raw child should exist");
+        assert_nested_sensitive_child_encrypted(
+            &raw_optional_child,
+            "optional-child",
+            "optional-secret",
+        );
+
+        let raw_optional_none =
+            load_optional_nested_sensitive_parent_raw("nested-sensitive-optional-none").await;
+        assert_eq!(raw_optional_none.alias, "optional-none-parent");
+        assert!(raw_optional_none.child.is_none());
+
+        let raw_vec = load_vec_nested_sensitive_parent_raw("nested-sensitive-vec").await;
+        assert_eq!(raw_vec.alias, "vec-parent");
+        assert_eq!(raw_vec.children.len(), 2);
+        assert_nested_sensitive_child_encrypted(&raw_vec.children[0], "vec-a", "vec-secret-a");
+        assert_nested_sensitive_child_encrypted(&raw_vec.children[1], "vec-b", "vec-secret-b");
     });
 }
 

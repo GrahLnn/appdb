@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Sensitive)]
 struct InvalidRecord {
     #[secure]
-    pub counter: u32,
+    pub counter: std::collections::HashMap<String, String>,
 }
 
 fn main() {}
