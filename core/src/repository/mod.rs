@@ -110,15 +110,11 @@ where
     classified.into_db_error().into()
 }
 
-fn normalize_root_record_id_string<T>(value: &mut serde_json::Value)
-where
-    T: ModelMeta,
-{
+fn normalize_root_record_id_string(value: &mut serde_json::Value) {
     if let serde_json::Value::Object(map) = value {
         if let Some(id) = map.get_mut("id") {
             if let serde_json::Value::String(text) = id {
-                if let Ok(record) = parse_record_id_or_plain_string(text, Some(T::storage_table()))
-                {
+                if let Ok(record) = parse_record_id_or_plain_string(text, None) {
                     *id = serde_json::to_value(record).expect("record id should serialize");
                 }
             }
@@ -258,7 +254,7 @@ where
         }
     }
 
-    normalize_root_record_id_string::<T>(&mut row);
+    normalize_root_record_id_string(&mut row);
 
     if T::has_foreign_fields() {
         if let Value::Object(map) = &mut row {
