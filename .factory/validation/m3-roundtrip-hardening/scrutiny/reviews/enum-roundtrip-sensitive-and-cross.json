@@ -1,0 +1,21 @@
+{
+  "featureId": "enum-roundtrip-sensitive-and-cross",
+  "reviewedAt": "2026-03-24T19:56:46Z",
+  "commitId": "376c1a877058a749973d9a186e0e112ef2514df6",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature is implemented as focused regression coverage for the existing sensitive enum runtime seam and nested override paths. The added integration tests explicitly prove the required sensitive-contained enum roundtrip, nested-override coexistence, and mixed save_many isolation behavior, and the stderr refresh matches the current supported secure-container contract.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker transcript shows repeated attempts to execute .factory/init.sh directly on Windows even though repo/global guidance says .sh files must be read as text and translated to native commands. The rust-library-worker skill mentions reading mission/library files but does not restate the Windows-specific init handling, so the procedure still invites a forbidden/failed step.",
+      "evidence": "worker-transcripts.jsonl session 318fe76a-299a-4835-88bb-17c8b5544c82 records a direct .factory/init.sh execution attempt during startup; ~/.factory/AGENTS.md says .sh files must not be invoked on Windows; .factory/skills/rust-library-worker/SKILL.md lacks an explicit Windows init translation instruction."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. Commit 376c1a87 adds the missing explicit regressions for VAL-ER-002, VAL-CROSS-003, and VAL-CROSS-005 in core/tests/integration_db.rs, and updates the compile-fail stderr to the current SensitiveValueOf<T> boundary. I found no blocking or non-blocking code issues in the feature scope."
+}

@@ -1,0 +1,34 @@
+{
+  "featureId": "enum-roundtrip-plain-and-boundaries",
+  "reviewedAt": "2026-03-24T19:56:56.629595+00:00",
+  "commitId": "8e121b0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature proves only a plain struct-shaped storage fallback, not actual Rust enum roundtrip behavior. It also preserves the direct secure-enum boundary only via a noisy trait-bound failure fixture rather than the macro-level supported-shape contract.",
+    "issues": [
+      {
+        "file": "core/tests/integration_db.rs",
+        "line": 591,
+        "severity": "blocking",
+        "description": "The added 'enum roundtrip' regression does not exercise Rust enums at all: `ItPlainStatus` and `ItPayloadState` are plain structs with string tags / JSON payloads, while `ItPlainEnumProfile` stores those structs. This leaves VAL-ER-001/003/004 unproven because true enum discriminant decoding, payload variant handling, and Option<Enum> behavior are never tested."
+      },
+      {
+        "file": "core/tests/ui/sensitive/secure_enum_direct_rejected.rs",
+        "line": 11,
+        "severity": "non_blocking",
+        "description": "The boundary test relies on a broad trait-bound explosion from the derive expansion instead of a focused supported-shape diagnostic. It still fails as required, but the stderr fixture is large and brittle, making the contract harder to maintain and obscuring the intended direct secure-enum boundary."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The worker discovered that SurrealValue-derived Rust enums did not behave as initially expected for this persistence path and pivoted to struct-shaped test fixtures, but that limitation is not recorded in shared library notes even though it directly affects how enum-roundtrip features should be implemented and reviewed.",
+      "evidence": "Transcript skeleton for session c2809228-540c-464c-baf7-bf183cffbe6f shows repeated investigation into surrealdb-types enum derive internals and a later rewrite from enum fixtures to `ItPlainStatus` / `ItPayloadState` structs before committing only tests."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: the committed change adds coverage, but not for the promised Rust enum scenarios. The main regression test stores struct stand-ins instead of real enums, so the feature does not actually prove plain enum / Option<Enum> / payload enum roundtrip through Store APIs."
+}
