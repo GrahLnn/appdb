@@ -11,6 +11,7 @@ use crate::connection::get_db;
 use crate::error::DBError;
 use crate::model::meta::{HasId, ModelMeta, UniqueLookupMeta};
 use crate::query::builder::QueryKind;
+use crate::serde_utils::id::parse_record_id_or_plain_string;
 use crate::{ForeignModel, StoredModel};
 
 fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
@@ -97,9 +98,58 @@ fn normalize_foreign_shapes(value: &mut serde_json::Value) {
     crate::decode_stored_record_links(value);
 }
 
+fn normalize_record_id_strings<T>(value: &mut serde_json::Value)
+where
+    T: ModelMeta,
+{
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(id) = map.get_mut("id") {
+                if let serde_json::Value::String(text) = id {
+                    if let Ok(record) =
+                        parse_record_id_or_plain_string(text, Some(T::storage_table()))
+                    {
+                        *id = serde_json::to_value(record).expect("record id should serialize");
+                    }
+                }
+            }
+
+            for nested in map.values_mut() {
+                normalize_record_id_strings::<T>(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for nested in items {
+                normalize_record_id_strings::<T>(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn normalize_public_output_ids(value: &mut serde_json::Value) {
+    let current_id = value.as_object().and_then(|map| map.get("id")).cloned();
+
+    crate::serde_utils::id::normalize_public_id_value(value);
+
+    match current_id {
+        Some(serde_json::Value::String(text)) if !text.contains(':') => {
+            if let Some(map) = value.as_object_mut() {
+                map.insert("id".to_owned(), serde_json::Value::String(text));
+            }
+        }
+        Some(id @ serde_json::Value::Object(_)) => {
+            if let Some(map) = value.as_object_mut() {
+                map.insert("id".to_owned(), id);
+            }
+        }
+        _ => {}
+    }
+}
+
 async fn decode_hydrated_row<T>(mut row: serde_json::Value) -> Result<T>
 where
-    T: ForeignModel,
+    T: ForeignModel + ModelMeta,
 {
     if let serde_json::Value::Object(map) = &mut row {
         for (field, value) in map.iter_mut() {
@@ -108,7 +158,7 @@ where
             }
         }
     }
-    crate::serde_utils::id::normalize_public_id_value(&mut row);
+    normalize_public_output_ids(&mut row);
     T::hydrate_foreign(serde_json::from_value(row)?).await
 }
 
@@ -183,15 +233,15 @@ where
         }
     })?;
 
-    let stored = decode_stored_row_value::<T>(row.into_json_value(), None)?;
+    let stored = decode_saved_row::<T>(row, serde_json::to_value(record.clone())?)?;
     let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
-    crate::serde_utils::id::normalize_public_id_value(&mut value);
+    normalize_public_output_ids(&mut value);
     Ok(serde_json::from_value(value)?)
 }
 
 fn decode_saved_row<T>(row: SurrealDbValue, id: Value) -> Result<T::Stored>
 where
-    T: ForeignModel,
+    T: ForeignModel + ModelMeta,
     T::Stored: serde::de::DeserializeOwned,
 {
     let row = row.into_json_value();
@@ -200,7 +250,7 @@ where
 
 fn decode_stored_row_value<T>(mut row: Value, id: Option<Value>) -> Result<T::Stored>
 where
-    T: ForeignModel,
+    T: ForeignModel + ModelMeta,
     T::Stored: serde::de::DeserializeOwned,
 {
     if let Value::Object(map) = &mut row {
@@ -208,6 +258,8 @@ where
             map.insert("id".to_owned(), id);
         }
     }
+
+    normalize_record_id_strings::<T>(&mut row);
 
     if T::has_foreign_fields() {
         if let Value::Object(map) = &mut row {
@@ -367,12 +419,16 @@ where
     /// Loads a row by full `RecordId`.
     pub async fn get_record(record: RecordId) -> Result<T> {
         let db = get_db()?;
+        let requested = record.clone();
         let record: Option<SurrealDbValue> = db.select(record).await?;
         match record {
             Some(stored) => {
-                let stored = decode_stored_row_value::<T>(stored.into_json_value(), None)?;
+                let stored = decode_stored_row_value::<T>(
+                    stored.into_json_value(),
+                    Some(serde_json::to_value(requested)?),
+                )?;
                 let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
-                crate::serde_utils::id::normalize_public_id_value(&mut value);
+                normalize_public_output_ids(&mut value);
                 Ok(serde_json::from_value(value)?)
             }
             None => Err(DBError::NotFound.into()),
@@ -498,7 +554,12 @@ where
         RecordIdKey: From<K>,
         K: Send,
     {
-        let record = RecordId::new(T::storage_table(), id);
+        let key: RecordIdKey = id.into();
+        let record = match key {
+            RecordIdKey::String(text) => parse_record_id_or_plain_string(&text, None)
+                .unwrap_or_else(|plain| RecordId::new(T::storage_table(), plain.to_owned())),
+            other => RecordId::new(T::storage_table(), other),
+        };
         Self::delete_record(record).await
     }
 
@@ -654,7 +715,7 @@ where
         match row {
             Some(stored) => {
                 let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
-                crate::serde_utils::id::normalize_public_id_value(&mut value);
+                normalize_public_output_ids(&mut value);
                 Ok(serde_json::from_value(value)?)
             }
             None => Err(DBError::NotFound.into()),

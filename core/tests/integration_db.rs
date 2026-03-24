@@ -13,7 +13,7 @@ use appdb::model::relation::relation_name;
 use appdb::query::{query_bound_checked, query_bound_return, RawSqlStmt};
 use appdb::repository::Repo;
 use appdb::tx::{run_tx, TxStmt};
-use appdb::{Bridge, Crud, DBErrorKind, Id, Relation, Sensitive, Store, StoredModel};
+use appdb::{Bridge, Crud, DBError, DBErrorKind, Id, Relation, Sensitive, Store, StoredModel};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
@@ -3481,7 +3481,7 @@ fn inherent_record_model_api_roundtrip_passes() {
             .await
             .expect("delete_all should succeed");
 
-        let created = Repo::<ItRecordUser>::create_at(
+        Repo::<ItRecordUser>::create_at(
             RecordId::new("it_record_user", "reload-me"),
             ItRecordUser {
                 id: RecordId::new("it_record_user", "reload-me"),
@@ -3505,8 +3505,9 @@ fn inherent_record_model_api_roundtrip_passes() {
             .await
             .expect("get_record should succeed");
         assert_eq!(reloaded.name, "after");
+        assert_eq!(reloaded.id, RecordId::new("it_record_user", "reload-me"));
 
-        Repo::<ItRecordUser>::delete_record(created.id.clone())
+        Repo::<ItRecordUser>::delete_record(reloaded.id.clone())
             .await
             .expect("record delete should succeed");
     });
@@ -3596,6 +3597,41 @@ fn delete_target_string_bind_fails_but_table_bind_passes() {
             .expect("query should execute")
             .check()
             .expect("table bind should pass for DELETE target");
+    });
+}
+
+#[test]
+fn delete_record_query_accepts_bound_record_id() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecordUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        Repo::<ItRecordUser>::create_at(
+            RecordId::new("it_record_user", "bound-delete"),
+            ItRecordUser {
+                id: RecordId::new("it_record_user", "bound-delete"),
+                name: "Bound Delete".to_owned(),
+            },
+        )
+        .await
+        .expect("seed record should be created");
+
+        Repo::<ItRecordUser>::delete_record(RecordId::new("it_record_user", "bound-delete"))
+            .await
+            .expect("bound record id delete should succeed");
+
+        let missing =
+            Repo::<ItRecordUser>::get_record(RecordId::new("it_record_user", "bound-delete"))
+                .await
+                .expect_err("deleted row should be gone");
+        assert!(matches!(
+            missing.downcast_ref::<DBError>(),
+            Some(DBError::NotFound)
+        ));
     });
 }
 

@@ -180,15 +180,12 @@ where
 {
     let value = serde_json::Value::deserialize(deserializer)?;
     match value {
-        serde_json::Value::String(text) => {
-            if let Some(record) = crate::parse_record_id_compat_string(&text) {
-                Ok(record)
-            } else if let Ok(record) = RecordId::parse_simple(&text) {
-                Ok(record)
-            } else {
-                Ok(RecordId::new("_", text.trim_matches('`').to_owned()))
-            }
-        }
+        serde_json::Value::String(text) => parse_record_id_or_plain_string(&text, Some("_"))
+            .map_err(|invalid| {
+                <D::Error as serde::de::Error>::custom(format!(
+                    "failed to deserialize record id: invalid record id string `{invalid}`"
+                ))
+            }),
         other => serde_json::from_value(other).map_err(|err| {
             <D::Error as serde::de::Error>::custom(format!(
                 "failed to deserialize record id: {err}"
@@ -205,16 +202,31 @@ pub fn record_id_to_plain_string(record: &RecordId) -> String {
     }
 }
 
+pub fn parse_record_id_or_plain_string<'a>(
+    text: &'a str,
+    fallback_table: Option<&str>,
+) -> Result<RecordId, &'a str> {
+    if let Some(record) = crate::parse_record_id_compat_string(text) {
+        Ok(record)
+    } else if let Ok(record) = RecordId::parse_simple(text) {
+        Ok(record)
+    } else if let Some(table) = fallback_table {
+        Ok(RecordId::new(table, text.trim_matches('`').to_owned()))
+    } else {
+        Err(text)
+    }
+}
+
 pub fn normalize_public_id_value(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
             if let Some(id) = map.get_mut("id") {
                 let normalized = match id {
-                    serde_json::Value::String(text) => {
-                        RecordId::parse_simple(text).ok().map(|record| {
+                    serde_json::Value::String(text) => parse_record_id_or_plain_string(text, None)
+                        .ok()
+                        .map(|record| {
                             serde_json::Value::String(record_id_to_plain_string(&record))
-                        })
-                    }
+                        }),
                     serde_json::Value::Object(_) => serde_json::from_value::<RecordId>(id.clone())
                         .ok()
                         .map(|record| {
