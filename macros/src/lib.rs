@@ -747,6 +747,14 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
         let ident = field.ident.clone().expect("named field");
         let field_vis = field.vis.clone();
         let secure = has_secure_attr(&field.attrs);
+        let field_crypto_config = field_crypto_config(&field.attrs)?;
+
+        if !secure && field_crypto_config.is_present() {
+            return Err(Error::new_spanned(
+                ident,
+                "#[crypto(...)] on a field requires #[secure] on the same field",
+            ));
+        }
 
         if secure {
             secure_field_count += 1;
@@ -758,7 +766,6 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
                 to_pascal_case(&ident.to_string())
             );
             let field_tag_literal = ident.to_string();
-            let field_crypto_config = field_crypto_config(&field.attrs)?;
             let effective_account = field_crypto_config
                 .field_account
                 .clone()
@@ -937,6 +944,12 @@ struct TypeCryptoConfig {
 #[derive(Default, Clone)]
 struct FieldCryptoConfig {
     field_account: Option<String>,
+}
+
+impl FieldCryptoConfig {
+    fn is_present(&self) -> bool {
+        self.field_account.is_some()
+    }
 }
 
 fn type_crypto_config(attrs: &[Attribute]) -> syn::Result<TypeCryptoConfig> {

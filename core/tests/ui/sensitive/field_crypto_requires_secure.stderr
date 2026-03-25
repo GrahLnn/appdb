@@ -1,0 +1,5 @@
+error: #[crypto(...)] on a field requires #[secure] on the same field
+ --> tests/ui/sensitive/field_crypto_requires_secure.rs:7:9
+  |
+7 |     pub secret: String,
+  |         ^^^^^^
