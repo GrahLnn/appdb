@@ -1,0 +1,21 @@
+{
+  "featureId": "crypto-attribute-secure-field-boundary",
+  "reviewedAt": "2026-03-25T00:00:00Z",
+  "commitId": "dfb68590d9c82fe55467fe597fbf6396e48b9b6d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature cleanly enforces the secure-field boundary in the Sensitive derive: non-secure fields with #[crypto(...)] now fail at macro expansion, valid secure-field overrides still compile via the existing pass fixture, and the new trybuild case directly covers VAL-ACD-010 without widening runtime behavior.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill still tells workers to add or update failing tests first, but for compile-boundary changes like this one the worker could only demonstrate a failing-first proof after implementing the diagnostic and then reconciling the trybuild stderr.",
+      "evidence": "Worker transcript for session 28886e95-6585-4cca-a682-379fe47f6dd3 records a deviation for Work Procedure step 5 explaining that the new misuse fixture only became meaningful once the macro emitted the diagnostic; the first targeted trybuild run then failed on the stderr mismatch rather than on missing behavior."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. The commit scopes the change to the Sensitive macro and compile-test harness, satisfies VAL-ACD-010 by rejecting stray field-level crypto attributes on plaintext fields, and preserves valid secure-field crypto overrides through the existing compile-pass and focused runtime coverage."
+}

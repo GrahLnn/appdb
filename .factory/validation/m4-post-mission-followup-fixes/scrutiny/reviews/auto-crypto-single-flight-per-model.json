@@ -1,0 +1,21 @@
+{
+  "featureId": "auto-crypto-single-flight-per-model",
+  "reviewedAt": "2026-03-25T04:58:07.099962Z",
+  "commitId": "d8a4117",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature satisfies VAL-ACD-009. ensure_sensitive_model_ready now gates first-use registration through a per-model mutex/condvar state machine, resets to pending on failure, and the added runtime/store regressions demonstrate concurrent cold-start callers converge on one established context without breaking later reuse semantics.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-library-worker skill does not mention that stable Rust lacks OnceLock::get_or_try_init, even though this single-flight task naturally pushes workers toward that API before they fall back to a custom gate.",
+      "evidence": "Handoff skillFeedback.suggestedChanges for worker session eaab35e3-2180-441a-9202-37674d075e1a explicitly calls this out after implementing AutoCryptoInit in core/src/crypto.rs."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed handoff, transcript skeleton, and commit d8a4117. The single-flight refactor and focused regressions are aligned with VAL-ACD-009, and I found no blocking or non-blocking code issues for this feature."
+}
