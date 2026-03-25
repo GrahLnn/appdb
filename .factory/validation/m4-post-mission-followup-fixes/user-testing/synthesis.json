@@ -1,0 +1,25 @@
+{
+  "milestone": "m4-post-mission-followup-fixes",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-ACD-009",
+    "VAL-ACD-010"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "validation-state.json",
+      "description": "Marked VAL-ACD-009 and VAL-ACD-010 passed after focused cargo-based user-surface validation for single-flight runtime/store behavior and compile-fail crypto attribute boundary.",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}
