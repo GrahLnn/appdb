@@ -1,6 +1,6 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
 };
 use keyring::{Entry, Error as KeyringError};
 use rand::RngExt;
@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, RwLock};
 use thiserror::Error;
 #[cfg(target_os = "windows")]
-use windows::core::PCWSTR;
-#[cfg(target_os = "windows")]
-use windows::Win32::Foundation::{LocalFree, HLOCAL};
+use windows::Win32::Foundation::{HLOCAL, LocalFree};
 #[cfg(target_os = "windows")]
 use windows::Win32::Security::Cryptography::{
-    CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+    CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData,
 };
+#[cfg(target_os = "windows")]
+use windows::core::PCWSTR;
 
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
@@ -43,7 +43,9 @@ pub enum CryptoError {
     SecretStore(String),
     #[error("protected backup store error: {0}")]
     ProtectedBackup(String),
-    #[error("no crypto resolver mapping registered for model tag `{model_tag}` and field tag `{field_tag}`")]
+    #[error(
+        "no crypto resolver mapping registered for model tag `{model_tag}` and field tag `{field_tag}`"
+    )]
     ResolverNotFound {
         model_tag: &'static str,
         field_tag: &'static str,
@@ -258,10 +260,7 @@ where
 }
 
 impl AutoCryptoInit {
-    fn run(
-        &self,
-        init: impl FnOnce() -> Result<(), CryptoError>,
-    ) -> Result<(), CryptoError> {
+    fn run(&self, init: impl FnOnce() -> Result<(), CryptoError>) -> Result<(), CryptoError> {
         let mut state = self
             .state
             .lock()

@@ -2,22 +2,21 @@ use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use appdb::connection::{get_db, reinit_db, reinit_db_with_options, DbRuntime, InitDbOptions};
+use appdb::connection::{DbRuntime, InitDbOptions, get_db, reinit_db, reinit_db_with_options};
 use appdb::crypto::{
-    clear_crypto_context_registry, register_crypto_context_for, reset_default_crypto_config,
-    set_default_crypto_config, CryptoContext, SensitiveFieldTag, SensitiveModelTag,
+    CryptoContext, SensitiveFieldTag, SensitiveModelTag, clear_crypto_context_registry,
+    register_crypto_context_for, reset_default_crypto_config, set_default_crypto_config,
 };
 use appdb::error::classify_db_error_text;
 use appdb::graph::{GraphCrud, GraphRepo};
-use appdb::model::meta::{register_table, HasId, ModelMeta, ResolveRecordId, UniqueLookupMeta};
+use appdb::model::meta::{HasId, ModelMeta, ResolveRecordId, UniqueLookupMeta, register_table};
 use appdb::model::relation::relation_name;
-use appdb::query::{query_bound_checked, query_bound_return, RawSqlStmt};
+use appdb::query::{RawSqlStmt, query_bound_checked, query_bound_return};
 use appdb::repository::Repo;
-use appdb::tx::{run_tx, TxStmt};
+use appdb::tx::{TxStmt, run_tx};
 use appdb::{
     Bridge, Crud, DBError, DBErrorKind, Id, Relation, Sensitive, SensitiveShape, SensitiveValueOf,
-    Store,
-    StoredModel,
+    Store, StoredModel,
 };
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
@@ -64,7 +63,6 @@ impl appdb::ForeignPersistence for RecordingForeignPersistence {
             .push(format!("create:{}", T::table_name()));
         Repo::<T>::create(data).await
     }
-
 }
 
 static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -308,7 +306,10 @@ impl appdb::ForeignModel for ItMismatchedForeignChild {
 #[async_trait::async_trait]
 impl ResolveRecordId for ItMismatchedForeignChild {
     async fn resolve_record_id(&self) -> anyhow::Result<RecordId> {
-        Ok(RecordId::new(Self::table_name(), self.resolved_id.to_string()))
+        Ok(RecordId::new(
+            Self::table_name(),
+            self.resolved_id.to_string(),
+        ))
     }
 }
 
@@ -454,7 +455,10 @@ struct ItSensitiveProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
-#[crypto(service = "integration-type-override", account = "integration-type-master")]
+#[crypto(
+    service = "integration-type-override",
+    account = "integration-type-master"
+)]
 struct ItSensitiveOverrideProfile {
     id: Id,
     alias: String,
@@ -595,7 +599,10 @@ enum ItPlainStatus {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
 enum ItPayloadState {
-    Draft { kind: String, note: String },
+    Draft {
+        kind: String,
+        note: String,
+    },
     Published {
         kind: String,
         version: u32,
@@ -794,7 +801,9 @@ async fn load_nested_sensitive_parent_raw(id: &str) -> StoredNestedSensitivePare
         .expect("nested sensitive parent raw row should exist")
 }
 
-async fn load_optional_nested_sensitive_parent_raw(id: &str) -> StoredOptionalNestedSensitiveParentRow {
+async fn load_optional_nested_sensitive_parent_raw(
+    id: &str,
+) -> StoredOptionalNestedSensitiveParentRow {
     let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
         .bind("table", ItOptionalNestedSensitiveParent::table_name())
         .bind("id", id.to_owned());
@@ -2114,13 +2123,23 @@ fn foreign_explicit_id_and_resolved_record_id_mismatch_fails_deterministically()
 
         let serialized = Repo::<ItMismatchedForeignChild>::get("serialized-child").await;
         assert!(
-            matches!(appdb::error::classify_db_error(&serialized.expect_err("serialized id must remain absent")), DBError::NotFound | DBError::MissingTable(_)),
+            matches!(
+                appdb::error::classify_db_error(
+                    &serialized.expect_err("serialized id must remain absent")
+                ),
+                DBError::NotFound | DBError::MissingTable(_)
+            ),
             "serialized id should not be persisted"
         );
 
         let resolved = Repo::<ItMismatchedForeignChild>::get("resolved-child").await;
         assert!(
-            matches!(appdb::error::classify_db_error(&resolved.expect_err("resolved id must remain absent")), DBError::NotFound | DBError::MissingTable(_)),
+            matches!(
+                appdb::error::classify_db_error(
+                    &resolved.expect_err("resolved id must remain absent")
+                ),
+                DBError::NotFound | DBError::MissingTable(_)
+            ),
             "resolved id should not be persisted"
         );
     });
@@ -2655,38 +2674,53 @@ fn save_many_reuses_existing_recursive_foreign_graphs_without_duplication() {
         assert_eq!(saved, vec![updated.clone(), created.clone()]);
         assert_eq!(loaded_updated, updated);
         assert_eq!(loaded_created, created);
-        assert_ne!(seeded, loaded_updated, "seeded parent should be updated in place");
-        assert_eq!(all_children.len(), 4, "existing recursive children should be reused, not duplicated");
+        assert_ne!(
+            seeded, loaded_updated,
+            "seeded parent should be updated in place"
+        );
+        assert_eq!(
+            all_children.len(),
+            4,
+            "existing recursive children should be reused, not duplicated"
+        );
 
         let expected_updated_ids = vec![
             vec![
-                Repo::<ItNestedLookupChild>::find_unique_id_for(&updated
-                    .children
-                    .as_ref()
-                    .expect("updated children should exist")[0][0])
+                Repo::<ItNestedLookupChild>::find_unique_id_for(
+                    &updated
+                        .children
+                        .as_ref()
+                        .expect("updated children should exist")[0][0],
+                )
                 .await
                 .expect("updated child a should resolve"),
-                Repo::<ItNestedLookupChild>::find_unique_id_for(&updated
-                    .children
-                    .as_ref()
-                    .expect("updated children should exist")[0][1])
+                Repo::<ItNestedLookupChild>::find_unique_id_for(
+                    &updated
+                        .children
+                        .as_ref()
+                        .expect("updated children should exist")[0][1],
+                )
                 .await
                 .expect("updated child c should resolve"),
             ],
             vec![
-                Repo::<ItNestedLookupChild>::find_unique_id_for(&updated
-                    .children
-                    .as_ref()
-                    .expect("updated children should exist")[1][0])
+                Repo::<ItNestedLookupChild>::find_unique_id_for(
+                    &updated
+                        .children
+                        .as_ref()
+                        .expect("updated children should exist")[1][0],
+                )
                 .await
                 .expect("updated child b should resolve"),
             ],
         ];
         let expected_created_ids = vec![vec![
-            Repo::<ItNestedLookupChild>::find_unique_id_for(&created
-                .children
-                .as_ref()
-                .expect("created children should exist")[0][0])
+            Repo::<ItNestedLookupChild>::find_unique_id_for(
+                &created
+                    .children
+                    .as_ref()
+                    .expect("created children should exist")[0][0],
+            )
             .await
             .expect("created child d should resolve"),
         ]];
@@ -3702,9 +3736,10 @@ fn upsert_id_without_id_field_fails() {
         })
         .await
         .expect_err("missing `id` field should fail");
-        assert!(err
-            .to_string()
-            .contains("does not contain an `id` string or i64 field"));
+        assert!(
+            err.to_string()
+                .contains("does not contain an `id` string or i64 field")
+        );
     });
 }
 
@@ -4239,9 +4274,11 @@ fn delete_target_string_bind_fails_but_table_bind_passes() {
         let bad_err = bad_res
             .check()
             .expect_err("string bind should fail for DELETE target");
-        assert!(bad_err
-            .to_string()
-            .contains("Cannot execute DELETE statement using value"));
+        assert!(
+            bad_err
+                .to_string()
+                .contains("Cannot execute DELETE statement using value")
+        );
 
         db.query("DELETE $target RETURN NONE;")
             .bind(("target", Table::from("it_record_user")))
@@ -4328,9 +4365,10 @@ fn repo_delete_string_id_does_not_cross_table_boundary() {
             Some(DBError::NotFound)
         ));
 
-        let foreign = Repo::<ItRecordUser>::get_record(RecordId::new("it_record_user", "cross-target"))
-            .await
-            .expect("foreign row should remain");
+        let foreign =
+            Repo::<ItRecordUser>::get_record(RecordId::new("it_record_user", "cross-target"))
+                .await
+                .expect("foreign row should remain");
         assert_eq!(foreign.name, "foreign row");
     });
 }
@@ -4558,11 +4596,7 @@ fn store_sensitive_nested_child_shapes_roundtrip_with_plaintext_results_and_encr
 
         let raw_direct = load_nested_sensitive_parent_raw("nested-sensitive-direct").await;
         assert_eq!(raw_direct.alias, "direct-parent");
-        assert_nested_sensitive_child_encrypted(
-            &raw_direct.child,
-            "direct-child",
-            "direct-secret",
-        );
+        assert_nested_sensitive_child_encrypted(&raw_direct.child, "direct-child", "direct-secret");
 
         let raw_optional_some =
             load_optional_nested_sensitive_parent_raw("nested-sensitive-optional-some").await;
@@ -4807,9 +4841,11 @@ fn nested_ref_cross_area_regressions() {
         })
         .await
         .expect_err("sensitive create_return_id should remain guarded");
-        assert!(guarded_err
-            .to_string()
-            .contains("does not support create_return_id"));
+        assert!(
+            guarded_err
+                .to_string()
+                .contains("does not support create_return_id")
+        );
 
         let source = Repo::<ItLookupSource>::create(ItLookupSource {
             name: "cross-source".to_owned(),
@@ -5838,7 +5874,10 @@ fn plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many() {
 
         let raw_saved = load_plain_enum_profile_raw("plain-enum-save").await;
         assert_eq!(raw_saved.name, "plain-one");
-        assert_eq!(raw_saved.status, serde_json::json!({ "Draft": { "kind": "Draft" } }));
+        assert_eq!(
+            raw_saved.status,
+            serde_json::json!({ "Draft": { "kind": "Draft" } })
+        );
         assert_eq!(
             raw_saved.optional_status,
             Some(serde_json::json!({ "Published": { "kind": "Published" } }))
@@ -5899,9 +5938,10 @@ fn plain_store_enum_fields_roundtrip_through_save_get_list_and_save_many() {
             },
         };
 
-        let saved_many = ItPlainEnumProfile::save_many(vec![batch_first.clone(), batch_second.clone()])
-            .await
-            .expect("save_many should preserve enum row association");
+        let saved_many =
+            ItPlainEnumProfile::save_many(vec![batch_first.clone(), batch_second.clone()])
+                .await
+                .expect("save_many should preserve enum row association");
         assert_eq!(saved_many, vec![batch_first.clone(), batch_second.clone()]);
 
         let listed = ItPlainEnumProfile::list()
@@ -5980,10 +6020,12 @@ fn sensitive_enum_shape_runtime_seam_supports_store_roundtrip_without_secure_enu
             }),
         };
 
-        let saved_many =
-            ItSensitiveRuntimeSeamParent::save_many(vec![batch_first.clone(), batch_second.clone()])
-                .await
-                .expect("save_many should preserve enum-bearing sensitive row association");
+        let saved_many = ItSensitiveRuntimeSeamParent::save_many(vec![
+            batch_first.clone(),
+            batch_second.clone(),
+        ])
+        .await
+        .expect("save_many should preserve enum-bearing sensitive row association");
         assert_eq!(saved_many, vec![batch_first.clone(), batch_second.clone()]);
 
         let listed = ItSensitiveRuntimeSeamParent::list()
@@ -6067,10 +6109,12 @@ fn sensitive_contained_enum_fields_roundtrip_through_save_get_list_and_save_many
             }),
         };
 
-        let saved_many =
-            ItSensitiveRuntimeSeamParent::save_many(vec![batch_first.clone(), batch_second.clone()])
-                .await
-                .expect("save_many should preserve sensitive enum row association");
+        let saved_many = ItSensitiveRuntimeSeamParent::save_many(vec![
+            batch_first.clone(),
+            batch_second.clone(),
+        ])
+        .await
+        .expect("save_many should preserve sensitive enum row association");
         assert_eq!(saved_many, vec![batch_first.clone(), batch_second.clone()]);
 
         let listed = ItSensitiveRuntimeSeamParent::list()
@@ -6185,7 +6229,10 @@ fn enum_roundtrip_remains_correct_when_nested_overrides_are_present() {
         ])
         .await
         .expect("save_many should keep exact enum fidelity while nested overrides coexist");
-        assert_eq!(saved_many, vec![enum_batch_first.clone(), enum_batch_second.clone()]);
+        assert_eq!(
+            saved_many,
+            vec![enum_batch_first.clone(), enum_batch_second.clone()]
+        );
 
         assert_eq!(
             ItNestedOverrideParent::get("nested-override-enum-parent")
@@ -6261,7 +6308,10 @@ fn save_many_mixed_sensitive_rows_preserve_auto_ensure_and_isolation_semantics()
             .await
             .expect("delete_all should succeed");
 
-        set_default_crypto_config("integration-cross-batch-svc", "integration-cross-batch-acct");
+        set_default_crypto_config(
+            "integration-cross-batch-svc",
+            "integration-cross-batch-acct",
+        );
 
         let default_rows = vec![
             ItSensitiveProfile {
@@ -6444,7 +6494,9 @@ fn store_sensitive_concurrent_first_use_initialization_is_single_flight_per_mode
             std::env::set_var("LOCALAPPDATA", &local_appdata);
         }
 
-        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+        #[derive(
+            Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive,
+        )]
         struct ItSensitiveSingleFlightProfile {
             id: Id,
             alias: String,
@@ -6550,7 +6602,9 @@ fn store_sensitive_later_first_use_models_pick_up_new_global_defaults() {
             std::env::set_var("LOCALAPPDATA", &local_appdata);
         }
 
-        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+        #[derive(
+            Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive,
+        )]
         struct ItSensitiveLateDefaultsA {
             id: Id,
             alias: String,
@@ -6558,7 +6612,9 @@ fn store_sensitive_later_first_use_models_pick_up_new_global_defaults() {
             secret: String,
         }
 
-        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+        #[derive(
+            Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive,
+        )]
         struct ItSensitiveLateDefaultsB {
             id: Id,
             alias: String,
@@ -6678,9 +6734,11 @@ fn store_sensitive_insert_ignore_and_insert_or_replace_preserve_plaintext_semant
         .await
         .expect("insert_or_replace should succeed");
         assert_eq!(replaced.len(), 2);
-        assert!(replaced
-            .iter()
-            .any(|row| row.id == Id::from("s-conflict") && row.secret == "replacement-secret"));
+        assert!(
+            replaced
+                .iter()
+                .any(|row| row.id == Id::from("s-conflict") && row.secret == "replacement-secret")
+        );
 
         let after_replace = Repo::<ItSensitiveProfile>::get("s-conflict")
             .await

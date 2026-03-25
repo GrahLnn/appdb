@@ -34,7 +34,7 @@ pub fn ensure_relation_name(name: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_relation_name, register_relation, RelationMeta};
+    use super::{RelationMeta, ensure_relation_name, register_relation};
 
     #[derive(crate::Relation)]
     struct AutoRelName;

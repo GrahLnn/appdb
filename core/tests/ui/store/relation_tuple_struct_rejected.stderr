@@ -1,0 +1,5 @@
+error: Relation can only be derived for unit structs or structs with named fields
+ --> tests/ui/store/relation_tuple_struct_rejected.rs:4:8
+  |
+4 | struct InvalidRelation(i64);
+  |        ^^^^^^^^^^^^^^^

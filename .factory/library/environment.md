@@ -15,3 +15,7 @@ Environment variables, external dependencies, and setup notes.
   - non-test default provider uses keyring
   - default service is `appdb` unless overridden globally
   - default account is `master-sensitive` unless overridden globally
+- Rust 2024 upgrade mission notes:
+  - no new external services or credentials are required
+  - workers should inspect the repo for intentional dirty files before editing
+  - `.sh` files remain documentation-only in this Windows environment

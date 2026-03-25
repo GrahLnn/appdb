@@ -1,8 +1,8 @@
 use appdb::crypto::{
+    CryptoContext, CryptoError, SensitiveFieldTag, SensitiveModelTag,
     clear_crypto_context_registry, default_crypto_config, register_crypto_context_for,
     reset_default_crypto_config, set_default_crypto_account, set_default_crypto_config,
-    set_default_crypto_service, CryptoContext, CryptoError, SensitiveFieldTag,
-    SensitiveModelTag,
+    set_default_crypto_service,
 };
 use appdb::{Sensitive, SensitiveShape, SensitiveValueOf};
 use serde::{Deserialize, Serialize};
@@ -380,7 +380,8 @@ fn sensitive_runtime_resolver_first_use_initialization_is_single_flight_per_mode
 }
 
 #[test]
-fn sensitive_runtime_resolver_first_use_models_track_global_default_changes_without_retroactive_leakage() {
+fn sensitive_runtime_resolver_first_use_models_track_global_default_changes_without_retroactive_leakage()
+ {
     let _guard = TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -435,9 +436,7 @@ fn sensitive_runtime_resolver_auto_initialization_failures_surface_crypto_errors
     clear_crypto_context_registry();
     reset_default_crypto_config();
     let local_appdata = crypto_test_local_appdata("invalid-key");
-    let backup_dir = local_appdata
-        .join("broken_service")
-        .join("key-backup");
+    let backup_dir = local_appdata.join("broken_service").join("key-backup");
     std::fs::create_dir_all(&backup_dir).expect("backup dir should be creatable");
     std::fs::write(backup_dir.join("broken_account.bin"), [1_u8; 7])
         .expect("invalid backup key should be written");
@@ -485,21 +484,39 @@ fn sensitive_crypto_metadata_exposes_defaults_and_overrides() {
     assert_eq!(defaults.service, "svc-a");
     assert_eq!(defaults.account, "acct-a");
 
-    let account_meta = <AppdbSensitiveFieldTagAccountSecretsPassword as SensitiveFieldTag>::crypto_metadata();
-    assert_eq!(account_meta.model_tag, <AccountSecrets as SensitiveModelTag>::model_tag());
+    let account_meta =
+        <AppdbSensitiveFieldTagAccountSecretsPassword as SensitiveFieldTag>::crypto_metadata();
+    assert_eq!(
+        account_meta.model_tag,
+        <AccountSecrets as SensitiveModelTag>::model_tag()
+    );
     assert_eq!(account_meta.field_tag, "password");
     assert_eq!(account_meta.service, None);
     assert_eq!(account_meta.account, None);
     assert_eq!(AccountSecrets::SECURE_FIELDS.len(), 1);
-    assert_eq!(AccountSecrets::SECURE_FIELDS[0].model_tag, account_meta.model_tag);
-    assert_eq!(AccountSecrets::SECURE_FIELDS[0].field_tag, account_meta.field_tag);
-    assert_eq!(AccountSecrets::SECURE_FIELDS[0].service, account_meta.service);
-    assert_eq!(AccountSecrets::SECURE_FIELDS[0].account, account_meta.account);
+    assert_eq!(
+        AccountSecrets::SECURE_FIELDS[0].model_tag,
+        account_meta.model_tag
+    );
+    assert_eq!(
+        AccountSecrets::SECURE_FIELDS[0].field_tag,
+        account_meta.field_tag
+    );
+    assert_eq!(
+        AccountSecrets::SECURE_FIELDS[0].service,
+        account_meta.service
+    );
+    assert_eq!(
+        AccountSecrets::SECURE_FIELDS[0].account,
+        account_meta.account
+    );
     assert_eq!(account_meta.secure_fields.len(), 1);
     assert_eq!(account_meta.secure_fields[0].field_tag, "password");
 
-    let override_key = <AppdbSensitiveFieldTagOverrideSecretsApiKey as SensitiveFieldTag>::crypto_metadata();
-    let override_note = <AppdbSensitiveFieldTagOverrideSecretsNote as SensitiveFieldTag>::crypto_metadata();
+    let override_key =
+        <AppdbSensitiveFieldTagOverrideSecretsApiKey as SensitiveFieldTag>::crypto_metadata();
+    let override_note =
+        <AppdbSensitiveFieldTagOverrideSecretsNote as SensitiveFieldTag>::crypto_metadata();
     assert_eq!(override_key.service, Some("billing"));
     assert_eq!(override_key.account, Some("tenant-master"));
     assert_eq!(override_note.service, Some("billing"));
@@ -626,12 +643,14 @@ fn sensitive_nested_override_sibling_contexts_do_not_cross_decrypt() {
         .encrypt_with_runtime_resolver()
         .expect("nested override parent should encrypt");
 
-    let left_ctx =
-        appdb::crypto::resolve_crypto_context_for::<AppdbSensitiveFieldTagOverrideNestedSensitiveParentLeft>()
-            .expect("left context should resolve");
-    let right_ctx =
-        appdb::crypto::resolve_crypto_context_for::<AppdbSensitiveFieldTagOverrideNestedSensitiveParentRight>()
-            .expect("right context should resolve");
+    let left_ctx = appdb::crypto::resolve_crypto_context_for::<
+        AppdbSensitiveFieldTagOverrideNestedSensitiveParentLeft,
+    >()
+    .expect("left context should resolve");
+    let right_ctx = appdb::crypto::resolve_crypto_context_for::<
+        AppdbSensitiveFieldTagOverrideNestedSensitiveParentRight,
+    >()
+    .expect("right context should resolve");
 
     assert_eq!(
         OverrideNestedSensitiveLeaf::decrypt_with_context(&encrypted.left, &left_ctx)

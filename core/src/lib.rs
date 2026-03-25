@@ -218,7 +218,8 @@ where
         &self,
         context: &crate::crypto::CryptoContext,
     ) -> Result<Self::Encrypted, crate::crypto::CryptoError> {
-        let plaintext = serde_json::to_string(&self.0).map_err(|_| crate::crypto::CryptoError::Encrypt)?;
+        let plaintext =
+            serde_json::to_string(&self.0).map_err(|_| crate::crypto::CryptoError::Encrypt)?;
         crate::crypto::encrypt_string(&plaintext, context)
     }
 
@@ -236,7 +237,8 @@ where
 impl<T> SensitiveShape for T
 where
     T: Sensitive,
-    T::Encrypted: Clone + serde::Serialize + serde::de::DeserializeOwned + surrealdb::types::SurrealValue,
+    T::Encrypted:
+        Clone + serde::Serialize + serde::de::DeserializeOwned + surrealdb::types::SurrealValue,
 {
     type Encrypted = T::Encrypted;
 
@@ -394,7 +396,6 @@ pub trait ForeignPersistence: Send + Sync {
     fn create<T>(&self, data: T) -> impl std::future::Future<Output = anyhow::Result<T>> + Send
     where
         T: model::meta::ModelMeta + repository::Crud + StoredModel + ForeignModel + Send;
-
 }
 
 #[derive(Clone, Copy, Default)]
@@ -701,7 +702,11 @@ where
         + Sync,
 {
     if persistence.exists_record(record_id.clone()).await? {
-        Ok(persistence.ensure_at(record_id, value).await?.resolve_record_id().await?)
+        Ok(persistence
+            .ensure_at(record_id, value)
+            .await?
+            .resolve_record_id()
+            .await?)
     } else {
         save_foreign_created(persistence.ensure_at(record_id, value).await?).await
     }
