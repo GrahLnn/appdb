@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, OnceLock, RwLock};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, RwLock};
 use thiserror::Error;
 #[cfg(target_os = "windows")]
 use windows::core::PCWSTR;
@@ -159,8 +159,21 @@ pub fn reset_default_crypto_config() {
 
 type ResolverKey = (&'static str, &'static str);
 type CryptoResolverRegistry = HashMap<ResolverKey, Arc<CryptoContext>>;
-type AutoCryptoInit = Arc<OnceLock<()>>;
-type AutoCryptoRegistry = HashMap<&'static str, AutoCryptoInit>;
+#[derive(Debug, Default)]
+struct AutoCryptoInit {
+    state: Mutex<AutoCryptoInitState>,
+    ready: Condvar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum AutoCryptoInitState {
+    #[default]
+    Pending,
+    Running,
+    Ready,
+}
+
+type AutoCryptoRegistry = HashMap<&'static str, Arc<AutoCryptoInit>>;
 
 static CRYPTO_RESOLVER_REGISTRY: LazyLock<RwLock<CryptoResolverRegistry>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
@@ -236,15 +249,51 @@ where
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         registry
             .entry(model_tag)
-            .or_insert_with(|| Arc::new(OnceLock::new()))
+            .or_insert_with(|| Arc::new(AutoCryptoInit::default()))
             .clone()
     };
 
-    if once.get().is_none() {
-        register_model_crypto_fields::<Tag>()?;
-        let _ = once.set(());
-    }
+    once.run(register_model_crypto_fields::<Tag>)?;
     Ok(())
+}
+
+impl AutoCryptoInit {
+    fn run(
+        &self,
+        init: impl FnOnce() -> Result<(), CryptoError>,
+    ) -> Result<(), CryptoError> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            match *state {
+                AutoCryptoInitState::Ready => return Ok(()),
+                AutoCryptoInitState::Pending => {
+                    *state = AutoCryptoInitState::Running;
+                    drop(state);
+                    let result = init();
+                    let mut state = self
+                        .state
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *state = if result.is_ok() {
+                        AutoCryptoInitState::Ready
+                    } else {
+                        AutoCryptoInitState::Pending
+                    };
+                    self.ready.notify_all();
+                    return result;
+                }
+                AutoCryptoInitState::Running => {
+                    state = self
+                        .ready
+                        .wait(state)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+            }
+        }
+    }
 }
 
 fn register_model_crypto_fields<Tag>() -> Result<(), CryptoError>
