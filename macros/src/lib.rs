@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashSet;
 use syn::{
-    parse_macro_input, Attribute, Data, DeriveInput, Error, Field, Fields, GenericArgument,
-    Meta, PathArguments, Type, TypePath,
+    Attribute, Data, DeriveInput, Error, Field, Fields, GenericArgument, Meta, PathArguments, Type,
+    TypePath, parse_macro_input,
 };
 
 #[proc_macro_derive(Sensitive, attributes(secure, crypto))]
@@ -50,14 +50,14 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 return Err(Error::new_spanned(
                     struct_ident,
                     "Store can only be derived for structs with named fields",
-                ))
+                ));
             }
         },
         _ => {
             return Err(Error::new_spanned(
                 struct_ident,
                 "Store can only be derived for structs",
-            ))
+            ));
         }
     };
 
@@ -519,7 +519,7 @@ fn derive_bridge_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStrea
             return Err(Error::new_spanned(
                 enum_ident,
                 "Bridge can only be derived for enums",
-            ))
+            ));
         }
     };
 
@@ -603,19 +603,19 @@ fn parse_bridge_variant(variant: &syn::Variant) -> syn::Result<BridgeVariant> {
             return Err(Error::new_spanned(
                 &variant.ident,
                 "Bridge variants must be single-field tuple variants",
-            ))
+            ));
         }
         Fields::Unit => {
             return Err(Error::new_spanned(
                 &variant.ident,
                 "Bridge does not support unit variants",
-            ))
+            ));
         }
         Fields::Named(_) => {
             return Err(Error::new_spanned(
                 &variant.ident,
                 "Bridge does not support struct variants",
-            ))
+            ));
         }
     };
 
@@ -625,7 +625,7 @@ fn parse_bridge_variant(variant: &syn::Variant) -> syn::Result<BridgeVariant> {
             return Err(Error::new_spanned(
                 &payload_ty,
                 "Bridge payload must implement appdb::Bridge",
-            ))
+            ));
         }
     };
 
@@ -652,20 +652,20 @@ fn derive_relation_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStr
         .unwrap_or_else(|| to_snake_case(&struct_ident.to_string()));
 
     match input.data {
-        Data::Struct(data) => {
-            match data.fields {
-                Fields::Unit | Fields::Named(_) => {}
-                _ => return Err(Error::new_spanned(
+        Data::Struct(data) => match data.fields {
+            Fields::Unit | Fields::Named(_) => {}
+            _ => {
+                return Err(Error::new_spanned(
                     struct_ident,
                     "Relation can only be derived for unit structs or structs with named fields",
-                )),
+                ));
             }
-        }
+        },
         _ => {
             return Err(Error::new_spanned(
                 struct_ident,
                 "Relation can only be derived for structs",
-            ))
+            ));
         }
     }
 
@@ -723,14 +723,14 @@ fn derive_sensitive_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenSt
                 return Err(Error::new_spanned(
                     struct_ident,
                     "Sensitive can only be derived for structs with named fields",
-                ))
+                ));
             }
         },
         _ => {
             return Err(Error::new_spanned(
                 struct_ident,
                 "Sensitive can only be derived for structs",
-            ))
+            ));
         }
     };
 
@@ -977,7 +977,11 @@ fn type_crypto_config(attrs: &[Attribute]) -> syn::Result<TypeCryptoConfig> {
             match key.to_string().as_str() {
                 "service" => config.service = Some(literal.value()),
                 "account" => config.account = Some(literal.value()),
-                _ => return Err(meta.error("unsupported crypto attribute; expected `service` or `account`")),
+                _ => {
+                    return Err(
+                        meta.error("unsupported crypto attribute; expected `service` or `account`")
+                    );
+                }
             }
             Ok(())
         })?;
@@ -1010,7 +1014,7 @@ fn field_crypto_config(attrs: &[Attribute]) -> syn::Result<FieldCryptoConfig> {
                     _ => {
                         return Err(meta.error(
                             "unsupported field crypto attribute; expected `field_account`",
-                        ))
+                        ));
                     }
                 }
                 Ok(())
@@ -1053,7 +1057,7 @@ fn table_alias_target(attrs: &[Attribute]) -> syn::Result<Option<Type>> {
                 return Err(Error::new_spanned(
                     parsed,
                     "#[table_as(...)] target must be a type path",
-                ))
+                ));
             }
         }
     }
@@ -1104,8 +1108,7 @@ fn validate_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<Type> 
     Err(Error::new_spanned(attr, "unsupported foreign attribute"))
 }
 
-const BINDREF_ACCEPTED_SHAPES: &str =
-    "#[foreign] supports recursive Option<_> / Vec<_> shapes whose leaf type implements appdb::Bridge";
+const BINDREF_ACCEPTED_SHAPES: &str = "#[foreign] supports recursive Option<_> / Vec<_> shapes whose leaf type implements appdb::Bridge";
 
 const BINDREF_BRIDGE_STORE_ONLY: &str =
     "#[foreign] leaf types must derive Store or #[derive(Bridge)] dispatcher enums";
@@ -1329,7 +1332,10 @@ fn secure_kind(field: &Field) -> syn::Result<SecureKind> {
         return Ok(SecureKind::Shape(field.ty.clone()));
     }
 
-    Err(Error::new_spanned(&field.ty, secure_shape_error_message(&field.ty)))
+    Err(Error::new_spanned(
+        &field.ty,
+        secure_shape_error_message(&field.ty),
+    ))
 }
 
 fn secure_shape_supported(ty: &Type) -> bool {

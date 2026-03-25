@@ -8,7 +8,7 @@ use surrealdb::opt::PatchOp;
 use surrealdb::types::{RecordId, RecordIdKey, Table, Value as SurrealDbValue};
 
 use crate::connection::get_db;
-use crate::error::{classify_db_error_text, DBError, DBErrorKind};
+use crate::error::{DBError, DBErrorKind, classify_db_error_text};
 use crate::model::meta::{HasId, ModelMeta, UniqueLookupMeta};
 use crate::query::builder::QueryKind;
 use crate::serde_utils::id::parse_record_id_or_plain_string;
@@ -116,14 +116,12 @@ where
 }
 
 fn normalize_root_record_id_string(value: &mut serde_json::Value) {
-    if let serde_json::Value::Object(map) = value {
-        if let Some(id) = map.get_mut("id") {
-            if let serde_json::Value::String(text) = id {
-                if let Ok(record) = parse_record_id_or_plain_string(text, None) {
-                    *id = serde_json::to_value(record).expect("record id should serialize");
-                }
-            }
-        }
+    if let serde_json::Value::Object(map) = value
+        && let Some(id) = map.get_mut("id")
+        && let serde_json::Value::String(text) = id
+        && let Ok(record) = parse_record_id_or_plain_string(text, None)
+    {
+        *id = serde_json::to_value(record).expect("record id should serialize");
     }
 }
 
@@ -253,20 +251,20 @@ where
     T: ForeignModel + ModelMeta,
     T::Stored: serde::de::DeserializeOwned,
 {
-    if let Value::Object(map) = &mut row {
-        if let Some(id) = id {
-            map.insert("id".to_owned(), id);
-        }
+    if let Value::Object(map) = &mut row
+        && let Some(id) = id
+    {
+        map.insert("id".to_owned(), id);
     }
 
     normalize_root_record_id_string(&mut row);
 
-    if T::has_foreign_fields() {
-        if let Value::Object(map) = &mut row {
-            for (field, value) in map.iter_mut() {
-                if field != "id" {
-                    normalize_foreign_shapes(value);
-                }
+    if T::has_foreign_fields()
+        && let Value::Object(map) = &mut row
+    {
+        for (field, value) in map.iter_mut() {
+            if field != "id" {
+                normalize_foreign_shapes(value);
             }
         }
     }
@@ -797,7 +795,8 @@ where
                 let ((record, content, id), row_foreign_records) =
                     crate::run_with_foreign_cleanup_scope(|| async {
                         let stored_row = T::persist_foreign(row).await?;
-                        let (record, content, id) = prepare_save_parts(T::storage_table(), stored_row)?;
+                        let (record, content, id) =
+                            prepare_save_parts(T::storage_table(), stored_row)?;
                         Ok::<_, anyhow::Error>((record, content, id))
                     })
                     .await?;
@@ -985,18 +984,20 @@ mod tests {
     fn extract_id_fails_when_id_not_string_or_number() {
         let model = BadIdType { id: true };
         let err = extract_record_id_key(&model).expect_err("expected bad id type error");
-        assert!(err
-            .to_string()
-            .contains("not a non-empty string or i64 number"));
+        assert!(
+            err.to_string()
+                .contains("not a non-empty string or i64 number")
+        );
     }
 
     #[test]
     fn extract_id_fails_when_id_empty() {
         let model = GoodModel { id: String::new() };
         let err = extract_record_id_key(&model).expect_err("expected empty id error");
-        assert!(err
-            .to_string()
-            .contains("not a non-empty string or i64 number"));
+        assert!(
+            err.to_string()
+                .contains("not a non-empty string or i64 number")
+        );
     }
 
     #[test]

@@ -372,23 +372,6 @@ help: the trait `Sensitive` is implemented for `InvalidSecureEnumRecord`
    = note: required for `DirectSecureEnum` to implement `SensitiveShape`
    = note: this error originates in the derive macro `::serde::Serialize` which comes from the expansion of the derive macro `Sensitive` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error: this function depends on never type fallback being `()`
-  --> tests/ui/sensitive/secure_enum_direct_rejected.rs:11:48
-   |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, Sensitive)]
-   |                                                ^^^^^^^^^
-   |
-   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in Rust 2024 and in a future release in all editions!
-   = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/never-type-fallback.html>
-   = help: specify the types explicitly
-note: in edition 2024, the requirement `!: Deserialize<'_>` will fail
-  --> tests/ui/sensitive/secure_enum_direct_rejected.rs:11:48
-   |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, Sensitive)]
-   |                                                ^^^^^^^^^
-   = note: `#[deny(dependency_on_unit_never_type_fallback)]` (part of `#[deny(rust_2024_compatibility)]`) on by default
-   = note: this error originates in the derive macro `::serde::Deserialize` which comes from the expansion of the derive macro `Sensitive` (in Nightly builds, run with -Z macro-backtrace for more info)
-
 error[E0277]: the trait bound `DirectSecureEnum: Sensitive` is not satisfied
   --> tests/ui/sensitive/secure_enum_direct_rejected.rs:11:48
    |
@@ -418,19 +401,3 @@ error[E0282]: type annotations needed
    |
 14 |     state: DirectSecureEnum,
    |     ^^^^^ cannot infer type
-
-error: this function depends on never type fallback being `()`
-  --> tests/ui/sensitive/secure_enum_direct_rejected.rs:11:48
-   |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, Sensitive)]
-   |                                                ^^^^^^^^^
-   |
-   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in Rust 2024 and in a future release in all editions!
-   = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/never-type-fallback.html>
-   = help: specify the types explicitly
-note: in edition 2024, the requirement `!: SurrealValue` will fail
-  --> tests/ui/sensitive/secure_enum_direct_rejected.rs:11:48
-   |
-11 | #[derive(Debug, Clone, Serialize, Deserialize, Sensitive)]
-   |                                                ^^^^^^^^^
-   = note: this error originates in the derive macro `::surrealdb::types::SurrealValue` which comes from the expansion of the derive macro `Sensitive` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use specta::Type;
 use std::fmt;
-use surrealdb::types::{kind, Kind, Number, RecordId, RecordIdKey, SurrealValue, ToSql, Value};
+use surrealdb::types::{Kind, Number, RecordId, RecordIdKey, SurrealValue, ToSql, Value, kind};
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -240,8 +240,8 @@ pub fn normalize_public_root_id_value(value: &mut serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::{
-        deserialize_id_or_record_id_as_string, deserialize_record_id_or_compat_string,
-        serialize_id_as_string, Id,
+        Id, deserialize_id_or_record_id_as_string, deserialize_record_id_or_compat_string,
+        serialize_id_as_string,
     };
     use serde::{Deserialize, Serialize};
     use surrealdb::types::RecordId;

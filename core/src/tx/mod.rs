@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
+use surrealdb::IndexedResults;
 use surrealdb::opt;
 use surrealdb::types::{SurrealValue, Value};
-use surrealdb::IndexedResults;
 
 use crate::connection::get_db;
 

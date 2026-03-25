@@ -8,9 +8,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, LazyLock, RwLock};
 use std::thread;
 use std::time::Duration;
+use surrealdb::Surreal;
 use surrealdb::engine::local::{Db, SurrealKv};
 use surrealdb::opt::Config;
-use surrealdb::Surreal;
 
 /// Shared SurrealDB handle used by the runtime and global facade.
 pub type DbHandle = Arc<Surreal<Db>>;
@@ -344,7 +344,7 @@ pub fn get_db() -> Result<DbHandle> {
 #[cfg(test)]
 mod tests {
     use super::{
-        get_db, make_schema_ddl_idempotent, reinit_db, reset_db, DbRuntime, InitDbOptions,
+        DbRuntime, InitDbOptions, get_db, make_schema_ddl_idempotent, reinit_db, reset_db,
     };
     use std::path::PathBuf;
     use std::sync::{Arc, LazyLock, Mutex};
