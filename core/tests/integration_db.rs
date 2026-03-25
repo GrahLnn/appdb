@@ -6425,6 +6425,112 @@ fn save_many_mixed_sensitive_rows_preserve_auto_ensure_and_isolation_semantics()
 }
 
 #[test]
+fn store_sensitive_concurrent_first_use_initialization_is_single_flight_per_model() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+        clear_crypto_context_registry();
+        reset_default_crypto_config();
+
+        let local_appdata = std::env::temp_dir().join(format!(
+            "appdb_integration_single_flight_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before epoch")
+                .as_nanos()
+        ));
+        unsafe {
+            std::env::set_var("LOCALAPPDATA", &local_appdata);
+        }
+
+        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
+        struct ItSensitiveSingleFlightProfile {
+            id: Id,
+            alias: String,
+            #[secure]
+            secret: String,
+        }
+
+        Repo::<ItSensitiveSingleFlightProfile>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let first = ItSensitiveSingleFlightProfile {
+            id: Id::from("single-flight-a"),
+            alias: "alpha".to_owned(),
+            secret: "secret-a".to_owned(),
+        };
+        let second = ItSensitiveSingleFlightProfile {
+            id: Id::from("single-flight-b"),
+            alias: "beta".to_owned(),
+            secret: "secret-b".to_owned(),
+        };
+
+        let first_task = tokio::spawn({
+            let value = first.clone();
+            async move {
+                let encrypted = value.encrypt_with_runtime_resolver()?;
+                ItSensitiveSingleFlightProfile::decrypt_with_runtime_resolver(&encrypted)
+            }
+        });
+        let second_task = tokio::spawn({
+            let value = second.clone();
+            async move {
+                let encrypted = value.encrypt_with_runtime_resolver()?;
+                ItSensitiveSingleFlightProfile::decrypt_with_runtime_resolver(&encrypted)
+            }
+        });
+
+        let saved_first = first_task
+            .await
+            .expect("first store worker should not panic")
+            .expect("first store path should initialize crypto");
+        let saved_second = second_task
+            .await
+            .expect("second store worker should not panic")
+            .expect("second store path should reuse initialization");
+
+        set_default_crypto_config(
+            "integration-single-flight-mutated-svc",
+            "integration-single-flight-mutated-acct",
+        );
+
+        assert_eq!(saved_first, first);
+        assert_eq!(saved_second, second);
+
+        let persisted_first = ItSensitiveSingleFlightProfile::save(first.clone())
+            .await
+            .expect("save after single-flight init should succeed");
+        let persisted_second = ItSensitiveSingleFlightProfile::save(second.clone())
+            .await
+            .expect("second save after single-flight init should succeed");
+
+        assert_eq!(persisted_first, first);
+        assert_eq!(persisted_second, second);
+        assert_eq!(
+            ItSensitiveSingleFlightProfile::get("single-flight-a")
+                .await
+                .expect("first row should decrypt with established context"),
+            first
+        );
+        assert_eq!(
+            ItSensitiveSingleFlightProfile::get("single-flight-b")
+                .await
+                .expect("second row should decrypt with established context"),
+            second
+        );
+
+        unsafe {
+            std::env::remove_var("LOCALAPPDATA");
+        }
+        let _ = std::fs::remove_dir_all(local_appdata);
+        clear_crypto_context_registry();
+        reset_default_crypto_config();
+    });
+}
+
+#[test]
 fn store_sensitive_later_first_use_models_pick_up_new_global_defaults() {
     let _guard = acquire_test_lock();
     run_async(async {

@@ -312,6 +312,74 @@ fn sensitive_runtime_resolver_auto_initializes_from_defaults() {
 }
 
 #[test]
+fn sensitive_runtime_resolver_first_use_initialization_is_single_flight_per_model() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+    let local_appdata = crypto_test_local_appdata("single-flight-runtime");
+    unsafe {
+        std::env::set_var("LOCALAPPDATA", &local_appdata);
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Sensitive)]
+    struct RuntimeSingleFlightSecrets {
+        pub alias: String,
+
+        #[secure]
+        pub secret: String,
+    }
+
+    let alpha = RuntimeSingleFlightSecrets {
+        alias: "alpha".into(),
+        secret: "one".into(),
+    };
+    let beta = RuntimeSingleFlightSecrets {
+        alias: "beta".into(),
+        secret: "two".into(),
+    };
+
+    let first = std::thread::spawn({
+        let value = alpha.clone();
+        move || value.encrypt_with_runtime_resolver()
+    });
+    let second = std::thread::spawn({
+        let value = beta.clone();
+        move || value.encrypt_with_runtime_resolver()
+    });
+
+    let encrypted_alpha = first
+        .join()
+        .expect("first runtime worker should not panic")
+        .expect("first runtime call should initialize crypto");
+    let encrypted_beta = second
+        .join()
+        .expect("second runtime worker should not panic")
+        .expect("second runtime call should reuse initialization");
+
+    set_default_crypto_config("single-flight-mutated-svc", "single-flight-mutated-acct");
+
+    assert_eq!(
+        RuntimeSingleFlightSecrets::decrypt_with_runtime_resolver(&encrypted_alpha)
+            .expect("first encrypted value should decrypt with established context"),
+        alpha
+    );
+    assert_eq!(
+        RuntimeSingleFlightSecrets::decrypt_with_runtime_resolver(&encrypted_beta)
+            .expect("second encrypted value should decrypt with established context"),
+        beta
+    );
+
+    unsafe {
+        std::env::remove_var("LOCALAPPDATA");
+    }
+    let _ = std::fs::remove_dir_all(local_appdata);
+    clear_crypto_context_registry();
+    reset_default_crypto_config();
+}
+
+#[test]
 fn sensitive_runtime_resolver_first_use_models_track_global_default_changes_without_retroactive_leakage() {
     let _guard = TEST_LOCK
         .lock()
