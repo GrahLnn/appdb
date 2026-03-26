@@ -1,0 +1,21 @@
+{
+  "featureId": "workspace-readme-alignment-rescope",
+  "reviewedAt": "2026-03-26T10:51:48.698333+00:00",
+  "commitId": "cfc7b4c6ed185d85650301cf34c938db260e4404",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix adequately addresses the prior mixed-scope failure. Unlike bd0a198a, commit cfc7b4c is README-only, preserves the intended Rust 2024 validator wording, and the handoff/transcript evidence shows the required targeted facade export coverage was rerun for workspace integration.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker followed the updated rust-edition-upgrade-worker guidance that pre-existing Jujutsu working copies are not blockers when the remaining diff is fully scoped. The prior failure arose before that guidance landed, and the fix transcript shows the revised procedure now matches the mission reality for README-only rescope work.",
+      "evidence": "Previous failed diff bd0a198a edited both README.md and .factory/skills/rust-edition-upgrade-worker/SKILL.md; current fix diff cfc7b4c edits only README.md. Compare worker transcripts 14fd0af7-f51f-4d87-94c7-3f87a2508291 vs fff46ceb-8ce7-430d-b73d-b0f929630757 and current skill file step 10, which now explicitly says to commit on the current Jujutsu change when the diff is fully scoped."
+    }
+  ],
+  "addressesFailureFrom": "C:\\Users\\admin\\appdb\\.factory\\validation\\rust-2024-upgrade\\scrutiny\\reviews\\workspace-validation-and-readme-alignment.json",
+  "summary": "Pass: the rescope fix removes the unrelated skill-file edit from the feature commit, keeps the README alignment intact, and re-verifies the workspace integration seam with targeted facade export coverage."
+}
