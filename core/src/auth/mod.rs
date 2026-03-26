@@ -96,7 +96,9 @@ mod tests {
                 let signup_passwords = Rc::clone(&signup_passwords);
                 move |record| {
                     *signup_calls.borrow_mut() += 1;
-                    signup_passwords.borrow_mut().push(record.params.pass.clone());
+                    signup_passwords
+                        .borrow_mut()
+                        .push(record.params.pass.clone());
                     ready(Ok(()))
                 }
             },
@@ -142,7 +144,9 @@ mod tests {
                 let signup_passwords = Rc::clone(&signup_passwords);
                 move |record| {
                     *signup_calls.borrow_mut() += 1;
-                    signup_passwords.borrow_mut().push(record.params.pass.clone());
+                    signup_passwords
+                        .borrow_mut()
+                        .push(record.params.pass.clone());
                     ready(Ok(()))
                 }
             },
