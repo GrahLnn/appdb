@@ -1,7 +1,7 @@
 {
   "milestone": "rust-2024-upgrade",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -25,50 +25,49 @@
     }
   },
   "reviewsSummary": {
-    "total": 3,
-    "passed": 1,
-    "failed": 2,
-    "failedFeatures": [
-      "runtime-drop-order-and-sensitive-regressions",
-      "workspace-validation-and-readme-alignment"
-    ]
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "runtime-drop-order-and-sensitive-regressions",
-      "severity": "blocking",
-      "description": "The feature contract required a focused runtime regression for ensure_root_user, but the delivered tree lacks a test that exercises signin-first/signup-fallback behavior and combined error context when both paths fail."
-    },
-    {
-      "featureId": "workspace-validation-and-readme-alignment",
-      "severity": "blocking",
-      "description": "Commit bd0a198a includes unrelated edits to .factory/skills/rust-edition-upgrade-worker/SKILL.md alongside the README alignment, so the feature did not stay tightly scoped to the assigned deliverable."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skill:rust-edition-upgrade-worker",
-      "suggestion": "Add an explicit fallback procedure for proving ensure_root_user behavior when there is no dedicated runtime seam yet, such as requiring a targeted auth regression helper or a minimal injectable seam before considering the feature complete.",
-      "evidence": "The runtime-drop-order-and-sensitive-regressions review found no focused ensure_root_user runtime regression even though the feature contract required it, and the review noted the current skill guidance does not explain how to satisfy that requirement when no auth test seam exists.",
+      "suggestion": "Document how workers should handle tasks whose required implementation already exists in the incoming dirty tree so they know when validation-only completion is acceptable.",
+      "evidence": "The ensure-root-user-auth-regression review notes prior handoff feedback asked for guidance on already-implemented work discovered in the dirty tree, and the skill still does not explicitly describe that case.",
       "isSystemic": false
     },
     {
-      "target": "review-orchestration",
-      "suggestion": "Do not rely solely on worker handoff commitId fields when routing scrutiny reviews; cross-check with the feature diff/history or transcript evidence before deciding what commit represents the feature.",
-      "evidence": "The edition-metadata-and-compile-surface review found the handoff commitId pointed at 90e8dab, while the actual feature changes were present in 64d4657.",
+      "target": "skill:rust-edition-upgrade-worker",
+      "suggestion": "Keep the explicit fallback procedure for proving ensure_root_user behavior via a tiny injectable seam when no dedicated auth regression path exists, because the fix feature succeeded by adding ensure_root_user_with plus focused tests.",
+      "evidence": "The original runtime review failed for missing ensure_root_user runtime coverage, and the passing fix review shows the minimal injectable seam approach was the effective resolution.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md / CLAUDE.md",
+      "suggestion": "Reconcile GitNexus guidance with the actual installed CLI capability, because the docs require gitnexus_detect_changes() but worker evidence reports the detect_changes command is unavailable.",
+      "evidence": "The ensure-root-user-auth-regression review records a failed attempt to run the detect_changes CLI subcommand while repository guidance still mandates detect_changes before commit.",
       "isSystemic": true
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Record auth bootstrap regression guidance in .factory/library/rust-2024-upgrade.md.",
-      "reason": "Rejected because this is process guidance derived from one review, not stable codebase knowledge; it belongs in worker skill/orchestrator guidance rather than library reference material."
+      "observation": "Add auth regression seam guidance to .factory/library/rust-2024-upgrade.md.",
+      "reason": "Rejected because this is procedural worker guidance rather than stable codebase knowledge, so it belongs in skills or orchestrator instructions instead of the shared library."
     },
     {
-      "observation": "Apply the current skill-file change from bd0a198a as a scrutiny-side update.",
-      "reason": "Rejected because the change is already present in the repository and the review issue is about mixed feature scope, not missing guidance content."
+      "observation": "Re-apply the previously mixed-scope rust-edition-upgrade-worker skill edit as a scrutiny-side update.",
+      "reason": "Rejected because the repository already contains the updated skill guidance; the old failure was about mixed feature scope, not missing current guidance."
+    },
+    {
+      "observation": "Repeat the earlier review-orchestration recommendation about cross-checking handoff commit IDs.",
+      "reason": "Rejected for this rerun because neither fix review surfaced an active misrouting problem; the current synthesis is scoped to validating the two fix features from the current tree."
     }
   ],
-  "previousRound": null
+  "previousRound": {
+    "round": 1,
+    "path": ".factory/validation/rust-2024-upgrade/scrutiny/synthesis.json"
+  }
 }
