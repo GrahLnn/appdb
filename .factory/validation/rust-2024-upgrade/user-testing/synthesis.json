@@ -1,0 +1,29 @@
+{
+  "milestone": "rust-2024-upgrade",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-CROSS-001",
+    "VAL-CROSS-002",
+    "VAL-EDITION-001",
+    "VAL-MACRO-001",
+    "VAL-MACRO-002",
+    "VAL-MACRO-003",
+    "VAL-RUNTIME-001",
+    "VAL-RUNTIME-002",
+    "VAL-RUNTIME-003",
+    "VAL-RUNTIME-004",
+    "VAL-RUNTIME-005",
+    "VAL-RUNTIME-006"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}

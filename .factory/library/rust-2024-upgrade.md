@@ -7,6 +7,7 @@ Mission-specific notes for the workspace edition migration.
 ---
 
 - Upgrade the workspace root to `edition = "2024"` and keep member crates inheriting from the workspace.
+- Follow-up metadata target: raise workspace `rust-version` from `1.89.0` to `1.94.0` and keep the validator contract green.
 - Public compile surface to preserve:
   - `core/tests/sensitive_compile.rs`
   - `#[derive(Relation)]`
