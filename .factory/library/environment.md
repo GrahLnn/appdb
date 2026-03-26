@@ -19,3 +19,4 @@ Environment variables, external dependencies, and setup notes.
   - no new external services or credentials are required
   - workers should inspect the repo for intentional dirty files before editing
   - `.sh` files remain documentation-only in this Windows environment
+  - follow-up toolchain metadata target: workspace `rust-version` should be raised to `1.94.0`
