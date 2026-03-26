@@ -19,7 +19,7 @@ None
 
 1. Read the assigned feature, `mission.md`, mission `AGENTS.md`, `.factory/services.yaml`, and relevant `.factory/library/*.md` files before editing.
 2. On Windows, never execute `.sh` files directly. Read `.factory/init.sh` as documentation only and perform its steps with native commands.
-3. Run `git status --short` immediately. If the tree starts dirty, identify whether the feature can proceed safely around those files. Do not discard pre-existing user changes.
+3. Run `git status --short` immediately. If the tree starts dirty, identify whether the feature can proceed safely around those files. Do not discard pre-existing user changes. A pre-existing active Jujutsu change is not by itself a blocker if the final diff remains fully scoped to the assigned feature.
 4. If GitNexus tooling is available, run impact analysis before editing any function, method, or macro entrypoint you will change. If GitNexus is unavailable, explicitly note the fallback and inspect the affected code/test seams directly.
 5. Write or update the narrowest failing regression tests first:
    - trybuild / compile tests for macro or edition-compatibility claims
@@ -29,7 +29,7 @@ None
 7. Implement the migration fix with explicit, readable code. Treat `cargo fix --edition` as a hint only; prefer manual rewrites that make lifetimes, drop order, and control flow obvious.
 8. Re-run targeted regressions until they pass, then run the broader validators from `.factory/services.yaml` that match the feature scope. The final feature in the milestone must run the full validator contract, including `format`.
 9. If the feature updates the final project state or validator path, perform the required README adjustment and verify it stays tightly scoped to this mission.
-10. Produce a detailed handoff with exact files changed, commands, outcomes, failing-first evidence, and any newly discovered Rust 2024 fallout.
+10. If you start inside an existing Jujutsu working copy and your remaining diff is fully scoped to the assigned feature, commit on that current change instead of returning partial solely because the change pre-existed. Produce a detailed handoff with exact files changed, commands, outcomes, failing-first evidence, and any newly discovered Rust 2024 fallout.
 
 ## Example Handoff
 
@@ -83,6 +83,6 @@ None
 ## When to Return to Orchestrator
 
 - The migration requires scope expansion beyond Rust 2024 compatibility and validator alignment.
-- Pre-existing dirty files overlap the same code and make safe progress ambiguous.
+- Pre-existing dirty files overlap the same code and make safe progress ambiguous, or safe completion would require history surgery/mixed-scope change ownership decisions.
 - A required edition fix needs a new feature because it touches a different surface than the assigned feature.
 - Cargo validation is blocked by environment or toolchain issues you cannot repair locally.
