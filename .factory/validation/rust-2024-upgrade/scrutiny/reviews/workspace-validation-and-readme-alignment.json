@@ -1,0 +1,28 @@
+{
+  "featureId": "workspace-validation-and-readme-alignment",
+  "reviewedAt": "2026-03-26T09:01:58.990692+00:00",
+  "commitId": "bd0a198a8f0e6389bb7f9f942ab4318c1e58d340",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The worker successfully validated the Rust 2024 workspace and updated README.md, but the committed change was not actually scoped to this feature: it also included edits to .factory/skills/rust-edition-upgrade-worker/SKILL.md, contradicting the handoff claim that the diff stayed limited to the README alignment.",
+    "issues": [
+      {
+        "file": ".factory/skills/rust-edition-upgrade-worker/SKILL.md",
+        "line": 17,
+        "severity": "blocking",
+        "description": "Commit bd0a198a includes unrelated skill-file edits alongside the README change, so the implementation does not satisfy the feature requirement to keep the README update tightly scoped and the handoff incorrectly states the feature diff was scoped to README.md only."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-edition-upgrade-worker skill now correctly states that a pre-existing active Jujutsu change is not itself a blocker and that workers should commit on the current change when the remaining diff is fully scoped. That guidance matches the orchestrator note and directly addresses the earlier partial handoff behavior.",
+      "evidence": "Commit bd0a198a modifies .factory/skills/rust-edition-upgrade-worker/SKILL.md lines covering steps 3 and 10; transcript for worker 69f35225-f733-405c-bced-ca6a5a4aa65c returned partial despite a scoped README diff, while worker 14fd0af7-f51f-4d87-94c7-3f87a2508291 followed the updated procedure."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail: validation evidence and README alignment are correct, but the feature commit is mixed-scope because it also includes skill-file edits not part of the assigned deliverable."
+}

@@ -1,0 +1,74 @@
+{
+  "milestone": "rust-2024-upgrade",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --workspace -- --test-threads 12",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    },
+    "format": {
+      "passed": true,
+      "command": "cargo fmt --all -- --check",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 1,
+    "failed": 2,
+    "failedFeatures": [
+      "runtime-drop-order-and-sensitive-regressions",
+      "workspace-validation-and-readme-alignment"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "runtime-drop-order-and-sensitive-regressions",
+      "severity": "blocking",
+      "description": "The feature contract required a focused runtime regression for ensure_root_user, but the delivered tree lacks a test that exercises signin-first/signup-fallback behavior and combined error context when both paths fail."
+    },
+    {
+      "featureId": "workspace-validation-and-readme-alignment",
+      "severity": "blocking",
+      "description": "Commit bd0a198a includes unrelated edits to .factory/skills/rust-edition-upgrade-worker/SKILL.md alongside the README alignment, so the feature did not stay tightly scoped to the assigned deliverable."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skill:rust-edition-upgrade-worker",
+      "suggestion": "Add an explicit fallback procedure for proving ensure_root_user behavior when there is no dedicated runtime seam yet, such as requiring a targeted auth regression helper or a minimal injectable seam before considering the feature complete.",
+      "evidence": "The runtime-drop-order-and-sensitive-regressions review found no focused ensure_root_user runtime regression even though the feature contract required it, and the review noted the current skill guidance does not explain how to satisfy that requirement when no auth test seam exists.",
+      "isSystemic": false
+    },
+    {
+      "target": "review-orchestration",
+      "suggestion": "Do not rely solely on worker handoff commitId fields when routing scrutiny reviews; cross-check with the feature diff/history or transcript evidence before deciding what commit represents the feature.",
+      "evidence": "The edition-metadata-and-compile-surface review found the handoff commitId pointed at 90e8dab, while the actual feature changes were present in 64d4657.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Record auth bootstrap regression guidance in .factory/library/rust-2024-upgrade.md.",
+      "reason": "Rejected because this is process guidance derived from one review, not stable codebase knowledge; it belongs in worker skill/orchestrator guidance rather than library reference material."
+    },
+    {
+      "observation": "Apply the current skill-file change from bd0a198a as a scrutiny-side update.",
+      "reason": "Rejected because the change is already present in the repository and the review issue is about mixed feature scope, not missing guidance content."
+    }
+  ],
+  "previousRound": null
+}
