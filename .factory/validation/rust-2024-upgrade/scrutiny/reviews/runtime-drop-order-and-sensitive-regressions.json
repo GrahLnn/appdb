@@ -1,0 +1,39 @@
+{
+  "featureId": "runtime-drop-order-and-sensitive-regressions",
+  "reviewedAt": "2026-03-26T09:02:55Z",
+  "commitId": "64d4657",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The repository cleanup and sensitive-crypto regressions are implemented and well-covered, but the feature is incomplete because ensure_root_user lacks the requested focused runtime regression and the feature commit bundles many unrelated files beyond this runtime migration slice.",
+    "issues": [
+      {
+        "file": "core/src/auth/mod.rs",
+        "line": 28,
+        "severity": "blocking",
+        "description": "The feature contract explicitly requires a focused runtime regression for ensure_root_user, but the tree only contains a helper-shape unit test for root_user and no runtime test that exercises signin-first/signup-fallback behavior or the combined error context when both calls fail."
+      },
+      {
+        "file": ".factory/init.sh",
+        "line": 1,
+        "severity": "non_blocking",
+        "description": "The reviewed commit 64d4657 includes broad unrelated mission/library/validation/macro files in addition to the runtime-sensitive code paths, so this feature handoff does not isolate its claimed scope and makes review/audit harder."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-edition-upgrade-worker skill says to add focused runtime regressions for the assigned behavior, but it does not give a concrete fallback for auth-path coverage when no dedicated ensure_root_user seam exists, and this review found that gap persisted into the delivered feature.",
+      "evidence": "Feature handoff coverage note says no dedicated ensure_root_user runtime test existed; skillFeedback.suggestedChanges also requests a fallback procedure, while core/tests contains no ensure_root_user test match."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The shared library notes capture repository and crypto migration hotspots but do not record how auth bootstrap behavior should be regression-tested under Rust 2024, which likely contributed to the missing ensure_root_user coverage.",
+      "evidence": "C:/Users/admin/appdb/.factory/library/rust-2024-upgrade.md lists core/src/auth/mod.rs as a hotspot, but no shared library note describes an auth regression seam or verification method for ensure_root_user."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed handoff, transcript skeleton, skill guidance, and commit 64d4657. Repository cleanup, duplicate-batch protection, encrypted-at-rest, single-flight init, and auto-init failure coverage look correct, but the feature still misses the requested ensure_root_user runtime regression, so I marked the review as fail."
+}

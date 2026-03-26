@@ -25,6 +25,7 @@ None
    - trybuild / compile tests for macro or edition-compatibility claims
    - focused runtime tests for drop-order, cleanup, auth, or crypto behavior
    - facade/export tests when verifying public surface integration
+   - if a required runtime behavior has no dedicated seam yet, add the smallest practical test seam/helper instead of treating source inspection as sufficient proof
 6. Run the targeted tests before implementation and capture failing-first proof whenever the path can honestly fail first. If the proof must be an adjusted trybuild stderr or another compile-boundary exception, explain why.
 7. Implement the migration fix with explicit, readable code. Treat `cargo fix --edition` as a hint only; prefer manual rewrites that make lifetimes, drop order, and control flow obvious.
 8. Re-run targeted regressions until they pass, then run the broader validators from `.factory/services.yaml` that match the feature scope. The final feature in the milestone must run the full validator contract, including `format`.
