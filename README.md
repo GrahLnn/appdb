@@ -145,8 +145,11 @@ let value: Option<i64> = query_bound_return(stmt).await?;
 
 ## Development
 
-Run the standard checks from the workspace root:
+Run the standard Rust 2024 workspace validators from the workspace root:
 
 ```bash
-cargo test
+cargo check --workspace --all-targets
+cargo test --workspace -- --test-threads 12
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
 ```
