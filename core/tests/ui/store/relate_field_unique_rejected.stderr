@@ -1,0 +1,5 @@
+error: #[relate(...)] fields cannot be used as #[unique] lookup keys
+  --> tests/ui/store/relate_field_unique_rejected.rs:16:5
+   |
+16 |     child: RelatedLeaf,
+   |     ^^^^^

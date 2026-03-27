@@ -14,7 +14,7 @@ pub fn derive_sensitive(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(Store, attributes(unique, secure, foreign, table_as, crypto))]
+#[proc_macro_derive(Store, attributes(unique, secure, foreign, table_as, crypto, relate))]
 pub fn derive_store(input: TokenStream) -> TokenStream {
     match derive_store_impl(parse_macro_input!(input as DeriveInput)) {
         Ok(tokens) => tokens.into(),
@@ -106,6 +106,15 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         })
         .collect::<syn::Result<Vec<_>>>()?;
 
+    let relate_fields = named_fields
+        .iter()
+        .filter_map(|field| match field_relate_attr(field) {
+            Ok(Some(attr)) => Some(parse_relate_field(field, attr)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+
     if let Some(non_store_child) = foreign_fields
         .iter()
         .find_map(|field| invalid_foreign_leaf_type(&field.kind.original_ty))
@@ -124,6 +133,47 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             ident,
             "#[foreign] fields cannot be used as #[unique] lookup keys",
         ));
+    }
+
+    if let Some(invalid_field) = named_fields.iter().find(|field| {
+        field_relate_attr(field).ok().flatten().is_some() && has_unique_attr(&field.attrs)
+    }) {
+        let ident = invalid_field.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            "#[relate(...)] fields cannot be used as #[unique] lookup keys",
+        ));
+    }
+
+    if let Some(invalid_field) = named_fields.iter().find(|field| {
+        field_relate_attr(field).ok().flatten().is_some() && has_secure_attr(&field.attrs)
+    }) {
+        let ident = invalid_field.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            "#[relate(...)] fields cannot be marked #[secure]",
+        ));
+    }
+
+    if let Some(invalid_field) = named_fields.iter().find(|field| {
+        field_relate_attr(field).ok().flatten().is_some()
+            && field_foreign_attr(field).ok().flatten().is_some()
+    }) {
+        let ident = invalid_field.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            "#[relate(...)] cannot be combined with #[foreign]",
+        ));
+    }
+
+    let mut seen_relation_names = HashSet::new();
+    for field in &relate_fields {
+        if !seen_relation_names.insert(field.relation_name.clone()) {
+            return Err(Error::new_spanned(
+                &field.ident,
+                "duplicate #[relate(...)] relation name is not supported within one Store model",
+            ));
+        }
     }
 
     let auto_has_id_impl = id_fields.first().map(|field| {
@@ -202,6 +252,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 if ident == "id"
                     || secure_fields.iter().any(|secure| secure == ident)
                     || foreign_fields.iter().any(|foreign| foreign.ident == *ident)
+                    || relate_fields.iter().any(|relate| relate.ident == *ident)
                 {
                     None
                 } else {
@@ -219,7 +270,13 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
     let foreign_field_literals = foreign_fields
         .iter()
         .map(|field| field.ident.to_string())
-        .map(|field| quote! { #field });
+        .map(|field| quote! { #field })
+        .collect::<Vec<_>>();
+    let relate_field_literals = relate_fields
+        .iter()
+        .map(|field| field.ident.to_string())
+        .map(|field| quote! { #field })
+        .collect::<Vec<_>>();
     if id_fields.is_empty() && lookup_fields.is_empty() {
         return Err(Error::new_spanned(
             struct_ident,
@@ -308,6 +365,114 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
     });
 
+    let relation_methods_impl = if relate_fields.is_empty() {
+        quote! {}
+    } else {
+        let strip_relation_fields = relate_fields.iter().map(|field| {
+            let ident = field.ident.to_string();
+            quote! {
+                map.remove(#ident);
+            }
+        });
+
+        let inject_relation_values_from_model = relate_fields.iter().map(|field| {
+            let ident = &field.ident;
+            let name = ident.to_string();
+            quote! {
+                map.insert(#name.to_owned(), ::serde_json::to_value(&self.#ident)?);
+            }
+        });
+
+        let prepare_relation_writes = relate_fields.iter().map(|field| {
+            let ident = &field.ident;
+            let relation_name = &field.relation_name;
+            let field_ty = &field.field_ty;
+            quote! {
+                {
+                    let ids = <#field_ty as ::appdb::RelateShape>::persist_relate_shape(self.#ident.clone()).await?;
+                    writes.push(::appdb::RelationWrite {
+                        relation: #relation_name,
+                        record: record.clone(),
+                        edges: ids
+                            .into_iter()
+                            .enumerate()
+                            .map(|(position, out)| ::appdb::graph::OrderedRelationEdge {
+                                _in: ::std::option::Option::Some(record.clone()),
+                                out,
+                                position: position as i64,
+                            })
+                            .collect(),
+                    });
+                }
+            }
+        });
+
+        let inject_relation_values_from_db = relate_fields.iter().map(|field| {
+            let relation_name = &field.relation_name;
+            let field_ty = &field.field_ty;
+            let ident = field.ident.to_string();
+            quote! {
+                {
+                    let edges = ::appdb::graph::GraphRepo::out_edges(record.clone(), #relation_name).await?;
+                    let value = <#field_ty as ::appdb::RelateShape>::hydrate_relate_shape(
+                        edges.into_iter().map(|edge| edge.out).collect(),
+                    )
+                    .await?;
+                    map.insert(#ident.to_owned(), ::serde_json::to_value(value)?);
+                }
+            }
+        });
+
+        quote! {
+            fn has_relation_fields() -> bool {
+                true
+            }
+
+            fn relation_field_names() -> &'static [&'static str] {
+                &[ #( #relate_field_literals ),* ]
+            }
+
+            fn strip_relation_fields(row: &mut ::serde_json::Value) {
+                if let ::serde_json::Value::Object(map) = row {
+                    #( #strip_relation_fields )*
+                }
+            }
+
+            fn inject_relation_values_from_model(
+                &self,
+                row: &mut ::serde_json::Value,
+            ) -> ::anyhow::Result<()> {
+                if let ::serde_json::Value::Object(map) = row {
+                    #( #inject_relation_values_from_model )*
+                }
+                Ok(())
+            }
+
+            fn prepare_relation_writes(
+                &self,
+                record: ::surrealdb::types::RecordId,
+            ) -> impl ::std::future::Future<Output = ::anyhow::Result<::std::vec::Vec<::appdb::RelationWrite>>> + Send {
+                async move {
+                    let mut writes = ::std::vec::Vec::new();
+                    #( #prepare_relation_writes )*
+                    Ok(writes)
+                }
+            }
+
+            fn inject_relation_values_from_db(
+                record: ::surrealdb::types::RecordId,
+                row: &mut ::serde_json::Value,
+            ) -> impl ::std::future::Future<Output = ::anyhow::Result<()>> + Send {
+                async move {
+                    if let ::serde_json::Value::Object(map) = row {
+                        #( #inject_relation_values_from_db )*
+                    }
+                    Ok(())
+                }
+            }
+        }
+    };
+
     let foreign_model_impl = if foreign_fields.is_empty() {
         quote! {
             impl ::appdb::ForeignModel for #struct_ident {
@@ -327,6 +492,8 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 {
                     Ok(::serde_json::from_value(row.into_json_value())?)
                 }
+
+                #relation_methods_impl
             }
         }
     } else {
@@ -373,6 +540,10 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                     true
                 }
 
+                fn foreign_field_names() -> &'static [&'static str] {
+                    &[ #( #foreign_field_literals ),* ]
+                }
+
                 fn decode_stored_row(
                     row: ::surrealdb::types::Value,
                 ) -> ::anyhow::Result<Self::Stored>
@@ -385,6 +556,8 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                     }
                     Ok(::serde_json::from_value(row)?)
                 }
+
+                #relation_methods_impl
             }
         }
     };
@@ -1099,6 +1272,27 @@ fn field_foreign_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
     Ok(foreign_attr)
 }
 
+fn field_relate_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
+    let mut relate_attr = None;
+
+    for attr in &field.attrs {
+        if !attr.path().is_ident("relate") {
+            continue;
+        }
+
+        if relate_attr.is_some() {
+            return Err(Error::new_spanned(
+                attr,
+                "duplicate #[relate(...)] attribute is not supported",
+            ));
+        }
+
+        relate_attr = Some(attr);
+    }
+
+    Ok(relate_attr)
+}
+
 fn validate_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
     if attr.path().is_ident("foreign") {
         return foreign_leaf_type(&field.ty)
@@ -1113,6 +1307,8 @@ const BINDREF_ACCEPTED_SHAPES: &str = "#[foreign] supports recursive Option<_> /
 const BINDREF_BRIDGE_STORE_ONLY: &str =
     "#[foreign] leaf types must derive Store or #[derive(Bridge)] dispatcher enums";
 
+const RELATE_ACCEPTED_SHAPES: &str = "#[relate(\"...\")] supports direct Child / Option<Child> / Vec<Child> shapes whose leaf type implements appdb::Bridge";
+
 #[derive(Clone)]
 struct ForeignField {
     ident: syn::Ident,
@@ -1123,6 +1319,13 @@ struct ForeignField {
 struct ForeignFieldKind {
     original_ty: Type,
     stored_ty: Type,
+}
+
+#[derive(Clone)]
+struct RelateField {
+    ident: syn::Ident,
+    relation_name: String,
+    field_ty: Type,
 }
 
 fn parse_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<ForeignField> {
@@ -1136,6 +1339,52 @@ fn parse_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<ForeignFi
     };
 
     Ok(ForeignField { ident, kind })
+}
+
+fn parse_relate_field(field: &Field, attr: &Attribute) -> syn::Result<RelateField> {
+    let relation_name = attr
+        .parse_args::<syn::LitStr>()
+        .map_err(|_| {
+            Error::new_spanned(
+                attr,
+                "#[relate(\"...\")] requires exactly one string literal",
+            )
+        })?
+        .value();
+    if relation_name.is_empty() {
+        return Err(Error::new_spanned(
+            attr,
+            "#[relate(\"...\")] relation name must not be empty",
+        ));
+    }
+
+    validate_relate_field(field, attr)?;
+
+    Ok(RelateField {
+        ident: field.ident.clone().expect("named field"),
+        relation_name,
+        field_ty: field.ty.clone(),
+    })
+}
+
+fn validate_relate_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
+    if !attr.path().is_ident("relate") {
+        return Err(Error::new_spanned(attr, "unsupported relate attribute"));
+    }
+
+    let accepted = direct_store_child_type(&field.ty)
+        .cloned()
+        .map(Type::Path)
+        .or_else(|| {
+            option_inner_type(&field.ty)
+                .and_then(|inner| direct_store_child_type(inner).cloned().map(Type::Path))
+        })
+        .or_else(|| {
+            vec_inner_type(&field.ty)
+                .and_then(|inner| direct_store_child_type(inner).cloned().map(Type::Path))
+        });
+
+    accepted.ok_or_else(|| Error::new_spanned(&field.ty, RELATE_ACCEPTED_SHAPES))
 }
 
 fn foreign_field_kind<'a>(

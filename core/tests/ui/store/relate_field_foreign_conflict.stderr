@@ -1,0 +1,5 @@
+error: #[relate(...)] cannot be combined with #[foreign]
+  --> tests/ui/store/relate_field_foreign_conflict.rs:16:5
+   |
+16 |     child: RelatedLeaf,
+   |     ^^^^^

@@ -104,6 +104,18 @@ Supported shapes include:
 
 `#[table_as(...)]` is also supported for referenced models.
 
+### Relation-backed fields
+
+Use `#[relate("edge_name")]` on supported child model fields when the relation should live in a dedicated SurrealDB relation table instead of being stored inline on the parent row.
+
+Supported shapes include:
+
+- `Child`
+- `Option<Child>`
+- `Vec<Child>`
+
+At write time the parent table omits the field, while appdb synchronizes ordered edges in the named relation table. `get`, `list`, `list_limit`, `save`, and `save_many` hydrate those fields back into full models on read.
+
 ### Graph relations
 
 `GraphRepo` provides helpers around SurrealDB relation tables.

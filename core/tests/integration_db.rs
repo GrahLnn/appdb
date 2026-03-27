@@ -720,6 +720,34 @@ struct NamedFieldTestRelation {
     created_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItRelateLeaf {
+    id: Id,
+    label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItRelateRoot {
+    id: Id,
+    title: String,
+    #[relate("it_relate_primary")]
+    primary: ItRelateLeaf,
+    #[relate("it_relate_optional")]
+    optional: Option<ItRelateLeaf>,
+    #[relate("it_relate_many")]
+    items: Vec<ItRelateLeaf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
+struct StoredRelateEdgeRow {
+    #[serde(rename = "in")]
+    #[serde(default)]
+    _in: Option<RecordId>,
+    #[serde(deserialize_with = "appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
+    out: RecordId,
+    position: i64,
+}
+
 fn test_db_path() -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1229,6 +1257,28 @@ fn parse_record_id_value(value: serde_json::Value, context: &str) -> RecordId {
     }
 }
 
+async fn load_relate_root_raw(id: &str) -> serde_json::Value {
+    let stmt = RawSqlStmt::new("SELECT * FROM ONLY type::record($table, $id);")
+        .bind("table", ItRelateRoot::table_name())
+        .bind("id", id.to_owned());
+    query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("relate root raw query should succeed")
+        .expect("relate root raw row should exist")
+}
+
+async fn load_relate_edges(rel: &str, id: &str) -> Vec<StoredRelateEdgeRow> {
+    let stmt = RawSqlStmt::new(
+        "SELECT in, out, position FROM $rel WHERE in = $record ORDER BY position ASC;",
+    )
+    .bind("rel", Table::from(rel))
+    .bind("record", RecordId::new(ItRelateRoot::table_name(), id));
+    let mut result = query_bound_checked(stmt)
+        .await
+        .expect("relate edge query should succeed");
+    result.take(0).expect("relate edge rows should decode")
+}
+
 #[test]
 fn id_repo_roundtrip_passes() {
     let _guard = acquire_test_lock();
@@ -1304,6 +1354,46 @@ fn inherent_model_api_roundtrip_passes() {
         assert_eq!(typed.kind(), DBErrorKind::NotFound);
 
         drop(inserted);
+    });
+}
+
+#[test]
+fn model_exists_reports_whether_table_has_any_rows() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        assert!(
+            !ItStringUser::exists()
+                .await
+                .expect("exists on an empty table should succeed"),
+            "empty table should report false"
+        );
+
+        Repo::<ItStringUser>::save(ItStringUser {
+            id: Id::from("seed"),
+            payload: "value".to_owned(),
+        })
+        .await
+        .expect("seed save should succeed");
+
+        assert!(
+            ItStringUser::exists()
+                .await
+                .expect("exists on a populated table should succeed"),
+            "non-empty table should report true"
+        );
+
+        ItStringUser::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        assert!(
+            !ItStringUser::exists()
+                .await
+                .expect("exists after delete_all should succeed"),
+            "table cleared by delete_all should report false"
+        );
     });
 }
 
@@ -5367,6 +5457,239 @@ fn successful_foreign_save_matches_all_read_entrypoints() {
         assert_eq!(
             branch_raw.leaf,
             RecordId::new(ItNestedForeignLeaf::table_name(), "save-return-leaf")
+        );
+    });
+}
+
+#[test]
+fn relate_fields_are_stored_in_edge_tables_and_hydrated_on_read() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRelateRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItRelateLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let first = ItRelateLeaf {
+            id: Id::from("relate-leaf-1"),
+            label: "first".to_owned(),
+        };
+        let second = ItRelateLeaf {
+            id: Id::from("relate-leaf-2"),
+            label: "second".to_owned(),
+        };
+        let third = ItRelateLeaf {
+            id: Id::from("relate-leaf-3"),
+            label: "third".to_owned(),
+        };
+
+        let initial = ItRelateRoot {
+            id: Id::from("relate-root"),
+            title: "alpha".to_owned(),
+            primary: first.clone(),
+            optional: Some(second.clone()),
+            items: vec![third.clone(), first.clone(), third.clone()],
+        };
+
+        let saved = ItRelateRoot::save(initial.clone())
+            .await
+            .expect("relate save should succeed");
+        let loaded = ItRelateRoot::get("relate-root")
+            .await
+            .expect("relate get should succeed");
+        let listed = ItRelateRoot::list()
+            .await
+            .expect("relate list should succeed")
+            .into_iter()
+            .find(|row| row.id == Id::from("relate-root"))
+            .expect("saved relate row should be present in list results");
+        let limited = ItRelateRoot::list_limit(5)
+            .await
+            .expect("relate list_limit should succeed")
+            .into_iter()
+            .find(|row| row.id == Id::from("relate-root"))
+            .expect("saved relate row should be present in list_limit results");
+
+        let raw_root = load_relate_root_raw("relate-root").await;
+        let primary_edges = load_relate_edges("it_relate_primary", "relate-root").await;
+        let optional_edges = load_relate_edges("it_relate_optional", "relate-root").await;
+        let item_edges = load_relate_edges("it_relate_many", "relate-root").await;
+
+        assert_eq!(saved, initial);
+        assert_eq!(loaded, initial);
+        assert_eq!(listed, initial);
+        assert_eq!(limited, initial);
+
+        let raw_root_object = raw_root
+            .as_object()
+            .expect("relate root raw row should be an object");
+        assert_eq!(
+            raw_root_object.get("title"),
+            Some(&serde_json::Value::String("alpha".to_owned()))
+        );
+        assert!(
+            !raw_root_object.contains_key("primary"),
+            "root row should not inline relate single field"
+        );
+        assert!(
+            !raw_root_object.contains_key("optional"),
+            "root row should not inline relate optional field"
+        );
+        assert!(
+            !raw_root_object.contains_key("items"),
+            "root row should not inline relate vec field"
+        );
+
+        assert_eq!(primary_edges.len(), 1);
+        assert_eq!(primary_edges[0].position, 0);
+        assert_eq!(
+            primary_edges[0].out,
+            RecordId::new(ItRelateLeaf::table_name(), "relate-leaf-1")
+        );
+
+        assert_eq!(optional_edges.len(), 1);
+        assert_eq!(optional_edges[0].position, 0);
+        assert_eq!(
+            optional_edges[0].out,
+            RecordId::new(ItRelateLeaf::table_name(), "relate-leaf-2")
+        );
+
+        assert_eq!(item_edges.len(), 3);
+        assert_eq!(item_edges[0].position, 0);
+        assert_eq!(item_edges[1].position, 1);
+        assert_eq!(item_edges[2].position, 2);
+        assert_eq!(
+            item_edges
+                .iter()
+                .map(|row| row.out.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                RecordId::new(ItRelateLeaf::table_name(), "relate-leaf-3"),
+                RecordId::new(ItRelateLeaf::table_name(), "relate-leaf-1"),
+                RecordId::new(ItRelateLeaf::table_name(), "relate-leaf-3"),
+            ]
+        );
+
+        let updated = ItRelateRoot {
+            id: Id::from("relate-root"),
+            title: "beta".to_owned(),
+            primary: third.clone(),
+            optional: None,
+            items: vec![second.clone(), first.clone()],
+        };
+
+        let updated_saved = ItRelateRoot::save(updated.clone())
+            .await
+            .expect("relate update should succeed");
+        let updated_loaded = ItRelateRoot::get("relate-root")
+            .await
+            .expect("relate get after update should succeed");
+        let updated_primary_edges = load_relate_edges("it_relate_primary", "relate-root").await;
+        let updated_optional_edges = load_relate_edges("it_relate_optional", "relate-root").await;
+        let updated_item_edges = load_relate_edges("it_relate_many", "relate-root").await;
+
+        assert_eq!(updated_saved, updated);
+        assert_eq!(updated_loaded, updated);
+
+        assert_eq!(updated_primary_edges.len(), 1);
+        assert_eq!(
+            updated_primary_edges[0].out,
+            RecordId::new(ItRelateLeaf::table_name(), "relate-leaf-3")
+        );
+        assert!(
+            updated_optional_edges.is_empty(),
+            "optional relate edges should be cleared when the field becomes None"
+        );
+        assert_eq!(
+            updated_item_edges
+                .iter()
+                .map(|row| (row.position, row.out.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    0,
+                    RecordId::new(ItRelateLeaf::table_name(), "relate-leaf-2")
+                ),
+                (
+                    1,
+                    RecordId::new(ItRelateLeaf::table_name(), "relate-leaf-1")
+                ),
+            ]
+        );
+    });
+}
+
+#[test]
+fn relate_fields_roundtrip_through_save_many() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRelateRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItRelateLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let first = ItRelateRoot {
+            id: Id::from("relate-batch-a"),
+            title: "batch-a".to_owned(),
+            primary: ItRelateLeaf {
+                id: Id::from("relate-batch-leaf-a1"),
+                label: "a1".to_owned(),
+            },
+            optional: Some(ItRelateLeaf {
+                id: Id::from("relate-batch-leaf-a2"),
+                label: "a2".to_owned(),
+            }),
+            items: vec![ItRelateLeaf {
+                id: Id::from("relate-batch-leaf-a3"),
+                label: "a3".to_owned(),
+            }],
+        };
+        let second = ItRelateRoot {
+            id: Id::from("relate-batch-b"),
+            title: "batch-b".to_owned(),
+            primary: ItRelateLeaf {
+                id: Id::from("relate-batch-leaf-b1"),
+                label: "b1".to_owned(),
+            },
+            optional: None,
+            items: vec![
+                ItRelateLeaf {
+                    id: Id::from("relate-batch-leaf-b2"),
+                    label: "b2".to_owned(),
+                },
+                ItRelateLeaf {
+                    id: Id::from("relate-batch-leaf-b3"),
+                    label: "b3".to_owned(),
+                },
+            ],
+        };
+
+        let saved = ItRelateRoot::save_many(vec![first.clone(), second.clone()])
+            .await
+            .expect("relate save_many should succeed");
+        let listed = ItRelateRoot::list()
+            .await
+            .expect("relate list after save_many should succeed");
+
+        assert_eq!(saved, vec![first.clone(), second.clone()]);
+        assert!(listed.contains(&first));
+        assert!(listed.contains(&second));
+
+        assert_eq!(
+            load_relate_edges("it_relate_many", "relate-batch-b")
+                .await
+                .iter()
+                .map(|row| row.position)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
         );
     });
 }
