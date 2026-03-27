@@ -1,0 +1,5 @@
+error: #[relate("...")] supports direct Child / Option<Child> / Vec<Child> shapes whose leaf type implements appdb::Bridge
+  --> tests/ui/store/relate_field_unsupported_nested_wrapper.rs:15:13
+   |
+15 |     nested: Option<Vec<RelatedLeaf>>,
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^

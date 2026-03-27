@@ -1,0 +1,5 @@
+error: duplicate #[relate(...)] relation name is not supported within one Store model
+  --> tests/ui/store/relate_field_duplicate_relation_rejected.rs:17:5
+   |
+17 |     right: Vec<RelatedLeaf>,
+   |     ^^^^^

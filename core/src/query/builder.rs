@@ -123,6 +123,10 @@ impl QueryKind {
     pub fn all_id(_table: &str) -> String {
         "RETURN (SELECT id FROM $table).id;".to_owned()
     }
+    /// Builds a query that returns whether a table contains any rows.
+    pub fn table_has_rows(_table: &str) -> String {
+        "RETURN count((SELECT VALUE id FROM $table LIMIT 1)) > 0;".to_owned()
+    }
     /// Builds a query that projects one field from all rows.
     pub fn single_field(_table: &str, _k: &str) -> String {
         "RETURN (SELECT VALUE [$k] FROM $table);".to_owned()
@@ -148,6 +152,10 @@ impl QueryKind {
     pub fn select_out_ids(_in_id: &RecordId, _rel: &str, _out_table: &str) -> String {
         "RETURN (SELECT VALUE out FROM $rel WHERE in = $in AND record::tb(out) = $out_table);"
             .to_owned()
+    }
+    /// Builds a query that returns ordered outgoing relation edges for one source record.
+    pub fn select_out_edges(_in_id: &RecordId, _rel: &str) -> String {
+        "SELECT in, out, position FROM $rel WHERE in = $in ORDER BY position ASC;".to_owned()
     }
     /// Builds a query that returns incoming record ids for one target record.
     pub fn select_in_ids(_out_id: &RecordId, _rel: &str, _in_table: &str) -> String {
@@ -216,5 +224,14 @@ mod tests {
         let out_id = RecordId::new("member", "m1");
         let sql = QueryKind::relate(&in_id, &out_id, "task_assignment");
         assert!(sql.starts_with("INSERT RELATION INTO $rel"));
+    }
+
+    #[test]
+    fn table_has_rows_returns_a_boolean_probe() {
+        let sql = QueryKind::table_has_rows("user");
+        assert_eq!(
+            sql,
+            "RETURN count((SELECT VALUE id FROM $table LIMIT 1)) > 0;"
+        );
     }
 }

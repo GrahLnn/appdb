@@ -12,7 +12,7 @@ use crate::error::{DBError, DBErrorKind, classify_db_error_text};
 use crate::model::meta::{HasId, ModelMeta, UniqueLookupMeta};
 use crate::query::builder::QueryKind;
 use crate::serde_utils::id::parse_record_id_or_plain_string;
-use crate::{ForeignModel, StoredModel};
+use crate::{ForeignModel, RelationWrite, StoredModel};
 
 fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
     let value = serde_json::to_value(data)?;
@@ -103,6 +103,21 @@ fn normalize_foreign_shapes(value: &mut serde_json::Value) {
     crate::decode_stored_record_links(value);
 }
 
+fn normalize_declared_foreign_fields<T>(row: &mut serde_json::Value)
+where
+    T: ForeignModel,
+{
+    let serde_json::Value::Object(map) = row else {
+        return;
+    };
+
+    for field in T::foreign_field_names() {
+        if let Some(value) = map.get_mut(*field) {
+            normalize_foreign_shapes(value);
+        }
+    }
+}
+
 fn decode_error<T>(row: Value, err: serde_json::Error) -> anyhow::Error
 where
     T: ModelMeta,
@@ -149,37 +164,112 @@ async fn decode_hydrated_row<T>(mut row: serde_json::Value) -> Result<T>
 where
     T: ForeignModel + ModelMeta,
 {
-    if let serde_json::Value::Object(map) = &mut row {
-        for (field, value) in map.iter_mut() {
-            if field != "id" {
-                normalize_foreign_shapes(value);
-            }
-        }
+    let record = record_id_from_row::<T>(&row)?;
+    normalize_declared_foreign_fields::<T>(&mut row);
+    if T::has_relation_fields() {
+        T::inject_relation_values_from_db(record, &mut row).await?;
     }
     normalize_public_output_ids(&mut row);
     T::hydrate_foreign(serde_json::from_value(row)?).await
 }
 
-fn prepare_save_parts<T>(table: &str, data: T) -> Result<(RecordId, Value, Value)>
+fn record_id_from_row<T>(row: &serde_json::Value) -> Result<RecordId>
+where
+    T: ModelMeta,
+{
+    let id = row
+        .as_object()
+        .and_then(|map| map.get("id"))
+        .cloned()
+        .ok_or_else(|| DBError::Decode("stored row is missing `id`".to_owned()))?;
+
+    match id {
+        serde_json::Value::String(text) => {
+            parse_record_id_or_plain_string(&text, Some(T::storage_table())).map_err(|invalid| {
+                DBError::Decode(format!("stored row contains invalid id value `{invalid}`")).into()
+            })
+        }
+        serde_json::Value::Object(_) => Ok(serde_json::from_value(id)?),
+        other => Err(DBError::Decode(format!(
+            "stored row contains unsupported id shape `{other}`"
+        ))
+        .into()),
+    }
+}
+
+fn prepare_save_parts<M, T>(table: &str, data: T) -> Result<(RecordId, Value, Value)>
 where
     T: Serialize,
+    M: ForeignModel,
 {
     let key = extract_record_id_key(&data)?;
     let id = record_id_key_to_json_value(&key);
     let record = RecordId::new(table, key);
-    Ok((record, prepare_content(data)?, id))
+    Ok((record, prepare_content::<M, _>(data)?, id))
 }
 
-fn prepare_content<T>(data: T) -> Result<Value>
+fn prepare_content<M, T>(data: T) -> Result<Value>
 where
     T: Serialize,
+    M: ForeignModel,
 {
     let mut content = serde_json::to_value(&data)?;
     if let Value::Object(map) = &mut content {
         map.remove("id");
     }
+    M::strip_relation_fields(&mut content);
     strip_null_fields(&mut content);
     Ok(content)
+}
+
+async fn sync_relation_writes(writes: &[RelationWrite]) -> Result<()> {
+    if writes.is_empty() {
+        return Ok(());
+    }
+
+    let db = get_db()?;
+    for write in writes {
+        let delete_result = db
+            .query("DELETE $rel WHERE in = $record RETURN NONE;")
+            .bind(("rel", Table::from(write.relation)))
+            .bind(("record", write.record.clone()))
+            .await?;
+        if let Err(err) = delete_result.check() {
+            match DBError::from(err) {
+                DBError::MissingTable(_) => {}
+                other => return Err(other.into()),
+            }
+        }
+
+        if !write.edges.is_empty() {
+            let mut sql = String::from("INSERT RELATION INTO $rel [");
+            for idx in 0..write.edges.len() {
+                if idx > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&format!(
+                    "{{ in: $in_{idx}, out: $out_{idx}, position: $position_{idx} }}"
+                ));
+            }
+            sql.push_str("] RETURN NONE;");
+
+            let mut query = db.query(sql).bind(("rel", Table::from(write.relation)));
+            for (idx, edge) in write.edges.iter().enumerate() {
+                let in_record = edge._in.clone().ok_or_else(|| {
+                    DBError::InvalidModel(
+                        "relation edge write is missing its source record id".to_owned(),
+                    )
+                })?;
+                query = query
+                    .bind((format!("in_{idx}"), in_record))
+                    .bind((format!("out_{idx}"), edge.out.clone()))
+                    .bind((format!("position_{idx}"), edge.position));
+            }
+            query.await?.check()?;
+        }
+    }
+
+    Ok(())
 }
 
 async fn persist_explicit_id_primitive<T>(record: RecordId, data: T, create_only: bool) -> Result<T>
@@ -187,7 +277,9 @@ where
     T: ModelMeta + StoredModel + ForeignModel,
 {
     let db = get_db()?;
-    let content = prepare_content(T::persist_foreign(data).await?)?;
+    let original = data.clone();
+    let stored_input = T::persist_foreign(data).await?;
+    let content = prepare_content::<T, _>(stored_input)?;
     let statement = if create_only {
         "BEGIN TRANSACTION; CREATE ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;"
     } else {
@@ -231,19 +323,28 @@ where
         }
     })?;
 
-    let stored = decode_saved_row::<T>(row, serde_json::to_value(record.clone())?)?;
+    let relation_writes = original.prepare_relation_writes(record.clone()).await?;
+    sync_relation_writes(&relation_writes).await?;
+    let stored =
+        decode_saved_row_from_model::<T>(row, serde_json::to_value(record.clone())?, &original)?;
     let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
     normalize_public_output_ids(&mut value);
     Ok(serde_json::from_value(value)?)
 }
 
-fn decode_saved_row<T>(row: SurrealDbValue, id: Value) -> Result<T::Stored>
+fn decode_saved_row_from_model<T>(row: SurrealDbValue, id: Value, model: &T) -> Result<T::Stored>
 where
     T: ForeignModel + ModelMeta,
     T::Stored: serde::de::DeserializeOwned,
 {
-    let row = row.into_json_value();
-    decode_stored_row_value::<T>(row, Some(id))
+    let mut row = row.into_json_value();
+    if let Value::Object(map) = &mut row {
+        map.insert("id".to_owned(), id);
+    }
+    normalize_root_record_id_string(&mut row);
+    normalize_declared_foreign_fields::<T>(&mut row);
+    model.inject_relation_values_from_model(&mut row)?;
+    serde_json::from_value(row.clone()).map_err(|err| decode_error::<T>(row, err))
 }
 
 fn decode_stored_row_value<T>(mut row: Value, id: Option<Value>) -> Result<T::Stored>
@@ -258,16 +359,7 @@ where
     }
 
     normalize_root_record_id_string(&mut row);
-
-    if T::has_foreign_fields()
-        && let Value::Object(map) = &mut row
-    {
-        for (field, value) in map.iter_mut() {
-            if field != "id" {
-                normalize_foreign_shapes(value);
-            }
-        }
-    }
+    normalize_declared_foreign_fields::<T>(&mut row);
 
     serde_json::from_value(row.clone()).map_err(|err| decode_error::<T>(row, err))
 }
@@ -332,14 +424,28 @@ where
     Ok(values)
 }
 
+async fn decode_stored_row_from_db<T>(mut row: Value) -> Result<T::Stored>
+where
+    T: ForeignModel + ModelMeta,
+    T::Stored: serde::de::DeserializeOwned,
+{
+    let record = record_id_from_row::<T>(&row)?;
+    normalize_root_record_id_string(&mut row);
+    normalize_declared_foreign_fields::<T>(&mut row);
+    if T::has_relation_fields() {
+        T::inject_relation_values_from_db(record, &mut row).await?;
+    }
+    serde_json::from_value(row.clone()).map_err(|err| decode_error::<T>(row, err))
+}
+
 async fn raw_rows_to_public_hydrated<T>(rows: Vec<SurrealDbValue>) -> Result<Vec<T>>
 where
-    T: ForeignModel,
+    T: ForeignModel + ModelMeta,
     T::Stored: serde::de::DeserializeOwned,
 {
     let mut values = Vec::with_capacity(rows.len());
     for row in rows {
-        let stored = T::decode_stored_row(row)?;
+        let stored = decode_stored_row_from_db::<T>(row.into_json_value()).await?;
         values.push(T::hydrate_foreign(stored).await?);
     }
     Ok(values)
@@ -359,6 +465,27 @@ where
     /// Creates a new row in the model table.
     /// Creates a new row in the model table.
     pub async fn create(data: T) -> Result<T> {
+        if T::has_relation_fields() {
+            let db = get_db()?;
+            let original = data.clone();
+            let stored_input = T::persist_foreign(data).await?;
+            let content = prepare_content::<T, _>(stored_input)?;
+            let mut result = db
+                .query("BEGIN TRANSACTION; CREATE $table CONTENT $data RETURN AFTER; COMMIT TRANSACTION;")
+                .bind(("table", Table::from(T::storage_table())))
+                .bind(("data", content))
+                .await?
+                .check()?;
+            let row: Option<SurrealDbValue> = result.take(1)?;
+            let row = row.ok_or(DBError::EmptyResult("create"))?;
+            let row_json = row.into_json_value();
+            let record = record_id_from_row::<T>(&row_json)?;
+            let relation_writes = original.prepare_relation_writes(record).await?;
+            sync_relation_writes(&relation_writes).await?;
+            let stored = decode_stored_row_from_db::<T>(row_json).await?;
+            return Ok(T::hydrate_foreign(stored).await?);
+        }
+
         let db = get_db()?;
         let created: Option<T::Stored> = db
             .create(T::storage_table())
@@ -378,6 +505,14 @@ where
                 "model `{}` does not support create_return_id; use create or create_at instead",
                 std::any::type_name::<T>()
             ))
+            .into());
+        }
+
+        if T::has_relation_fields() {
+            return Err(DBError::InvalidModel(
+                "create_return_id is not supported for models with #[relate(...)] fields"
+                    .to_owned(),
+            )
             .into());
         }
 
@@ -421,10 +556,18 @@ where
         let record: Option<SurrealDbValue> = db.select(record).await?;
         match record {
             Some(stored) => {
-                let stored = decode_stored_row_value::<T>(
-                    stored.into_json_value(),
-                    Some(serde_json::to_value(requested)?),
-                )?;
+                let stored = if T::has_relation_fields() {
+                    let mut row = stored.into_json_value();
+                    if let Value::Object(map) = &mut row {
+                        map.insert("id".to_owned(), serde_json::to_value(requested.clone())?);
+                    }
+                    decode_stored_row_from_db::<T>(row).await?
+                } else {
+                    decode_stored_row_value::<T>(
+                        stored.into_json_value(),
+                        Some(serde_json::to_value(requested)?),
+                    )?
+                };
                 let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
                 normalize_public_output_ids(&mut value);
                 Ok(serde_json::from_value(value)?)
@@ -439,6 +582,30 @@ where
 
     /// Replaces the stored content of a row at the provided record id.
     pub async fn update_at(id: RecordId, data: T) -> Result<T> {
+        if T::has_relation_fields() {
+            let db = get_db()?;
+            let original = data.clone();
+            let stored_input = T::persist_foreign(data).await?;
+            let content = prepare_content::<T, _>(stored_input)?;
+            let mut result = db
+                .query(
+                    "BEGIN TRANSACTION; UPDATE $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;",
+                )
+                .bind(("record", id.clone()))
+                .bind(("data", content))
+                .await?
+                .check()?;
+            let row: Option<SurrealDbValue> = result.take(1)?;
+            let row = row.ok_or(DBError::NotFound)?;
+            let relation_writes = original.prepare_relation_writes(id.clone()).await?;
+            sync_relation_writes(&relation_writes).await?;
+            let stored =
+                decode_saved_row_from_model::<T>(row, serde_json::to_value(id)?, &original)?;
+            let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
+            normalize_public_output_ids(&mut value);
+            return Ok(serde_json::from_value(value)?);
+        }
+
         let db = get_db()?;
         let updated: Option<T::Stored> = db
             .update(id)
@@ -479,6 +646,14 @@ where
     /// Bulk-inserts rows into the model table.
     /// Inserts many rows using SurrealDB bulk insert.
     pub async fn insert(data: Vec<T>) -> Result<Vec<T>> {
+        if T::has_relation_fields() {
+            return Err(DBError::InvalidModel(
+                "insert is not supported for models with #[relate(...)] fields; use save_many"
+                    .to_owned(),
+            )
+            .into());
+        }
+
         let db = get_db()?;
         let mut stored = Vec::with_capacity(data.len());
         for item in data {
@@ -491,6 +666,14 @@ where
     /// Bulk-inserts rows while ignoring conflicting duplicates.
     /// Inserts many rows while ignoring duplicate-key conflicts.
     pub async fn insert_ignore(data: Vec<T>) -> Result<Vec<T>> {
+        if T::has_relation_fields() {
+            return Err(DBError::InvalidModel(
+                "insert_ignore is not supported for models with #[relate(...)] fields; use save_many"
+                    .to_owned(),
+            )
+            .into());
+        }
+
         let db = get_db()?;
         let chunk_size = 50_000;
         let mut inserted_all = Vec::with_capacity(data.len());
@@ -516,6 +699,14 @@ where
     /// Bulk-inserts rows and updates existing rows on duplicate keys.
     /// Inserts many rows and updates existing rows on duplicate key.
     pub async fn insert_or_replace(data: Vec<T>) -> Result<Vec<T>> {
+        if T::has_relation_fields() {
+            return Err(DBError::InvalidModel(
+                "insert_or_replace is not supported for models with #[relate(...)] fields; use save_many"
+                    .to_owned(),
+            )
+            .into());
+        }
+
         if data.is_empty() {
             return Ok(vec![]);
         }
@@ -616,6 +807,34 @@ where
         Ok(ids)
     }
 
+    /// Returns whether the model table currently contains at least one row.
+    pub async fn exists() -> Result<bool> {
+        let db = get_db()?;
+        let mut result = match db
+            .query(QueryKind::table_has_rows(T::storage_table()))
+            .bind(("table", Table::from(T::storage_table())))
+            .await
+        {
+            Ok(result) => match result.check() {
+                Ok(result) => result,
+                Err(err) => match DBError::from(err) {
+                    DBError::MissingTable(_) => return Ok(false),
+                    other => return Err(other.into()),
+                },
+            },
+            Err(err) => match DBError::from(err) {
+                DBError::MissingTable(_) => return Ok(false),
+                other => return Err(other.into()),
+            },
+        };
+
+        let exists: Option<bool> = result.take(0)?;
+        match exists {
+            Some(exists) => Ok(exists),
+            None => Ok(false),
+        }
+    }
+
     /// Finds exactly one record id by the model's automatic lookup fields.
     pub async fn find_unique_id_for(data: &T) -> Result<RecordId>
     where
@@ -664,10 +883,11 @@ where
         }
 
         let db = get_db()?;
+        let original = data.clone();
         let (stored, created_foreign_records) =
             crate::run_with_foreign_cleanup_scope(|| async { T::persist_foreign(data).await })
                 .await?;
-        let (record, content, id) = prepare_save_parts(T::storage_table(), stored)?;
+        let (record, content, id) = prepare_save_parts::<T, _>(T::storage_table(), stored)?;
         let mut result = db
             .query("BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;")
             .bind(("record", record.clone()))
@@ -676,7 +896,9 @@ where
             .check()?;
         let row: Option<SurrealDbValue> = result.take(1)?;
         let row = row.ok_or(DBError::EmptyResult("save"))?;
-        let stored = decode_saved_row::<T>(row, id)?;
+        let relation_writes = original.prepare_relation_writes(record.clone()).await?;
+        sync_relation_writes(&relation_writes).await?;
+        let stored = decode_saved_row_from_model::<T>(row, id, &original)?;
         match T::hydrate_foreign(stored).await {
             Ok(value) => Ok(value),
             Err(err) => {
@@ -699,7 +921,7 @@ where
         let db = get_db()?;
         let key: RecordIdKey = id.into();
         let record = RecordId::new(T::storage_table(), key.clone());
-        if T::has_foreign_fields() {
+        if T::has_foreign_fields() || T::has_relation_fields() {
             let stmt = crate::query::RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
                 .bind("table", T::storage_table())
                 .bind("id", key);
@@ -727,7 +949,7 @@ where
     /// Lists all rows with a normalized `id` field.
     /// Lists all rows with normalized `id` values.
     pub async fn list() -> Result<Vec<T>> {
-        if T::has_foreign_fields() {
+        if T::has_foreign_fields() || T::has_relation_fields() {
             let db = get_db()?;
             let mut result = db
                 .query(QueryKind::select_all_with_id())
@@ -751,7 +973,7 @@ where
     /// Lists up to `count` rows with a normalized `id` field.
     /// Lists up to `count` rows with normalized `id` values.
     pub async fn list_limit(count: i64) -> Result<Vec<T>> {
-        if T::has_foreign_fields() {
+        if T::has_foreign_fields() || T::has_relation_fields() {
             let db = get_db()?;
             let mut result = db
                 .query(QueryKind::select_limit_with_id())
@@ -787,16 +1009,19 @@ where
 
         for chunk in data.chunks(chunk_size) {
             let mut prepared = Vec::with_capacity(chunk.len());
+            let mut originals = Vec::with_capacity(chunk.len());
+            let mut relation_writes = Vec::new();
             let mut sql = String::from("BEGIN TRANSACTION; ");
             let mut created_foreign_records = Vec::new();
             let mut seen_records = std::collections::HashSet::<String>::with_capacity(chunk.len());
 
             for (idx, row) in chunk.iter().cloned().enumerate() {
+                let original = row.clone();
                 let ((record, content, id), row_foreign_records) =
                     crate::run_with_foreign_cleanup_scope(|| async {
                         let stored_row = T::persist_foreign(row).await?;
                         let (record, content, id) =
-                            prepare_save_parts(T::storage_table(), stored_row)?;
+                            prepare_save_parts::<T, _>(T::storage_table(), stored_row)?;
                         Ok::<_, anyhow::Error>((record, content, id))
                     })
                     .await?;
@@ -808,9 +1033,11 @@ where
                     .into());
                 }
                 created_foreign_records.extend(row_foreign_records);
+                relation_writes.extend(original.prepare_relation_writes(record.clone()).await?);
                 sql.push_str(&format!(
                     "UPSERT ONLY $record_{idx} CONTENT $data_{idx} RETURN AFTER;"
                 ));
+                originals.push(original);
                 prepared.push((record, content, id));
             }
             sql.push_str("COMMIT TRANSACTION;");
@@ -823,11 +1050,12 @@ where
             }
 
             let mut result = query.await?.check()?;
+            sync_relation_writes(&relation_writes).await?;
 
             for (idx, (_, _, id)) in prepared.clone().into_iter().enumerate() {
                 let row: Option<SurrealDbValue> = result.take(idx + 1)?;
                 let row = row.ok_or(DBError::EmptyResult("save_many"))?;
-                let stored = decode_saved_row::<T>(row, id)?;
+                let stored = decode_saved_row_from_model::<T>(row, id, &originals[idx])?;
                 match T::hydrate_foreign(stored).await {
                     Ok(value) => inserted_all.push(value),
                     Err(err) => {
@@ -1064,6 +1292,11 @@ pub trait Crud: ModelMeta + StoredModel + ForeignModel {
     /// Lists up to `count` rows with normalized `id` values.
     async fn list_limit(count: i64) -> Result<Vec<Self>> {
         Repo::<Self>::list_limit(count).await
+    }
+
+    /// Returns whether the model table currently contains at least one row.
+    async fn exists() -> Result<bool> {
+        Repo::<Self>::exists().await
     }
 
     /// Replaces the stored content of `self`.

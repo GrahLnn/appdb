@@ -18,6 +18,18 @@ pub struct RelationEdge {
     pub out: RecordId,
 }
 
+/// Ordered edge payload used by `#[relate(...)]` field synchronization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SurrealValue)]
+pub struct OrderedRelationEdge {
+    /// Source record id.
+    #[serde(rename = "in")]
+    pub _in: Option<RecordId>,
+    /// Target record id.
+    pub out: RecordId,
+    /// Stable position for vector-shaped relation fields.
+    pub position: i64,
+}
+
 /// Repository-style helpers for SurrealDB relation tables.
 pub struct GraphRepo;
 
@@ -70,6 +82,20 @@ impl GraphRepo {
             .await?
             .check()?;
         let rows: Vec<RecordId> = result.take(0)?;
+        Ok(rows)
+    }
+
+    /// Lists ordered outgoing relation edges for `in_id` through `rel`.
+    pub async fn out_edges(in_id: RecordId, rel: &str) -> Result<Vec<OrderedRelationEdge>> {
+        let sql = QueryKind::select_out_edges(&in_id, rel);
+        let db = get_db()?;
+        let mut result = db
+            .query(sql)
+            .bind(("rel", Table::from(rel)))
+            .bind(("in", in_id))
+            .await?
+            .check()?;
+        let rows: Vec<OrderedRelationEdge> = result.take(0)?;
         Ok(rows)
     }
 
@@ -143,6 +169,11 @@ pub async fn unrelate_at(self_id: RecordId, target_id: RecordId, rel: &str) -> R
 /// Free-function wrapper for [`GraphRepo::out_ids`].
 pub async fn out_ids(in_id: RecordId, rel: &str, out_table: &str) -> Result<Vec<RecordId>> {
     GraphRepo::out_ids(in_id, rel, out_table).await
+}
+
+/// Free-function wrapper for [`GraphRepo::out_edges`].
+pub async fn out_edges(in_id: RecordId, rel: &str) -> Result<Vec<OrderedRelationEdge>> {
+    GraphRepo::out_edges(in_id, rel).await
 }
 
 /// Free-function wrapper for [`GraphRepo::in_ids`].
