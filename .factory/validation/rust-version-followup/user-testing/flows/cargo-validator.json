@@ -1,0 +1,30 @@
+{
+  "milestone": "rust-version-followup",
+  "groupId": "cargo-validator",
+  "surface": "cargo",
+  "assertions": [
+    {
+      "id": "VAL-EDITION-002",
+      "status": "pass",
+      "reason": "Workspace root declares rust-version 1.94.0 and the full cargo validator contract passed on the real workspace surface."
+    }
+  ],
+  "toolsUsed": [
+    "cargo check --workspace --all-targets",
+    "cargo test --workspace -- --test-threads 12",
+    "cargo clippy --workspace --all-targets -- -D warnings",
+    "cargo fmt --all -- --check"
+  ],
+  "frictions": [],
+  "blockers": [],
+  "evidence": {
+    "cargoToml": "Cargo.toml [workspace.package].rust-version = 1.94.0",
+    "commands": [
+      "cargo check --workspace --all-targets",
+      "cargo test --workspace -- --test-threads 12",
+      "cargo clippy --workspace --all-targets -- -D warnings",
+      "cargo fmt --all -- --check"
+    ]
+  },
+  "generatedAt": "2026-03-26T12:34:05.464457+00:00"
+}
