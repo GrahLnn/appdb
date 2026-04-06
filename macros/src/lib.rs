@@ -635,6 +635,73 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 ::appdb::repository::Repo::<Self>::list_limit(count).await
             }
 
+            pub async fn relate_by_name<Target>(&self, target: &Target, relation: &str) -> ::anyhow::Result<()>
+            where
+                Target: ::appdb::model::meta::ResolveRecordId + Send + Sync,
+            {
+                <Self as ::appdb::graph::GraphCrud>::relate_by_name(self, target, relation).await
+            }
+
+            pub async fn back_relate_by_name<Target>(&self, target: &Target, relation: &str) -> ::anyhow::Result<()>
+            where
+                Target: ::appdb::model::meta::ResolveRecordId + Send + Sync,
+            {
+                <Self as ::appdb::graph::GraphCrud>::back_relate_by_name(self, target, relation).await
+            }
+
+            pub async fn unrelate_by_name<Target>(&self, target: &Target, relation: &str) -> ::anyhow::Result<()>
+            where
+                Target: ::appdb::model::meta::ResolveRecordId + Send + Sync,
+            {
+                <Self as ::appdb::graph::GraphCrud>::unrelate_by_name(self, target, relation).await
+            }
+
+            pub async fn outgoing_ids(&self, relation: &str) -> ::anyhow::Result<::std::vec::Vec<::surrealdb::types::RecordId>> {
+                <Self as ::appdb::repository::Crud>::outgoing_ids(self, relation).await
+            }
+
+            pub async fn outgoing<Target>(&self, relation: &str) -> ::anyhow::Result<::std::vec::Vec<Target>>
+            where
+                Target: ::appdb::model::meta::ModelMeta + ::appdb::StoredModel + ::appdb::ForeignModel,
+                <Target as ::appdb::StoredModel>::Stored: ::serde::de::DeserializeOwned,
+            {
+                <Self as ::appdb::repository::Crud>::outgoing::<Target>(self, relation).await
+            }
+
+            pub async fn outgoing_count(&self, relation: &str) -> ::anyhow::Result<i64> {
+                <Self as ::appdb::repository::Crud>::outgoing_count(self, relation).await
+            }
+
+            pub async fn outgoing_count_as<Target>(&self, relation: &str) -> ::anyhow::Result<i64>
+            where
+                Target: ::appdb::model::meta::ModelMeta + ::appdb::StoredModel + ::appdb::ForeignModel,
+            {
+                <Self as ::appdb::repository::Crud>::outgoing_count_as::<Target>(self, relation).await
+            }
+
+            pub async fn incoming_ids(&self, relation: &str) -> ::anyhow::Result<::std::vec::Vec<::surrealdb::types::RecordId>> {
+                <Self as ::appdb::repository::Crud>::incoming_ids(self, relation).await
+            }
+
+            pub async fn incoming<Target>(&self, relation: &str) -> ::anyhow::Result<::std::vec::Vec<Target>>
+            where
+                Target: ::appdb::model::meta::ModelMeta + ::appdb::StoredModel + ::appdb::ForeignModel,
+                <Target as ::appdb::StoredModel>::Stored: ::serde::de::DeserializeOwned,
+            {
+                <Self as ::appdb::repository::Crud>::incoming::<Target>(self, relation).await
+            }
+
+            pub async fn incoming_count(&self, relation: &str) -> ::anyhow::Result<i64> {
+                <Self as ::appdb::repository::Crud>::incoming_count(self, relation).await
+            }
+
+            pub async fn incoming_count_as<Target>(&self, relation: &str) -> ::anyhow::Result<i64>
+            where
+                Target: ::appdb::model::meta::ModelMeta + ::appdb::StoredModel + ::appdb::ForeignModel,
+            {
+                <Self as ::appdb::repository::Crud>::incoming_count_as::<Target>(self, relation).await
+            }
+
             pub async fn delete_all() -> ::anyhow::Result<()> {
                 ::appdb::repository::Repo::<Self>::delete_all().await
             }
@@ -857,6 +924,14 @@ fn derive_relation_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStr
                 B: ::appdb::model::meta::ResolveRecordId + Send + Sync,
             {
                 ::appdb::graph::relate_at(a.resolve_record_id().await?, b.resolve_record_id().await?, <Self as ::appdb::model::relation::RelationMeta>::relation_name()).await
+            }
+
+            pub async fn back_relate<A, B>(a: &A, b: &B) -> ::anyhow::Result<()>
+            where
+                A: ::appdb::model::meta::ResolveRecordId + Send + Sync,
+                B: ::appdb::model::meta::ResolveRecordId + Send + Sync,
+            {
+                ::appdb::graph::back_relate_at(a.resolve_record_id().await?, b.resolve_record_id().await?, <Self as ::appdb::model::relation::RelationMeta>::relation_name()).await
             }
 
             pub async fn unrelate<A, B>(a: &A, b: &B) -> ::anyhow::Result<()>

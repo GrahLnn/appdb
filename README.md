@@ -125,7 +125,27 @@ use appdb::prelude::*;
 
 let rel = relation_name::<FollowRel>();
 GraphRepo::relate_at(user_a.id(), user_b.id(), rel).await?;
+GraphRepo::back_relate_at(user_a.id(), user_b.id(), rel).await?; // creates user_b -> user_a
 let targets = GraphRepo::out_ids(user_a.id(), rel, "user").await?;
+```
+
+`#[derive(Store)]` models also expose instance-side graph accessors by relation name.
+
+```rust
+let rel = relation_name::<FollowRel>();
+let ids = user_a.outgoing_ids(rel).await?;
+let users = user_a.outgoing::<User>(rel).await?;
+let total = user_a.outgoing_count(rel).await?;
+let typed_total = user_a.outgoing_count_as::<User>(rel).await?;
+```
+
+If you do not want to declare a dedicated `#[derive(Relation)]` type, `#[derive(Store)]`
+models can also mutate graph edges directly with a raw relation name:
+
+```rust
+user_a.relate_by_name(&user_b, "follow_edge").await?;
+user_a.back_relate_by_name(&user_b, "follow_edge").await?;
+user_a.unrelate_by_name(&user_b, "follow_edge").await?;
 ```
 
 ### Raw SQL with bind values

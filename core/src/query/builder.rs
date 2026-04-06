@@ -153,6 +153,23 @@ impl QueryKind {
         "RETURN (SELECT VALUE out FROM $rel WHERE in = $in AND record::tb(out) = $out_table);"
             .to_owned()
     }
+    /// Builds a query that returns all outgoing record ids for one source record.
+    pub fn select_all_out_ids(_in_id: &RecordId, _rel: &str) -> String {
+        "RETURN (SELECT VALUE out FROM $rel WHERE in = $in);".to_owned()
+    }
+    /// Builds a query that returns fully loaded outgoing rows for one source record.
+    pub fn select_outgoing_rows(_in_id: &RecordId, _rel: &str, _out_table: &str) -> String {
+        "LET $ids = (SELECT VALUE out FROM $rel WHERE in = $in AND record::tb(out) = $out_table); SELECT *, record::id(id) AS id FROM $ids;".to_owned()
+    }
+    /// Builds a query that counts all outgoing edges for one source record.
+    pub fn count_all_outgoing(_in_id: &RecordId, _rel: &str) -> String {
+        "RETURN count((SELECT VALUE out FROM $rel WHERE in = $in));".to_owned()
+    }
+    /// Builds a query that counts outgoing edges for one source record filtered by target table.
+    pub fn count_outgoing_in_table(_in_id: &RecordId, _rel: &str, _out_table: &str) -> String {
+        "RETURN count((SELECT VALUE out FROM $rel WHERE in = $in AND record::tb(out) = $out_table));"
+            .to_owned()
+    }
     /// Builds a query that returns ordered outgoing relation edges for one source record.
     pub fn select_out_edges(_in_id: &RecordId, _rel: &str) -> String {
         "SELECT in, out, position FROM $rel WHERE in = $in ORDER BY position ASC;".to_owned()
@@ -160,6 +177,23 @@ impl QueryKind {
     /// Builds a query that returns incoming record ids for one target record.
     pub fn select_in_ids(_out_id: &RecordId, _rel: &str, _in_table: &str) -> String {
         "RETURN (SELECT VALUE in FROM $rel WHERE out = $out AND record::tb(in) = $in_table);"
+            .to_owned()
+    }
+    /// Builds a query that returns all incoming record ids for one target record.
+    pub fn select_all_in_ids(_out_id: &RecordId, _rel: &str) -> String {
+        "RETURN (SELECT VALUE in FROM $rel WHERE out = $out);".to_owned()
+    }
+    /// Builds a query that returns fully loaded incoming rows for one target record.
+    pub fn select_incoming_rows(_out_id: &RecordId, _rel: &str, _in_table: &str) -> String {
+        "LET $ids = (SELECT VALUE in FROM $rel WHERE out = $out AND record::tb(in) = $in_table); SELECT *, record::id(id) AS id FROM $ids;".to_owned()
+    }
+    /// Builds a query that counts all incoming edges for one target record.
+    pub fn count_all_incoming(_out_id: &RecordId, _rel: &str) -> String {
+        "RETURN count((SELECT VALUE in FROM $rel WHERE out = $out));".to_owned()
+    }
+    /// Builds a query that counts incoming edges for one target record filtered by source table.
+    pub fn count_incoming_in_table(_out_id: &RecordId, _rel: &str, _in_table: &str) -> String {
+        "RETURN count((SELECT VALUE in FROM $rel WHERE out = $out AND record::tb(in) = $in_table));"
             .to_owned()
     }
     /// Builds a query that returns one relation row id.
@@ -193,45 +227,5 @@ impl QueryKind {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::QueryKind;
-    use surrealdb::types::RecordId;
-
-    #[test]
-    fn pagin_uses_bind_placeholders() {
-        let sql = QueryKind::pagin(
-            "user",
-            10,
-            Some("abc'; DELETE user; --".to_owned()),
-            super::Order::Asc,
-            "id",
-        );
-        assert!(sql.contains("$cursor"));
-        assert!(sql.contains("LIMIT $count"));
-    }
-
-    #[test]
-    fn relation_lookups_use_bind_placeholders() {
-        let in_id = RecordId::new("user", "u1");
-        let sql = QueryKind::select_out_ids(&in_id, "follows", "user");
-        assert!(sql.contains("FROM $rel"));
-        assert!(sql.contains("record::tb(out) = $out_table"));
-    }
-
-    #[test]
-    fn relate_uses_relation_insert() {
-        let in_id = RecordId::new("task", "t1");
-        let out_id = RecordId::new("member", "m1");
-        let sql = QueryKind::relate(&in_id, &out_id, "task_assignment");
-        assert!(sql.starts_with("INSERT RELATION INTO $rel"));
-    }
-
-    #[test]
-    fn table_has_rows_returns_a_boolean_probe() {
-        let sql = QueryKind::table_has_rows("user");
-        assert_eq!(
-            sql,
-            "RETURN count((SELECT VALUE id FROM $table LIMIT 1)) > 0;"
-        );
-    }
-}
+#[path = "builder_tests.rs"]
+mod tests;
