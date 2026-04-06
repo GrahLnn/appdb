@@ -12,13 +12,13 @@ struct RelatedLeaf {
 struct RelatedRoot {
     id: Id,
     title: String,
-    #[relate("edge_single")]
+    #[back_relate("edge_single")]
     single: RelatedLeaf,
-    #[relate("edge_optional")]
+    #[back_relate("edge_optional")]
     optional: Option<RelatedLeaf>,
-    #[relate("edge_many")]
+    #[back_relate("edge_many")]
     many: Vec<RelatedLeaf>,
-    #[relate("edge_optional_many")]
+    #[back_relate("edge_optional_many")]
     optional_many: Option<Vec<RelatedLeaf>>,
 }
 

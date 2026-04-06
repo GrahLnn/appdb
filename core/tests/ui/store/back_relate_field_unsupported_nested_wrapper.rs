@@ -11,7 +11,7 @@ struct RelatedLeaf {
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
 struct RelatedRoot {
     id: Id,
-    #[relate("edge_nested")]
+    #[back_relate("edge_nested")]
     nested: Vec<Option<RelatedLeaf>>,
 }
 

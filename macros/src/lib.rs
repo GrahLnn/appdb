@@ -14,7 +14,10 @@ pub fn derive_sensitive(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(Store, attributes(unique, secure, foreign, table_as, crypto, relate))]
+#[proc_macro_derive(
+    Store,
+    attributes(unique, secure, foreign, table_as, crypto, relate, back_relate)
+)]
 pub fn derive_store(input: TokenStream) -> TokenStream {
     match derive_store_impl(parse_macro_input!(input as DeriveInput)) {
         Ok(tokens) => tokens.into(),
@@ -108,7 +111,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 
     let relate_fields = named_fields
         .iter()
-        .filter_map(|field| match field_relate_attr(field) {
+        .filter_map(|field| match field_relation_attr(field) {
             Ok(Some(attr)) => Some(parse_relate_field(field, attr)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -135,34 +138,54 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         ));
     }
 
-    if let Some(invalid_field) = named_fields.iter().find(|field| {
-        field_relate_attr(field).ok().flatten().is_some() && has_unique_attr(&field.attrs)
+    if let Some(invalid_field) = named_fields.iter().find_map(|field| {
+        field_relation_attr(field)
+            .ok()
+            .flatten()
+            .filter(|_| has_unique_attr(&field.attrs))
+            .map(|attr| (field, attr))
     }) {
-        let ident = invalid_field.ident.as_ref().expect("named field");
+        let ident = invalid_field.0.ident.as_ref().expect("named field");
         return Err(Error::new_spanned(
             ident,
-            "#[relate(...)] fields cannot be used as #[unique] lookup keys",
+            format!(
+                "{} fields cannot be used as #[unique] lookup keys",
+                relation_attr_label(invalid_field.1)
+            ),
         ));
     }
 
-    if let Some(invalid_field) = named_fields.iter().find(|field| {
-        field_relate_attr(field).ok().flatten().is_some() && has_secure_attr(&field.attrs)
+    if let Some(invalid_field) = named_fields.iter().find_map(|field| {
+        field_relation_attr(field)
+            .ok()
+            .flatten()
+            .filter(|_| has_secure_attr(&field.attrs))
+            .map(|attr| (field, attr))
     }) {
-        let ident = invalid_field.ident.as_ref().expect("named field");
+        let ident = invalid_field.0.ident.as_ref().expect("named field");
         return Err(Error::new_spanned(
             ident,
-            "#[relate(...)] fields cannot be marked #[secure]",
+            format!(
+                "{} fields cannot be marked #[secure]",
+                relation_attr_label(invalid_field.1)
+            ),
         ));
     }
 
-    if let Some(invalid_field) = named_fields.iter().find(|field| {
-        field_relate_attr(field).ok().flatten().is_some()
-            && field_foreign_attr(field).ok().flatten().is_some()
+    if let Some(invalid_field) = named_fields.iter().find_map(|field| {
+        field_relation_attr(field)
+            .ok()
+            .flatten()
+            .filter(|_| field_foreign_attr(field).ok().flatten().is_some())
+            .map(|attr| (field, attr))
     }) {
-        let ident = invalid_field.ident.as_ref().expect("named field");
+        let ident = invalid_field.0.ident.as_ref().expect("named field");
         return Err(Error::new_spanned(
             ident,
-            "#[relate(...)] cannot be combined with #[foreign]",
+            format!(
+                "{} cannot be combined with #[foreign]",
+                relation_attr_label(invalid_field.1)
+            ),
         ));
     }
 
@@ -171,7 +194,10 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         if !seen_relation_names.insert(field.relation_name.clone()) {
             return Err(Error::new_spanned(
                 &field.ident,
-                "duplicate #[relate(...)] relation name is not supported within one Store model",
+                format!(
+                    "duplicate {} relation name is not supported within one Store model",
+                    field.direction.attr_label()
+                ),
             ));
         }
     }
@@ -387,21 +413,16 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             let ident = &field.ident;
             let relation_name = &field.relation_name;
             let field_ty = &field.field_ty;
+            let write_direction = field.direction.write_direction_tokens();
+            let write_edges = field.direction.write_edges_tokens();
             quote! {
                 {
                     let ids = <#field_ty as ::appdb::RelateShape>::persist_relate_shape(self.#ident.clone()).await?;
                     writes.push(::appdb::RelationWrite {
                         relation: #relation_name,
                         record: record.clone(),
-                        edges: ids
-                            .into_iter()
-                            .enumerate()
-                            .map(|(position, out)| ::appdb::graph::OrderedRelationEdge {
-                                _in: ::std::option::Option::Some(record.clone()),
-                                out,
-                                position: position as i64,
-                            })
-                            .collect(),
+                        direction: #write_direction,
+                        edges: #write_edges,
                     });
                 }
             }
@@ -411,13 +432,10 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             let relation_name = &field.relation_name;
             let field_ty = &field.field_ty;
             let ident = field.ident.to_string();
+            let load_relation_ids = field.direction.load_edges_tokens(relation_name);
             quote! {
                 {
-                    let edges = ::appdb::graph::GraphRepo::out_edges(record.clone(), #relation_name).await?;
-                    let value = <#field_ty as ::appdb::RelateShape>::hydrate_relate_shape(
-                        edges.into_iter().map(|edge| edge.out).collect(),
-                    )
-                    .await?;
+                    let value = <#field_ty as ::appdb::RelateShape>::hydrate_relate_shape(#load_relation_ids).await?;
                     map.insert(#ident.to_owned(), ::serde_json::to_value(value)?);
                 }
             }
@@ -1347,18 +1365,18 @@ fn field_foreign_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
     Ok(foreign_attr)
 }
 
-fn field_relate_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
+fn field_relation_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
     let mut relate_attr = None;
 
     for attr in &field.attrs {
-        if !attr.path().is_ident("relate") {
+        if !attr.path().is_ident("relate") && !attr.path().is_ident("back_relate") {
             continue;
         }
 
-        if relate_attr.is_some() {
+        if let Some(previous) = relate_attr {
             return Err(Error::new_spanned(
                 attr,
-                "duplicate #[relate(...)] attribute is not supported",
+                relation_attr_conflict_message(previous, attr),
             ));
         }
 
@@ -1382,7 +1400,80 @@ const BINDREF_ACCEPTED_SHAPES: &str = "#[foreign] supports recursive Option<_> /
 const BINDREF_BRIDGE_STORE_ONLY: &str =
     "#[foreign] leaf types must derive Store or #[derive(Bridge)] dispatcher enums";
 
-const RELATE_ACCEPTED_SHAPES: &str = "#[relate(\"...\")] supports direct Child / Option<Child> / Vec<Child> shapes whose leaf type implements appdb::Bridge";
+const RELATE_ACCEPTED_SHAPES: &str = "relation-backed fields support Child / Option<Child> / Vec<Child> / Option<Vec<Child>> shapes whose leaf type implements appdb::Bridge";
+
+#[derive(Clone, Copy)]
+enum RelationFieldDirection {
+    Outgoing,
+    Incoming,
+}
+
+impl RelationFieldDirection {
+    fn attr_label(self) -> &'static str {
+        match self {
+            Self::Outgoing => "#[relate(...)]",
+            Self::Incoming => "#[back_relate(...)]",
+        }
+    }
+
+    fn write_direction_tokens(self) -> proc_macro2::TokenStream {
+        match self {
+            Self::Outgoing => quote!(::appdb::RelationWriteDirection::Outgoing),
+            Self::Incoming => quote!(::appdb::RelationWriteDirection::Incoming),
+        }
+    }
+
+    fn write_edges_tokens(self) -> proc_macro2::TokenStream {
+        match self {
+            Self::Outgoing => quote! {
+                ids
+                    .into_iter()
+                    .enumerate()
+                    .map(|(position, out)| ::appdb::graph::OrderedRelationEdge {
+                        _in: ::std::option::Option::Some(record.clone()),
+                        out,
+                        position: position as i64,
+                    })
+                    .collect()
+            },
+            Self::Incoming => quote! {
+                ids
+                    .into_iter()
+                    .enumerate()
+                    .map(|(position, source)| ::appdb::graph::OrderedRelationEdge {
+                        _in: ::std::option::Option::Some(source),
+                        out: record.clone(),
+                        position: position as i64,
+                    })
+                    .collect()
+            },
+        }
+    }
+
+    fn load_edges_tokens(self, relation_name: &str) -> proc_macro2::TokenStream {
+        match self {
+            Self::Outgoing => quote! {
+                ::appdb::graph::GraphRepo::out_edges(record.clone(), #relation_name)
+                    .await?
+                    .into_iter()
+                    .map(|edge| edge.out)
+                    .collect()
+            },
+            Self::Incoming => quote! {
+                {
+                    let mut ids = ::std::vec::Vec::new();
+                    for edge in ::appdb::graph::GraphRepo::in_edges(record.clone(), #relation_name).await? {
+                        let incoming = edge._in.ok_or_else(|| {
+                            ::anyhow::anyhow!("back relate field received relation edge without `in` record id")
+                        })?;
+                        ids.push(incoming);
+                    }
+                    ids
+                }
+            },
+        }
+    }
+}
 
 #[derive(Clone)]
 struct ForeignField {
@@ -1401,6 +1492,7 @@ struct RelateField {
     ident: syn::Ident,
     relation_name: String,
     field_ty: Type,
+    direction: RelationFieldDirection,
 }
 
 fn parse_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<ForeignField> {
@@ -1417,19 +1509,23 @@ fn parse_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<ForeignFi
 }
 
 fn parse_relate_field(field: &Field, attr: &Attribute) -> syn::Result<RelateField> {
+    let direction = parse_relation_direction(attr)?;
     let relation_name = attr
         .parse_args::<syn::LitStr>()
         .map_err(|_| {
             Error::new_spanned(
                 attr,
-                "#[relate(\"...\")] requires exactly one string literal",
+                format!(
+                    "{} requires exactly one string literal",
+                    direction.attr_label()
+                ),
             )
         })?
         .value();
     if relation_name.is_empty() {
         return Err(Error::new_spanned(
             attr,
-            "#[relate(\"...\")] relation name must not be empty",
+            format!("{} relation name must not be empty", direction.attr_label()),
         ));
     }
 
@@ -1439,27 +1535,78 @@ fn parse_relate_field(field: &Field, attr: &Attribute) -> syn::Result<RelateFiel
         ident: field.ident.clone().expect("named field"),
         relation_name,
         field_ty: field.ty.clone(),
+        direction,
     })
 }
 
 fn validate_relate_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
-    if !attr.path().is_ident("relate") {
+    if !attr.path().is_ident("relate") && !attr.path().is_ident("back_relate") {
         return Err(Error::new_spanned(attr, "unsupported relate attribute"));
     }
 
-    let accepted = direct_store_child_type(&field.ty)
-        .cloned()
-        .map(Type::Path)
-        .or_else(|| {
-            option_inner_type(&field.ty)
-                .and_then(|inner| direct_store_child_type(inner).cloned().map(Type::Path))
-        })
-        .or_else(|| {
-            vec_inner_type(&field.ty)
-                .and_then(|inner| direct_store_child_type(inner).cloned().map(Type::Path))
-        });
+    let accepted = relate_leaf_type(&field.ty).cloned().map(Type::Path);
 
     accepted.ok_or_else(|| Error::new_spanned(&field.ty, RELATE_ACCEPTED_SHAPES))
+}
+
+fn relate_leaf_type(ty: &Type) -> Option<&TypePath> {
+    if let Some(leaf) = direct_store_child_type(ty) {
+        return Some(leaf);
+    }
+
+    if let Some(inner) = option_inner_type(ty) {
+        if let Some(leaf) = direct_store_child_type(inner) {
+            return Some(leaf);
+        }
+
+        if let Some(vec_inner) = vec_inner_type(inner) {
+            return direct_store_child_type(vec_inner);
+        }
+
+        return None;
+    }
+
+    if let Some(inner) = vec_inner_type(ty) {
+        return direct_store_child_type(inner);
+    }
+
+    None
+}
+
+fn parse_relation_direction(attr: &Attribute) -> syn::Result<RelationFieldDirection> {
+    if attr.path().is_ident("relate") {
+        return Ok(RelationFieldDirection::Outgoing);
+    }
+    if attr.path().is_ident("back_relate") {
+        return Ok(RelationFieldDirection::Incoming);
+    }
+
+    Err(Error::new_spanned(attr, "unsupported relate attribute"))
+}
+
+fn relation_attr_label(attr: &Attribute) -> &'static str {
+    if attr.path().is_ident("back_relate") {
+        "#[back_relate(...)]"
+    } else {
+        "#[relate(...)]"
+    }
+}
+
+fn relation_attr_conflict_message(previous: &Attribute, current: &Attribute) -> String {
+    match (
+        previous.path().is_ident("relate"),
+        previous.path().is_ident("back_relate"),
+        current.path().is_ident("relate"),
+        current.path().is_ident("back_relate"),
+    ) {
+        (true, false, true, false) => {
+            "duplicate #[relate(...)] attribute is not supported".to_owned()
+        }
+        (false, true, false, true) => {
+            "duplicate #[back_relate(...)] attribute is not supported".to_owned()
+        }
+        _ => "#[relate(...)] cannot be combined with #[back_relate(...)]".to_owned(),
+    }
 }
 
 fn foreign_field_kind<'a>(
