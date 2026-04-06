@@ -172,11 +172,17 @@ impl QueryKind {
     }
     /// Builds a query that returns ordered outgoing relation edges for one source record.
     pub fn select_out_edges(_in_id: &RecordId, _rel: &str) -> String {
-        "SELECT in, out, position FROM $rel WHERE in = $in ORDER BY position ASC;".to_owned()
+        "SELECT `in` AS source, out, position FROM $rel WHERE in = $in ORDER BY position ASC;"
+            .to_owned()
     }
     /// Builds a query that returns incoming record ids for one target record.
     pub fn select_in_ids(_out_id: &RecordId, _rel: &str, _in_table: &str) -> String {
         "RETURN (SELECT VALUE in FROM $rel WHERE out = $out AND record::tb(in) = $in_table);"
+            .to_owned()
+    }
+    /// Builds a query that returns ordered incoming relation edges for one target record.
+    pub fn select_in_edges(_out_id: &RecordId, _rel: &str) -> String {
+        "SELECT `in` AS source, out, position FROM $rel WHERE out = $out ORDER BY position ASC;"
             .to_owned()
     }
     /// Builds a query that returns all incoming record ids for one target record.

@@ -738,11 +738,29 @@ struct ItRelateRoot {
     items: Vec<ItRelateLeaf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItBackRelateLeaf {
+    id: Id,
+    label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItBackRelateRoot {
+    id: Id,
+    title: String,
+    #[back_relate("it_back_relate_primary")]
+    primary: ItBackRelateLeaf,
+    #[back_relate("it_back_relate_optional")]
+    optional: Option<ItBackRelateLeaf>,
+    #[back_relate("it_back_relate_many")]
+    items: Vec<ItBackRelateLeaf>,
+    #[back_relate("it_back_relate_optional_many")]
+    maybe_items: Option<Vec<ItBackRelateLeaf>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue)]
 struct StoredRelateEdgeRow {
-    #[serde(rename = "in")]
-    #[serde(default)]
-    _in: Option<RecordId>,
+    source: RecordId,
     #[serde(deserialize_with = "appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
     out: RecordId,
     position: i64,
@@ -1267,9 +1285,19 @@ async fn load_relate_root_raw(id: &str) -> serde_json::Value {
         .expect("relate root raw row should exist")
 }
 
+async fn load_back_relate_root_raw(id: &str) -> serde_json::Value {
+    let stmt = RawSqlStmt::new("SELECT * FROM ONLY type::record($table, $id);")
+        .bind("table", ItBackRelateRoot::table_name())
+        .bind("id", id.to_owned());
+    query_bound_return::<serde_json::Value>(stmt)
+        .await
+        .expect("back relate root raw query should succeed")
+        .expect("back relate root raw row should exist")
+}
+
 async fn load_relate_edges(rel: &str, id: &str) -> Vec<StoredRelateEdgeRow> {
     let stmt = RawSqlStmt::new(
-        "SELECT in, out, position FROM $rel WHERE in = $record ORDER BY position ASC;",
+        "SELECT `in` AS source, out, position FROM $rel WHERE in = $record ORDER BY position ASC;",
     )
     .bind("rel", Table::from(rel))
     .bind("record", RecordId::new(ItRelateRoot::table_name(), id));
@@ -1277,6 +1305,18 @@ async fn load_relate_edges(rel: &str, id: &str) -> Vec<StoredRelateEdgeRow> {
         .await
         .expect("relate edge query should succeed");
     result.take(0).expect("relate edge rows should decode")
+}
+
+async fn load_back_relate_edges(rel: &str, id: &str) -> Vec<StoredRelateEdgeRow> {
+    let stmt = RawSqlStmt::new(
+        "SELECT `in` AS source, out, position FROM $rel WHERE out = $record ORDER BY position ASC;",
+    )
+    .bind("rel", Table::from(rel))
+    .bind("record", RecordId::new(ItBackRelateRoot::table_name(), id));
+    let mut result = query_bound_checked(stmt)
+        .await
+        .expect("back relate edge query should succeed");
+    result.take(0).expect("back relate edge rows should decode")
 }
 
 #[test]
@@ -6052,6 +6092,207 @@ fn relate_fields_roundtrip_through_save_many() {
                 .map(|row| row.position)
                 .collect::<Vec<_>>(),
             vec![0, 1]
+        );
+    });
+}
+
+#[test]
+fn back_relate_fields_are_stored_in_edge_tables_and_hydrated_on_read() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItBackRelateRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItBackRelateLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let first = ItBackRelateLeaf {
+            id: Id::from("back-relate-leaf-1"),
+            label: "first".to_owned(),
+        };
+        let second = ItBackRelateLeaf {
+            id: Id::from("back-relate-leaf-2"),
+            label: "second".to_owned(),
+        };
+        let third = ItBackRelateLeaf {
+            id: Id::from("back-relate-leaf-3"),
+            label: "third".to_owned(),
+        };
+        let fourth = ItBackRelateLeaf {
+            id: Id::from("back-relate-leaf-4"),
+            label: "fourth".to_owned(),
+        };
+
+        let initial = ItBackRelateRoot {
+            id: Id::from("back-relate-root"),
+            title: "alpha".to_owned(),
+            primary: first.clone(),
+            optional: Some(second.clone()),
+            items: vec![third.clone(), first.clone()],
+            maybe_items: Some(vec![fourth.clone(), second.clone()]),
+        };
+
+        let saved = ItBackRelateRoot::save(initial.clone())
+            .await
+            .expect("back relate save should succeed");
+        let loaded = ItBackRelateRoot::get("back-relate-root")
+            .await
+            .expect("back relate get should succeed");
+
+        let raw_root = load_back_relate_root_raw("back-relate-root").await;
+        let primary_edges =
+            load_back_relate_edges("it_back_relate_primary", "back-relate-root").await;
+        let optional_edges =
+            load_back_relate_edges("it_back_relate_optional", "back-relate-root").await;
+        let item_edges = load_back_relate_edges("it_back_relate_many", "back-relate-root").await;
+        let maybe_item_edges =
+            load_back_relate_edges("it_back_relate_optional_many", "back-relate-root").await;
+
+        assert_eq!(saved, initial);
+        assert_eq!(loaded, initial);
+
+        let raw_root_object = raw_root
+            .as_object()
+            .expect("back relate root raw row should be an object");
+        assert_eq!(
+            raw_root_object.get("title"),
+            Some(&serde_json::Value::String("alpha".to_owned()))
+        );
+        assert!(
+            !raw_root_object.contains_key("primary"),
+            "root row should not inline back relate single field"
+        );
+        assert!(
+            !raw_root_object.contains_key("optional"),
+            "root row should not inline back relate optional field"
+        );
+        assert!(
+            !raw_root_object.contains_key("items"),
+            "root row should not inline back relate vec field"
+        );
+        assert!(
+            !raw_root_object.contains_key("maybe_items"),
+            "root row should not inline back relate optional vec field"
+        );
+
+        assert_eq!(primary_edges.len(), 1);
+        assert_eq!(primary_edges[0].position, 0);
+        assert_eq!(
+            primary_edges[0].source,
+            RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-leaf-1")
+        );
+        assert_eq!(
+            primary_edges[0].out,
+            RecordId::new(ItBackRelateRoot::table_name(), "back-relate-root")
+        );
+
+        assert_eq!(optional_edges.len(), 1);
+        assert_eq!(
+            optional_edges[0].source,
+            RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-leaf-2")
+        );
+
+        assert_eq!(
+            item_edges
+                .iter()
+                .map(|row| (row.position, row.source.clone(), row.out.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    0,
+                    RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-leaf-3"),
+                    RecordId::new(ItBackRelateRoot::table_name(), "back-relate-root"),
+                ),
+                (
+                    1,
+                    RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-leaf-1"),
+                    RecordId::new(ItBackRelateRoot::table_name(), "back-relate-root"),
+                ),
+            ]
+        );
+
+        assert_eq!(
+            maybe_item_edges
+                .iter()
+                .map(|row| (row.position, row.source.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    0,
+                    RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-leaf-4")
+                ),
+                (
+                    1,
+                    RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-leaf-2")
+                ),
+            ]
+        );
+
+        let cleared = ItBackRelateRoot {
+            id: Id::from("back-relate-root"),
+            title: "beta".to_owned(),
+            primary: third.clone(),
+            optional: None,
+            items: vec![second.clone(), first.clone()],
+            maybe_items: None,
+        };
+
+        let cleared_saved = ItBackRelateRoot::save(cleared.clone())
+            .await
+            .expect("back relate update should succeed");
+        let cleared_loaded = ItBackRelateRoot::get("back-relate-root")
+            .await
+            .expect("back relate get after clear should succeed");
+
+        assert_eq!(cleared_saved, cleared);
+        assert_eq!(cleared_loaded, cleared);
+        assert!(
+            load_back_relate_edges("it_back_relate_optional", "back-relate-root")
+                .await
+                .is_empty(),
+            "optional back relate edges should be cleared when the field becomes None"
+        );
+        assert!(
+            load_back_relate_edges("it_back_relate_optional_many", "back-relate-root")
+                .await
+                .is_empty(),
+            "optional vec back relate edges should be cleared when the field becomes None"
+        );
+
+        let normalized_input = ItBackRelateRoot {
+            id: Id::from("back-relate-root"),
+            title: "gamma".to_owned(),
+            primary: fourth.clone(),
+            optional: Some(first.clone()),
+            items: vec![],
+            maybe_items: Some(vec![]),
+        };
+        let normalized_expected = ItBackRelateRoot {
+            id: Id::from("back-relate-root"),
+            title: "gamma".to_owned(),
+            primary: fourth,
+            optional: Some(first),
+            items: vec![],
+            maybe_items: None,
+        };
+
+        let normalized_saved = ItBackRelateRoot::save(normalized_input)
+            .await
+            .expect("back relate empty optional vec save should succeed");
+        let normalized_loaded = ItBackRelateRoot::get("back-relate-root")
+            .await
+            .expect("back relate empty optional vec get should succeed");
+
+        assert_eq!(normalized_saved.maybe_items, Some(vec![]));
+        assert_eq!(normalized_loaded, normalized_expected);
+        assert!(
+            load_back_relate_edges("it_back_relate_optional_many", "back-relate-root")
+                .await
+                .is_empty(),
+            "empty optional vec back relate edges should hydrate back as None"
         );
     });
 }

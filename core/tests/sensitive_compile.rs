@@ -5,6 +5,7 @@ fn sensitive_macro_rules_are_enforced() {
     tests.pass("tests/ui/store/nested_ref_supported_shapes.rs");
     tests.pass("tests/ui/store/nested_ref_public_foreign.rs");
     tests.pass("tests/ui/store/relate_field_supported_shapes.rs");
+    tests.pass("tests/ui/store/back_relate_field_supported_shapes.rs");
     tests.pass("tests/ui/store/relation_supported_shapes.rs");
     tests.pass("tests/ui/store/table_as_supported.rs");
     tests.pass("tests/ui/store/derive_bridge_enum_dispatcher.rs");
@@ -12,6 +13,7 @@ fn sensitive_macro_rules_are_enforced() {
     tests.compile_fail("tests/ui/store/relation_tuple_struct_rejected.rs");
     tests.compile_fail("tests/ui/store/relation_invalid_attribute_rejected.rs");
     tests.compile_fail("tests/ui/store/relate_field_unsupported_nested_wrapper.rs");
+    tests.compile_fail("tests/ui/store/back_relate_field_unsupported_nested_wrapper.rs");
     tests.compile_fail("tests/ui/store/relate_field_foreign_conflict.rs");
     tests.compile_fail("tests/ui/store/relate_field_unique_rejected.rs");
     tests.compile_fail("tests/ui/store/relate_field_duplicate_relation_rejected.rs");

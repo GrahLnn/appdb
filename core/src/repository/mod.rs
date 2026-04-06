@@ -12,7 +12,7 @@ use crate::error::{DBError, DBErrorKind, classify_db_error_text};
 use crate::model::meta::{HasId, ModelMeta, ResolveRecordId, UniqueLookupMeta};
 use crate::query::builder::QueryKind;
 use crate::serde_utils::id::parse_record_id_or_plain_string;
-use crate::{ForeignModel, RelationWrite, StoredModel};
+use crate::{ForeignModel, RelationWrite, RelationWriteDirection, StoredModel};
 
 fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
     let value = serde_json::to_value(data)?;
@@ -229,8 +229,12 @@ async fn sync_relation_writes(writes: &[RelationWrite]) -> Result<()> {
 
     let db = get_db()?;
     for write in writes {
+        let delete_sql = match write.direction {
+            RelationWriteDirection::Outgoing => "DELETE $rel WHERE in = $record RETURN NONE;",
+            RelationWriteDirection::Incoming => "DELETE $rel WHERE out = $record RETURN NONE;",
+        };
         let delete_result = db
-            .query("DELETE $rel WHERE in = $record RETURN NONE;")
+            .query(delete_sql)
             .bind(("rel", Table::from(write.relation)))
             .bind(("record", write.record.clone()))
             .await?;

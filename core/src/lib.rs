@@ -68,13 +68,24 @@ pub trait ForeignShape: Sized + Send {
 pub struct RelationWrite {
     /// Relation table name.
     pub relation: &'static str,
-    /// Source record id.
+    /// Anchor record id for synchronization.
     pub record: surrealdb::types::RecordId,
-    /// Ordered outgoing edges that should exist after synchronization.
+    /// Which side of the relation should be synchronized for `record`.
+    pub direction: RelationWriteDirection,
+    /// Ordered relation edges that should exist after synchronization.
     pub edges: Vec<crate::graph::OrderedRelationEdge>,
 }
 
-/// Runtime seam for direct `#[relate(...)]` field shapes.
+/// Synchronization direction for one relation-backed field write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelationWriteDirection {
+    /// Synchronize edges where `record` is the `in` side.
+    Outgoing,
+    /// Synchronize edges where `record` is the `out` side.
+    Incoming,
+}
+
+/// Runtime seam for relation-backed field shapes.
 #[::async_trait::async_trait]
 pub trait RelateShape: Sized + Send {
     /// Persists the related values and returns their ordered target record ids.
@@ -969,5 +980,36 @@ where
             out.push(<T as Bridge>::hydrate_foreign(value).await?);
         }
         Ok(out)
+    }
+}
+
+#[::async_trait::async_trait]
+impl<T> RelateShape for Option<Vec<T>>
+where
+    T: Bridge + Send,
+{
+    async fn persist_relate_shape(self) -> anyhow::Result<Vec<surrealdb::types::RecordId>> {
+        match self {
+            Some(values) => {
+                let mut out = Vec::with_capacity(values.len());
+                for value in values {
+                    out.push(<T as Bridge>::persist_foreign(value).await?);
+                }
+                Ok(out)
+            }
+            None => Ok(vec![]),
+        }
+    }
+
+    async fn hydrate_relate_shape(stored: Vec<surrealdb::types::RecordId>) -> anyhow::Result<Self> {
+        if stored.is_empty() {
+            return Ok(None);
+        }
+
+        let mut out = Vec::with_capacity(stored.len());
+        for value in stored {
+            out.push(<T as Bridge>::hydrate_foreign(value).await?);
+        }
+        Ok(Some(out))
     }
 }

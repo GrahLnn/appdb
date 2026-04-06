@@ -31,6 +31,23 @@ pub struct OrderedRelationEdge {
     pub position: i64,
 }
 
+#[derive(Debug, Deserialize, SurrealValue)]
+struct OrderedRelationEdgeRow {
+    source: RecordId,
+    out: RecordId,
+    position: i64,
+}
+
+impl From<OrderedRelationEdgeRow> for OrderedRelationEdge {
+    fn from(value: OrderedRelationEdgeRow) -> Self {
+        Self {
+            _in: Some(value.source),
+            out: value.out,
+            position: value.position,
+        }
+    }
+}
+
 /// Repository-style helpers for SurrealDB relation tables.
 pub struct GraphRepo;
 
@@ -166,8 +183,8 @@ impl GraphRepo {
             .bind(("in", in_id))
             .await?
             .check()?;
-        let rows: Vec<OrderedRelationEdge> = result.take(0)?;
-        Ok(rows)
+        let rows: Vec<OrderedRelationEdgeRow> = result.take(0)?;
+        Ok(rows.into_iter().map(OrderedRelationEdge::from).collect())
     }
 
     /// Lists source record ids that point to `out_id` through `rel`.
@@ -183,6 +200,20 @@ impl GraphRepo {
             .check()?;
         let rows: Vec<RecordId> = result.take(0)?;
         Ok(rows)
+    }
+
+    /// Lists ordered incoming relation edges for `out_id` through `rel`.
+    pub async fn in_edges(out_id: RecordId, rel: &str) -> Result<Vec<OrderedRelationEdge>> {
+        let sql = QueryKind::select_in_edges(&out_id, rel);
+        let db = get_db()?;
+        let mut result = db
+            .query(sql)
+            .bind(("rel", Table::from(rel)))
+            .bind(("out", out_id))
+            .await?
+            .check()?;
+        let rows: Vec<OrderedRelationEdgeRow> = result.take(0)?;
+        Ok(rows.into_iter().map(OrderedRelationEdge::from).collect())
     }
 
     /// Lists all incoming source record ids for `out_id` through `rel`.
@@ -403,6 +434,11 @@ pub async fn out_edges(in_id: RecordId, rel: &str) -> Result<Vec<OrderedRelation
 /// Free-function wrapper for [`GraphRepo::in_ids`].
 pub async fn in_ids(out_id: RecordId, rel: &str, in_table: &str) -> Result<Vec<RecordId>> {
     GraphRepo::in_ids(out_id, rel, in_table).await
+}
+
+/// Free-function wrapper for [`GraphRepo::in_edges`].
+pub async fn in_edges(out_id: RecordId, rel: &str) -> Result<Vec<OrderedRelationEdge>> {
+    GraphRepo::in_edges(out_id, rel).await
 }
 
 /// Free-function wrapper for [`GraphRepo::incoming_ids`].
