@@ -3881,6 +3881,58 @@ fn graph_relation_roundtrip_passes() {
 }
 
 #[test]
+fn graph_back_relation_roundtrip_passes() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecordUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let a = ItRecordUser {
+            id: RecordId::new("it_record_user", "back-a"),
+            name: "A".to_owned(),
+        };
+        let b = ItRecordUser {
+            id: RecordId::new("it_record_user", "back-b"),
+            name: "B".to_owned(),
+        };
+
+        Repo::<ItRecordUser>::create_at(a.id.clone(), a.clone())
+            .await
+            .expect("create a should succeed");
+        Repo::<ItRecordUser>::create_at(b.id.clone(), b.clone())
+            .await
+            .expect("create b should succeed");
+
+        let rel = relation_name::<ItFollowsRel>();
+        GraphRepo::back_relate_at(a.id.clone(), b.id.clone(), rel)
+            .await
+            .expect("back_relate should succeed");
+
+        let outs = GraphRepo::out_ids(b.id.clone(), rel, "it_record_user")
+            .await
+            .expect("reverse out_ids should succeed");
+        assert!(outs.iter().any(|id| id == &a.id));
+
+        let ins = GraphRepo::in_ids(a.id.clone(), rel, "it_record_user")
+            .await
+            .expect("reverse in_ids should succeed");
+        assert!(ins.iter().any(|id| id == &b.id));
+
+        GraphRepo::unrelate_at(b.id.clone(), a.id.clone(), rel)
+            .await
+            .expect("reverse unrelate should succeed");
+
+        let outs_after = GraphRepo::out_ids(b.id.clone(), rel, "it_record_user")
+            .await
+            .expect("reverse out_ids after unrelate should succeed");
+        assert!(!outs_after.iter().any(|id| id == &a.id));
+    });
+}
+
+#[test]
 fn graph_instance_api_accepts_store_models_without_has_id() {
     let _guard = acquire_test_lock();
     run_async(async {
@@ -3932,6 +3984,214 @@ fn graph_instance_api_accepts_store_models_without_has_id() {
         assert!(!outs_after.iter().any(|id| id == &target_id));
 
         let _ = source_id;
+    });
+}
+
+#[test]
+fn store_derived_graph_mutators_support_string_relation_names() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItLookupSource>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItLookupTarget>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let source = Repo::<ItLookupSource>::create(ItLookupSource {
+            name: "string-rel-source".to_owned(),
+        })
+        .await
+        .expect("source create should succeed");
+        let target = Repo::<ItLookupTarget>::create(ItLookupTarget {
+            code: "string-rel-target".to_owned(),
+        })
+        .await
+        .expect("target create should succeed");
+
+        source
+            .relate_by_name(&target, "it_follows_rel")
+            .await
+            .expect("relate_by_name should succeed");
+
+        let target_id = target
+            .resolve_record_id()
+            .await
+            .expect("target id should resolve");
+        let source_id = source
+            .resolve_record_id()
+            .await
+            .expect("source id should resolve");
+
+        let outgoing = source
+            .outgoing_ids("it_follows_rel")
+            .await
+            .expect("outgoing_ids should succeed");
+        assert_eq!(outgoing, vec![target_id.clone()]);
+
+        source
+            .unrelate_by_name(&target, "it_follows_rel")
+            .await
+            .expect("unrelate_by_name should succeed");
+
+        let outgoing_after = source
+            .outgoing_ids("it_follows_rel")
+            .await
+            .expect("outgoing_ids after unrelate should succeed");
+        assert!(outgoing_after.is_empty());
+
+        source
+            .back_relate_by_name(&target, "it_follows_rel")
+            .await
+            .expect("back_relate_by_name should succeed");
+
+        let incoming = source
+            .incoming_ids("it_follows_rel")
+            .await
+            .expect("incoming_ids should succeed");
+        assert_eq!(incoming, vec![target_id.clone()]);
+
+        let target_outgoing = target
+            .outgoing_ids("it_follows_rel")
+            .await
+            .expect("target outgoing_ids should succeed");
+        assert_eq!(target_outgoing, vec![source_id]);
+    });
+}
+
+#[test]
+fn store_derived_graph_accessors_support_ids_rows_and_counts() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItLookupSource>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItLookupTarget>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let source = Repo::<ItLookupSource>::create(ItLookupSource {
+            name: "store-graph-source".to_owned(),
+        })
+        .await
+        .expect("source create should succeed");
+        let peer_source = Repo::<ItLookupSource>::create(ItLookupSource {
+            name: "store-graph-peer".to_owned(),
+        })
+        .await
+        .expect("peer source create should succeed");
+        let target = Repo::<ItLookupTarget>::create(ItLookupTarget {
+            code: "store-graph-target".to_owned(),
+        })
+        .await
+        .expect("target create should succeed");
+
+        source
+            .relate::<ItFollowsRel, _>(&peer_source)
+            .await
+            .expect("source -> peer relate should succeed");
+        source
+            .relate::<ItFollowsRel, _>(&target)
+            .await
+            .expect("source -> target relate should succeed");
+
+        let rel = relation_name::<ItFollowsRel>();
+        let source_id = source
+            .resolve_record_id()
+            .await
+            .expect("source id should resolve");
+        let peer_source_id = peer_source
+            .resolve_record_id()
+            .await
+            .expect("peer source id should resolve");
+        let target_id = target
+            .resolve_record_id()
+            .await
+            .expect("target id should resolve");
+
+        let outgoing_ids = source
+            .outgoing_ids(rel)
+            .await
+            .expect("outgoing ids should succeed");
+        assert_eq!(outgoing_ids.len(), 2);
+        assert!(outgoing_ids.iter().any(|id| id == &peer_source_id));
+        assert!(outgoing_ids.iter().any(|id| id == &target_id));
+
+        let outgoing_targets = source
+            .outgoing::<ItLookupTarget>(rel)
+            .await
+            .expect("typed outgoing target rows should succeed");
+        assert_eq!(outgoing_targets.len(), 1);
+        assert_eq!(outgoing_targets[0].code, "store-graph-target");
+
+        let outgoing_sources = source
+            .outgoing::<ItLookupSource>(rel)
+            .await
+            .expect("typed outgoing source rows should succeed");
+        assert_eq!(outgoing_sources.len(), 1);
+        assert_eq!(outgoing_sources[0].name, "store-graph-peer");
+
+        assert_eq!(
+            source
+                .outgoing_count(rel)
+                .await
+                .expect("outgoing count should succeed"),
+            2
+        );
+        assert_eq!(
+            source
+                .outgoing_count_as::<ItLookupTarget>(rel)
+                .await
+                .expect("typed outgoing target count should succeed"),
+            1
+        );
+        assert_eq!(
+            source
+                .outgoing_count_as::<ItLookupSource>(rel)
+                .await
+                .expect("typed outgoing source count should succeed"),
+            1
+        );
+
+        let incoming_ids = target
+            .incoming_ids(rel)
+            .await
+            .expect("incoming ids should succeed");
+        assert_eq!(incoming_ids.len(), 1);
+        assert_eq!(incoming_ids[0], source_id);
+
+        let incoming_sources = target
+            .incoming::<ItLookupSource>(rel)
+            .await
+            .expect("typed incoming source rows should succeed");
+        assert_eq!(incoming_sources.len(), 1);
+        assert_eq!(incoming_sources[0].name, "store-graph-source");
+
+        assert_eq!(
+            target
+                .incoming_count(rel)
+                .await
+                .expect("incoming count should succeed"),
+            1
+        );
+        assert_eq!(
+            target
+                .incoming_count_as::<ItLookupSource>(rel)
+                .await
+                .expect("typed incoming source count should succeed"),
+            1
+        );
+        assert_eq!(
+            target
+                .incoming_count_as::<ItLookupTarget>(rel)
+                .await
+                .expect("typed incoming target count should succeed"),
+            0
+        );
     });
 }
 
@@ -4203,6 +4463,57 @@ fn relation_type_api_roundtrip_passes() {
 }
 
 #[test]
+fn relation_type_api_back_roundtrip_passes() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecordUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let a = ItRecordUser {
+            id: RecordId::new("it_record_user", "type-back-a"),
+            name: "A".to_owned(),
+        };
+        let b = ItRecordUser {
+            id: RecordId::new("it_record_user", "type-back-b"),
+            name: "B".to_owned(),
+        };
+
+        Repo::<ItRecordUser>::create_at(a.id.clone(), a.clone())
+            .await
+            .expect("create a should succeed");
+        Repo::<ItRecordUser>::create_at(b.id.clone(), b.clone())
+            .await
+            .expect("create b should succeed");
+
+        ItFollowsRel::back_relate(&a, &b)
+            .await
+            .expect("type-level back_relate should succeed");
+
+        let outs = ItFollowsRel::out_ids(&b, "it_record_user")
+            .await
+            .expect("type-level reverse out_ids should succeed");
+        assert!(outs.iter().any(|id| id == &a.id));
+
+        let ins = ItFollowsRel::in_ids(&a, "it_record_user")
+            .await
+            .expect("type-level reverse in_ids should succeed");
+        assert!(ins.iter().any(|id| id == &b.id));
+
+        ItFollowsRel::unrelate(&b, &a)
+            .await
+            .expect("type-level reverse unrelate should succeed");
+
+        let outs_after = ItFollowsRel::out_ids(&b, "it_record_user")
+            .await
+            .expect("type-level reverse out_ids after unrelate should succeed");
+        assert!(!outs_after.iter().any(|id| id == &a.id));
+    });
+}
+
+#[test]
 fn graph_instance_api_roundtrip_passes() {
     let _guard = acquire_test_lock();
     run_async(async {
@@ -4245,6 +4556,57 @@ fn graph_instance_api_roundtrip_passes() {
             .await
             .expect("out_ids after instance unrelate should succeed");
         assert!(!outs_after.iter().any(|id| id == &b.id));
+    });
+}
+
+#[test]
+fn graph_instance_api_back_roundtrip_passes() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRecordUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let a = ItRecordUser {
+            id: RecordId::new("it_record_user", "inst-back-a"),
+            name: "A".to_owned(),
+        };
+        let b = ItRecordUser {
+            id: RecordId::new("it_record_user", "inst-back-b"),
+            name: "B".to_owned(),
+        };
+
+        Repo::<ItRecordUser>::create_at(a.id.clone(), a.clone())
+            .await
+            .expect("create a should succeed");
+        Repo::<ItRecordUser>::create_at(b.id.clone(), b.clone())
+            .await
+            .expect("create b should succeed");
+
+        a.back_relate::<ItFollowsRel, _>(&b)
+            .await
+            .expect("instance back_relate should succeed");
+
+        let outs = ItFollowsRel::out_ids(&b, "it_record_user")
+            .await
+            .expect("instance reverse out_ids should succeed");
+        assert!(outs.iter().any(|id| id == &a.id));
+
+        let ins = ItFollowsRel::in_ids(&a, "it_record_user")
+            .await
+            .expect("instance reverse in_ids should succeed");
+        assert!(ins.iter().any(|id| id == &b.id));
+
+        b.unrelate::<ItFollowsRel, _>(&a)
+            .await
+            .expect("instance reverse unrelate should succeed");
+
+        let outs_after = ItFollowsRel::out_ids(&b, "it_record_user")
+            .await
+            .expect("instance reverse out_ids after unrelate should succeed");
+        assert!(!outs_after.iter().any(|id| id == &a.id));
     });
 }
 

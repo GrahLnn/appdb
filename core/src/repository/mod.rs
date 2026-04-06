@@ -9,7 +9,7 @@ use surrealdb::types::{RecordId, RecordIdKey, Table, Value as SurrealDbValue};
 
 use crate::connection::get_db;
 use crate::error::{DBError, DBErrorKind, classify_db_error_text};
-use crate::model::meta::{HasId, ModelMeta, UniqueLookupMeta};
+use crate::model::meta::{HasId, ModelMeta, ResolveRecordId, UniqueLookupMeta};
 use crate::query::builder::QueryKind;
 use crate::serde_utils::id::parse_record_id_or_plain_string;
 use crate::{ForeignModel, RelationWrite, StoredModel};
@@ -438,7 +438,7 @@ where
     serde_json::from_value(row.clone()).map_err(|err| decode_error::<T>(row, err))
 }
 
-async fn raw_rows_to_public_hydrated<T>(rows: Vec<SurrealDbValue>) -> Result<Vec<T>>
+pub(crate) async fn raw_rows_to_public_hydrated<T>(rows: Vec<SurrealDbValue>) -> Result<Vec<T>>
 where
     T: ForeignModel + ModelMeta,
     T::Stored: serde::de::DeserializeOwned,
@@ -1075,176 +1075,6 @@ where
     }
 }
 
-#[allow(clippy::items_after_test_module)]
-#[cfg(test)]
-mod tests {
-    use super::extract_record_id_key;
-    use crate::model::meta::ModelMeta;
-    use serde::{Deserialize, Serialize};
-    use surrealdb::types::{RecordIdKey, SurrealValue};
-
-    #[derive(Serialize)]
-    struct GoodModel {
-        id: String,
-    }
-
-    #[derive(Serialize)]
-    struct MissingId {
-        name: String,
-    }
-
-    #[derive(Serialize)]
-    struct BadIdType {
-        id: bool,
-    }
-
-    #[derive(Serialize)]
-    struct NumberIdType {
-        id: i64,
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
-    struct AutoTableModel {
-        id: String,
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
-    struct CustomTableModel {
-        id: String,
-    }
-
-    impl ModelMeta for AutoTableModel {
-        fn table_name() -> &'static str {
-            static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-            TABLE_NAME.get_or_init(|| {
-                let table = crate::model::meta::default_table_name(stringify!(AutoTableModel));
-                crate::model::meta::register_table(stringify!(AutoTableModel), table)
-            })
-        }
-    }
-
-    impl ModelMeta for CustomTableModel {
-        fn table_name() -> &'static str {
-            static TABLE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-            TABLE_NAME.get_or_init(|| {
-                crate::model::meta::register_table(stringify!(CustomTableModel), "custom_users")
-            })
-        }
-    }
-
-    impl crate::StoredModel for AutoTableModel {
-        type Stored = Self;
-
-        fn into_stored(self) -> anyhow::Result<Self::Stored> {
-            Ok(self)
-        }
-
-        fn from_stored(stored: Self::Stored) -> anyhow::Result<Self> {
-            Ok(stored)
-        }
-    }
-
-    impl crate::StoredModel for CustomTableModel {
-        type Stored = Self;
-
-        fn into_stored(self) -> anyhow::Result<Self::Stored> {
-            Ok(self)
-        }
-
-        fn from_stored(stored: Self::Stored) -> anyhow::Result<Self> {
-            Ok(stored)
-        }
-    }
-
-    impl crate::ForeignModel for AutoTableModel {
-        async fn persist_foreign(value: Self) -> anyhow::Result<Self::Stored> {
-            Ok(value)
-        }
-
-        async fn hydrate_foreign(stored: Self::Stored) -> anyhow::Result<Self> {
-            Ok(stored)
-        }
-    }
-
-    impl crate::ForeignModel for CustomTableModel {
-        async fn persist_foreign(value: Self) -> anyhow::Result<Self::Stored> {
-            Ok(value)
-        }
-
-        async fn hydrate_foreign(stored: Self::Stored) -> anyhow::Result<Self> {
-            Ok(stored)
-        }
-    }
-
-    impl crate::repository::Crud for AutoTableModel {}
-    impl crate::repository::Crud for CustomTableModel {}
-
-    #[test]
-    fn extract_id_succeeds_for_valid_model() {
-        let model = GoodModel {
-            id: "u1".to_owned(),
-        };
-        assert_eq!(
-            extract_record_id_key(&model).expect("expected id"),
-            RecordIdKey::String("u1".to_owned())
-        );
-    }
-
-    #[test]
-    fn extract_number_id_succeeds_for_valid_model() {
-        let model = NumberIdType { id: 42 };
-        assert_eq!(
-            extract_record_id_key(&model).expect("expected id"),
-            RecordIdKey::Number(42)
-        );
-    }
-
-    #[test]
-    fn extract_id_fails_when_id_missing() {
-        let model = MissingId {
-            name: "alice".to_owned(),
-        };
-        let err = extract_record_id_key(&model).expect_err("expected missing id error");
-        assert!(err.to_string().contains("does not contain an `id`"));
-    }
-
-    #[test]
-    fn extract_id_fails_when_id_not_string_or_number() {
-        let model = BadIdType { id: true };
-        let err = extract_record_id_key(&model).expect_err("expected bad id type error");
-        assert!(
-            err.to_string()
-                .contains("not a non-empty string or i64 number")
-        );
-    }
-
-    #[test]
-    fn extract_id_fails_when_id_empty() {
-        let model = GoodModel { id: String::new() };
-        let err = extract_record_id_key(&model).expect_err("expected empty id error");
-        assert!(
-            err.to_string()
-                .contains("not a non-empty string or i64 number")
-        );
-    }
-
-    #[test]
-    fn default_table_name_from_impl_crud_is_applied() {
-        assert_eq!(
-            <AutoTableModel as ModelMeta>::table_name(),
-            "auto_table_model"
-        );
-    }
-
-    #[test]
-    fn custom_table_name_from_impl_crud_override_is_applied() {
-        assert_eq!(
-            <CustomTableModel as ModelMeta>::table_name(),
-            "custom_users"
-        );
-    }
-}
-
 #[async_trait]
 /// Recommended model-facing CRUD surface.
 ///
@@ -1292,6 +1122,76 @@ pub trait Crud: ModelMeta + StoredModel + ForeignModel {
     /// Lists up to `count` rows with normalized `id` values.
     async fn list_limit(count: i64) -> Result<Vec<Self>> {
         Repo::<Self>::list_limit(count).await
+    }
+
+    /// Lists every outgoing related record id reachable through `relation`.
+    async fn outgoing_ids(&self, relation: &str) -> Result<Vec<RecordId>>
+    where
+        Self: ResolveRecordId + Sync,
+    {
+        crate::graph::outgoing_ids(self.resolve_record_id().await?, relation).await
+    }
+
+    /// Loads outgoing related records of type `T` reachable through `relation`.
+    async fn outgoing<T>(&self, relation: &str) -> Result<Vec<T>>
+    where
+        Self: ResolveRecordId + Sync,
+        T: ModelMeta + StoredModel + ForeignModel,
+        T::Stored: serde::de::DeserializeOwned,
+    {
+        crate::graph::outgoing::<T>(self.resolve_record_id().await?, relation).await
+    }
+
+    /// Counts every outgoing edge reachable through `relation`.
+    async fn outgoing_count(&self, relation: &str) -> Result<i64>
+    where
+        Self: ResolveRecordId + Sync,
+    {
+        crate::graph::outgoing_count(self.resolve_record_id().await?, relation).await
+    }
+
+    /// Counts outgoing related records of type `T` reachable through `relation`.
+    async fn outgoing_count_as<T>(&self, relation: &str) -> Result<i64>
+    where
+        Self: ResolveRecordId + Sync,
+        T: ModelMeta + StoredModel + ForeignModel,
+    {
+        crate::graph::outgoing_count_as::<T>(self.resolve_record_id().await?, relation).await
+    }
+
+    /// Lists every incoming related record id that points to `self` through `relation`.
+    async fn incoming_ids(&self, relation: &str) -> Result<Vec<RecordId>>
+    where
+        Self: ResolveRecordId + Sync,
+    {
+        crate::graph::incoming_ids(self.resolve_record_id().await?, relation).await
+    }
+
+    /// Loads incoming related records of type `T` that point to `self` through `relation`.
+    async fn incoming<T>(&self, relation: &str) -> Result<Vec<T>>
+    where
+        Self: ResolveRecordId + Sync,
+        T: ModelMeta + StoredModel + ForeignModel,
+        T::Stored: serde::de::DeserializeOwned,
+    {
+        crate::graph::incoming::<T>(self.resolve_record_id().await?, relation).await
+    }
+
+    /// Counts every incoming edge that points to `self` through `relation`.
+    async fn incoming_count(&self, relation: &str) -> Result<i64>
+    where
+        Self: ResolveRecordId + Sync,
+    {
+        crate::graph::incoming_count(self.resolve_record_id().await?, relation).await
+    }
+
+    /// Counts incoming related records of type `T` that point to `self` through `relation`.
+    async fn incoming_count_as<T>(&self, relation: &str) -> Result<i64>
+    where
+        Self: ResolveRecordId + Sync,
+        T: ModelMeta + StoredModel + ForeignModel,
+    {
+        crate::graph::incoming_count_as::<T>(self.resolve_record_id().await?, relation).await
     }
 
     /// Returns whether the model table currently contains at least one row.
@@ -1384,3 +1284,7 @@ pub trait Crud: ModelMeta + StoredModel + ForeignModel {
         Repo::<Self>::save_many(data).await
     }
 }
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
