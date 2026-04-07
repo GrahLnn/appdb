@@ -3,15 +3,27 @@ use surrealdb::types::RecordId;
 
 #[test]
 fn pagin_uses_bind_placeholders() {
-    let sql = QueryKind::pagin(
-        "user",
-        10,
-        Some("abc'; DELETE user; --".to_owned()),
-        Order::Asc,
-        "id",
-    );
-    assert!(sql.contains("$cursor"));
+    let sql = QueryKind::pagin("user", 10, true, Order::Asc, "id");
+    assert!(sql.contains("$cursor_value"));
+    assert!(sql.contains("$cursor_record"));
     assert!(sql.contains("LIMIT $count"));
+    assert!(!sql.contains("DELETE user"));
+}
+
+#[test]
+fn pagin_uses_stable_tiebreaker_cursor_predicate() {
+    let sql = QueryKind::pagin("user", 10, true, Order::Desc, "created_at");
+    assert!(sql.contains("$cursor_value"));
+    assert!(sql.contains("$cursor_record"));
+    assert!(sql.contains("OR"));
+    assert!(sql.contains("record::id(id)"));
+}
+
+#[test]
+fn pagin_uses_public_id_projection_when_ordering_by_id() {
+    let sql = QueryKind::pagin("user", 10, true, Order::Desc, "__page_public_id");
+    assert!(sql.contains("__page_public_id < $cursor_value"));
+    assert!(sql.contains("ORDER BY __page_public_id DESC, __page_record DESC"));
 }
 
 #[test]

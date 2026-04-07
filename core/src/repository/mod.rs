@@ -1,5 +1,6 @@
-use std::collections::BTreeMap;
 use std::marker::PhantomData;
+
+mod relation_sync;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -10,10 +11,18 @@ use surrealdb::types::{RecordId, RecordIdKey, Table, Value as SurrealDbValue};
 
 use crate::connection::get_db;
 use crate::error::{DBError, DBErrorKind, classify_db_error_text};
-use crate::model::meta::{HasId, ModelMeta, ResolveRecordId, UniqueLookupMeta};
-use crate::query::builder::QueryKind;
+use crate::model::meta::{HasId, ModelMeta, PaginationMeta, ResolveRecordId, UniqueLookupMeta};
+use crate::pagination::PaginationPlan;
+use crate::query::builder::{Order, QueryKind};
+use crate::query::{RawSqlStmt, query_bound, query_bound_checked};
 use crate::serde_utils::id::parse_record_id_or_plain_string;
-use crate::{ForeignModel, RelationWrite, RelationWriteDirection, StoredModel};
+use crate::{ForeignModel, StoredModel};
+
+pub use crate::pagination::{Page, PageCursor};
+use relation_sync::{
+    append_relation_sync_to_stmt, append_relation_sync_with_anchor_expr_to_stmt,
+    ensure_relation_tables,
+};
 
 fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
     let value = serde_json::to_value(data)?;
@@ -232,207 +241,38 @@ where
     Ok(content)
 }
 
-async fn sync_relation_writes(writes: &[RelationWrite]) -> Result<()> {
-    if writes.is_empty() {
-        return Ok(());
-    }
-
-    match sync_relation_writes_batched(writes).await {
-        Ok(()) => Ok(()),
-        Err(err) => match DBError::from(err) {
-            DBError::MissingTable(_) => sync_relation_writes_individually(writes).await,
-            other => Err(other.into()),
-        },
-    }
-}
-
-#[derive(Debug)]
-struct RelationWriteBatch<'a> {
-    relation: &'a str,
-    direction: RelationWriteDirection,
-    records: Vec<RecordId>,
-    edges: Vec<crate::graph::OrderedRelationEdge>,
-}
-
-fn relation_write_batches(writes: &[RelationWrite]) -> Result<Vec<RelationWriteBatch<'_>>> {
-    let mut groups = Vec::new();
-    let mut index_by_key = BTreeMap::new();
-
-    for write in writes {
-        let key = (
-            write.relation,
-            match write.direction {
-                RelationWriteDirection::Outgoing => 0u8,
-                RelationWriteDirection::Incoming => 1u8,
-            },
-        );
-
-        let group_index = if let Some(index) = index_by_key.get(&key) {
-            *index
-        } else {
-            let index = groups.len();
-            groups.push(RelationWriteBatch {
-                relation: write.relation,
-                direction: write.direction,
-                records: Vec::new(),
-                edges: Vec::new(),
-            });
-            index_by_key.insert(key, index);
-            index
-        };
-
-        let batch = groups
-            .get_mut(group_index)
-            .expect("relation batch index should remain valid");
-        batch.records.push(write.record.clone());
-        batch.edges.extend(write.edges.iter().cloned());
-    }
-
-    for batch in &groups {
-        for edge in &batch.edges {
-            if edge._in.is_none() {
-                return Err(DBError::InvalidModel(
-                    "relation edge write is missing its source record id".to_owned(),
-                )
-                .into());
-            }
-        }
-    }
-
-    Ok(groups)
-}
-
-async fn sync_relation_writes_batched(writes: &[RelationWrite]) -> Result<()> {
-    let batches = relation_write_batches(writes)?;
-    let db = get_db()?;
-    let mut sql = String::from("BEGIN TRANSACTION;");
-
-    for (batch_idx, batch) in batches.iter().enumerate() {
-        let field = match batch.direction {
-            RelationWriteDirection::Outgoing => "in",
-            RelationWriteDirection::Incoming => "out",
-        };
-        sql.push_str(&format!("DELETE $rel_{batch_idx} WHERE "));
-        for (record_idx, _) in batch.records.iter().enumerate() {
-            if record_idx > 0 {
-                sql.push_str(" OR ");
-            }
-            sql.push_str(&format!("{field} = $record_{batch_idx}_{record_idx}"));
-        }
-        sql.push_str(" RETURN NONE;");
-    }
-
-    for (batch_idx, batch) in batches.iter().enumerate() {
-        if batch.edges.is_empty() {
-            continue;
-        }
-
-        sql.push_str(&format!("INSERT RELATION INTO $rel_{batch_idx} ["));
-        for (edge_idx, _) in batch.edges.iter().enumerate() {
-            if edge_idx > 0 {
-                sql.push_str(", ");
-            }
-            sql.push_str(&format!(
-                "{{ in: $in_{batch_idx}_{edge_idx}, out: $out_{batch_idx}_{edge_idx}, position: $position_{batch_idx}_{edge_idx} }}"
-            ));
-        }
-        sql.push_str("] RETURN NONE;");
-    }
-
-    sql.push_str("COMMIT TRANSACTION;");
-
-    let mut query = db.query(sql);
-    for (batch_idx, batch) in batches.iter().enumerate() {
-        query = query.bind((format!("rel_{batch_idx}"), Table::from(batch.relation)));
-        for (record_idx, record) in batch.records.iter().enumerate() {
-            query = query.bind((format!("record_{batch_idx}_{record_idx}"), record.clone()));
-        }
-        for (edge_idx, edge) in batch.edges.iter().enumerate() {
-            let in_record = edge._in.clone().ok_or_else(|| {
-                DBError::InvalidModel(
-                    "relation edge write is missing its source record id".to_owned(),
-                )
-            })?;
-            query = query
-                .bind((format!("in_{batch_idx}_{edge_idx}"), in_record))
-                .bind((format!("out_{batch_idx}_{edge_idx}"), edge.out.clone()))
-                .bind((format!("position_{batch_idx}_{edge_idx}"), edge.position));
-        }
-    }
-
-    query.await?.check()?;
-    Ok(())
-}
-
-async fn sync_relation_writes_individually(writes: &[RelationWrite]) -> Result<()> {
-    let db = get_db()?;
-    for write in writes {
-        let delete_sql = match write.direction {
-            RelationWriteDirection::Outgoing => "DELETE $rel WHERE in = $record RETURN NONE;",
-            RelationWriteDirection::Incoming => "DELETE $rel WHERE out = $record RETURN NONE;",
-        };
-        let delete_result = db
-            .query(delete_sql)
-            .bind(("rel", Table::from(write.relation)))
-            .bind(("record", write.record.clone()))
-            .await?;
-        if let Err(err) = delete_result.check() {
-            match DBError::from(err) {
-                DBError::MissingTable(_) => {}
-                other => return Err(other.into()),
-            }
-        }
-
-        if !write.edges.is_empty() {
-            let mut sql = String::from("INSERT RELATION INTO $rel [");
-            for idx in 0..write.edges.len() {
-                if idx > 0 {
-                    sql.push_str(", ");
-                }
-                sql.push_str(&format!(
-                    "{{ in: $in_{idx}, out: $out_{idx}, position: $position_{idx} }}"
-                ));
-            }
-            sql.push_str("] RETURN NONE;");
-
-            let mut query = db.query(sql).bind(("rel", Table::from(write.relation)));
-            for (idx, edge) in write.edges.iter().enumerate() {
-                let in_record = edge._in.clone().ok_or_else(|| {
-                    DBError::InvalidModel(
-                        "relation edge write is missing its source record id".to_owned(),
-                    )
-                })?;
-                query = query
-                    .bind((format!("in_{idx}"), in_record))
-                    .bind((format!("out_{idx}"), edge.out.clone()))
-                    .bind((format!("position_{idx}"), edge.position));
-            }
-            query.await?.check()?;
-        }
-    }
-
-    Ok(())
+fn prepare_create_content<M, T>(data: T) -> Result<Value>
+where
+    T: Serialize,
+    M: ForeignModel,
+{
+    let mut content = serde_json::to_value(&data)?;
+    M::strip_relation_fields(&mut content);
+    strip_null_fields(&mut content);
+    Ok(content)
 }
 
 async fn persist_explicit_id_primitive<T>(record: RecordId, data: T, create_only: bool) -> Result<T>
 where
     T: ModelMeta + StoredModel + ForeignModel,
 {
-    let db = get_db()?;
     let original = data.clone();
     let stored_input = T::persist_foreign(data).await?;
     let content = prepare_content::<T, _>(stored_input)?;
-    let statement = if create_only {
-        "BEGIN TRANSACTION; CREATE ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;"
+    let relation_writes = original.prepare_relation_writes(record.clone()).await?;
+    ensure_relation_tables(&relation_writes).await?;
+    let mut stmt = RawSqlStmt::new("BEGIN TRANSACTION;");
+    stmt.sql.push_str(if create_only {
+        "CREATE ONLY $record CONTENT $data RETURN AFTER;"
     } else {
-        "BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;"
-    };
+        "UPSERT ONLY $record CONTENT $data RETURN AFTER;"
+    });
+    stmt = stmt.bind("record", record.clone()).bind("data", content);
+    let (stmt_with_relations, _) = append_relation_sync_to_stmt(stmt, &relation_writes, "rel")?;
+    let mut stmt = stmt_with_relations;
+    stmt.sql.push_str("COMMIT TRANSACTION;");
 
-    let result = db
-        .query(statement)
-        .bind(("record", record.clone()))
-        .bind(("data", content))
-        .await;
+    let result = query_bound(stmt).await;
     let mut result = match result {
         Ok(result) => result,
         Err(err) => {
@@ -464,9 +304,6 @@ where
             DBError::EmptyResult("persist_explicit_id_primitive")
         }
     })?;
-
-    let relation_writes = original.prepare_relation_writes(record.clone()).await?;
-    sync_relation_writes(&relation_writes).await?;
     let stored =
         decode_saved_row_from_model::<T>(row, serde_json::to_value(record.clone())?, &original)?;
     let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
@@ -608,22 +445,32 @@ where
     /// Creates a new row in the model table.
     pub async fn create(data: T) -> Result<T> {
         if T::has_relation_fields() {
-            let db = get_db()?;
             let original = data.clone();
             let stored_input = T::persist_foreign(data).await?;
-            let content = prepare_content::<T, _>(stored_input)?;
-            let mut result = db
-                .query("BEGIN TRANSACTION; CREATE $table CONTENT $data RETURN AFTER; COMMIT TRANSACTION;")
-                .bind(("table", Table::from(T::storage_table())))
-                .bind(("data", content))
-                .await?
-                .check()?;
-            let row: Option<SurrealDbValue> = result.take(1)?;
+            let content = prepare_create_content::<T, _>(stored_input)?;
+            let anchor_record = RecordId::new(T::storage_table(), "__appdb_pending_create__");
+            let relation_writes = original.prepare_relation_writes(anchor_record).await?;
+            ensure_relation_tables(&relation_writes).await?;
+            let mut stmt = RawSqlStmt::new(
+                "BEGIN TRANSACTION; LET $created = CREATE ONLY $table CONTENT $data RETURN AFTER;",
+            );
+            stmt = stmt
+                .bind("table", Table::from(T::storage_table()))
+                .bind("data", content);
+            let (mut stmt, relation_statement_count) =
+                append_relation_sync_with_anchor_expr_to_stmt(
+                    stmt,
+                    &relation_writes,
+                    "rel",
+                    "$created",
+                )?;
+            stmt.sql
+                .push_str("SELECT *, record::id(id) AS id FROM ONLY $created;");
+            stmt.sql.push_str("COMMIT TRANSACTION;");
+            let mut result = query_bound_checked(stmt).await?;
+            let row: Option<SurrealDbValue> = result.take(2 + relation_statement_count)?;
             let row = row.ok_or(DBError::EmptyResult("create"))?;
             let row_json = row.into_json_value();
-            let record = record_id_from_row::<T>(&row_json)?;
-            let relation_writes = original.prepare_relation_writes(record).await?;
-            sync_relation_writes(&relation_writes).await?;
             let stored = decode_stored_row_from_db::<T>(row_json).await?;
             return Ok(T::hydrate_foreign(stored).await?);
         }
@@ -725,22 +572,21 @@ where
     /// Replaces the stored content of a row at the provided record id.
     pub async fn update_at(id: RecordId, data: T) -> Result<T> {
         if T::has_relation_fields() {
-            let db = get_db()?;
             let original = data.clone();
             let stored_input = T::persist_foreign(data).await?;
             let content = prepare_content::<T, _>(stored_input)?;
-            let mut result = db
-                .query(
-                    "BEGIN TRANSACTION; UPDATE $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;",
-                )
-                .bind(("record", id.clone()))
-                .bind(("data", content))
-                .await?
-                .check()?;
+            let relation_writes = original.prepare_relation_writes(id.clone()).await?;
+            ensure_relation_tables(&relation_writes).await?;
+            let mut stmt =
+                RawSqlStmt::new("BEGIN TRANSACTION; UPDATE $record CONTENT $data RETURN AFTER;");
+            stmt = stmt.bind("record", id.clone()).bind("data", content);
+            let (stmt_with_relations, _) =
+                append_relation_sync_to_stmt(stmt, &relation_writes, "rel")?;
+            let mut stmt = stmt_with_relations;
+            stmt.sql.push_str("COMMIT TRANSACTION;");
+            let mut result = query_bound_checked(stmt).await?;
             let row: Option<SurrealDbValue> = result.take(1)?;
             let row = row.ok_or(DBError::NotFound)?;
-            let relation_writes = original.prepare_relation_writes(id.clone()).await?;
-            sync_relation_writes(&relation_writes).await?;
             let stored =
                 decode_saved_row_from_model::<T>(row, serde_json::to_value(id)?, &original)?;
             let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
@@ -1030,16 +876,19 @@ where
             crate::run_with_foreign_cleanup_scope(|| async { T::persist_foreign(data).await })
                 .await?;
         let (record, content, id) = prepare_save_parts::<T, _>(T::storage_table(), stored)?;
-        let mut result = db
-            .query("BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER; COMMIT TRANSACTION;")
-            .bind(("record", record.clone()))
-            .bind(("data", content.clone()))
-            .await?
-            .check()?;
+        let relation_writes = original.prepare_relation_writes(record.clone()).await?;
+        ensure_relation_tables(&relation_writes).await?;
+        let mut stmt =
+            RawSqlStmt::new("BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER;");
+        stmt = stmt
+            .bind("record", record.clone())
+            .bind("data", content.clone());
+        let (stmt_with_relations, _) = append_relation_sync_to_stmt(stmt, &relation_writes, "rel")?;
+        let mut stmt = stmt_with_relations;
+        stmt.sql.push_str("COMMIT TRANSACTION;");
+        let mut result = query_bound_checked(stmt).await?;
         let row: Option<SurrealDbValue> = result.take(1)?;
         let row = row.ok_or(DBError::EmptyResult("save"))?;
-        let relation_writes = original.prepare_relation_writes(record.clone()).await?;
-        sync_relation_writes(&relation_writes).await?;
         let stored = decode_saved_row_from_model::<T>(row, id, &original)?;
         match T::hydrate_foreign(stored).await {
             Ok(value) => Ok(value),
@@ -1138,6 +987,78 @@ where
         stored_rows_to_public_hydrated::<T>(rows).await
     }
 
+    async fn pagin_with_order(
+        count: i64,
+        cursor: Option<PageCursor>,
+        order: Order,
+    ) -> Result<Page<T>>
+    where
+        T: PaginationMeta,
+        T::Stored: serde::de::DeserializeOwned,
+    {
+        let field = T::pagination_field().ok_or_else(|| {
+            DBError::InvalidModel(format!(
+                "model `{}` does not declare a #[pagin] field",
+                std::any::type_name::<T>()
+            ))
+        })?;
+        let plan = PaginationPlan::new(field, order);
+
+        let requested = usize::try_from(count).map_err(|_| {
+            DBError::InvalidModel(format!("pagination count must be positive, got `{count}`"))
+        })?;
+        if requested == 0 {
+            return Err(
+                DBError::InvalidModel("pagination count must be positive".to_owned()).into(),
+            );
+        }
+
+        let query_count = count.checked_add(1).ok_or_else(|| {
+            DBError::InvalidModel(format!(
+                "pagination count `{count}` overflowed the lookahead window"
+            ))
+        })?;
+
+        let stmt = plan.build_stmt(T::storage_table(), query_count, cursor.as_ref())?;
+        let mut rows = crate::query::query_bound_take::<serde_json::Value>(stmt, Some(1)).await?;
+        let next = if rows.len() > requested {
+            rows.truncate(requested);
+            Some(
+                plan.build_cursor(
+                    rows.last()
+                        .expect("truncated page should retain its last row"),
+                )?,
+            )
+        } else {
+            None
+        };
+
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            items.push(decode_hydrated_row::<T>(row).await?);
+        }
+
+        Ok(Page { items, next })
+    }
+
+    /// Lists one descending keyset page using the model's `#[pagin]` field.
+    pub async fn pagin_desc(count: i64, cursor: Option<PageCursor>) -> Result<Page<T>>
+    where
+        T: PaginationMeta,
+        T::Stored: serde::de::DeserializeOwned,
+    {
+        Self::pagin_with_order(count, cursor, Order::Desc).await
+    }
+
+    /// Lists one ascending keyset page using the model's `#[pagin]` field.
+    pub async fn pagin_asc(count: i64, cursor: Option<PageCursor>) -> Result<Page<T>>
+    where
+        T: PaginationMeta,
+        T::Stored: serde::de::DeserializeOwned,
+    {
+        Self::pagin_with_order(count, cursor, Order::Asc).await
+    }
+
     /// Batch-upserts models by their `id` field and returns normalized rows.
     /// Saves many rows in chunks and returns normalized results.
     pub async fn save_many(data: Vec<T>) -> Result<Vec<T>> {
@@ -1145,7 +1066,6 @@ where
             return Ok(vec![]);
         }
 
-        let db = get_db()?;
         let mut inserted_all = Vec::with_capacity(data.len());
         let chunk_size = 5_000;
 
@@ -1182,17 +1102,20 @@ where
                 originals.push(original);
                 prepared.push((record, content, id));
             }
-            sql.push_str("COMMIT TRANSACTION;");
 
-            let mut query = db.query(sql);
+            ensure_relation_tables(&relation_writes).await?;
+            let mut stmt = RawSqlStmt::new(sql);
             for (idx, (record, content, _)) in prepared.iter().enumerate() {
-                query = query
-                    .bind((format!("record_{idx}"), record.clone()))
-                    .bind((format!("data_{idx}"), content.clone()));
+                stmt = stmt
+                    .bind(format!("record_{idx}"), record.clone())
+                    .bind(format!("data_{idx}"), content.clone());
             }
+            let (stmt_with_relations, _) =
+                append_relation_sync_to_stmt(stmt, &relation_writes, "rel")?;
+            let mut stmt = stmt_with_relations;
+            stmt.sql.push_str("COMMIT TRANSACTION;");
 
-            let mut result = query.await?.check()?;
-            sync_relation_writes(&relation_writes).await?;
+            let mut result = query_bound_checked(stmt).await?;
 
             for (idx, (_, _, id)) in prepared.clone().into_iter().enumerate() {
                 let row: Option<SurrealDbValue> = result.take(idx + 1)?;
@@ -1201,6 +1124,7 @@ where
                 match T::hydrate_foreign(stored).await {
                     Ok(value) => inserted_all.push(value),
                     Err(err) => {
+                        let db = get_db()?;
                         for (record, _, _) in prepared.iter() {
                             let _: Option<SurrealDbValue> = db.delete(record.clone()).await?;
                         }

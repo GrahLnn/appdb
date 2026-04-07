@@ -52,6 +52,14 @@ pub trait UniqueLookupMeta {
     }
 }
 
+/// Metadata describing the default keyset-pagination field for a Store model.
+pub trait PaginationMeta {
+    /// Field name used for default cursor pagination.
+    fn pagination_field() -> Option<&'static str> {
+        None
+    }
+}
+
 /// Narrow marker seam proving a type participates in `#[derive(Store)]`.
 #[doc(hidden)]
 pub trait StoreModelMarker {}

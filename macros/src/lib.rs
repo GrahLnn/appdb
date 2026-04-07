@@ -16,7 +16,7 @@ pub fn derive_sensitive(input: TokenStream) -> TokenStream {
 
 #[proc_macro_derive(
     Store,
-    attributes(unique, secure, foreign, table_as, crypto, relate, back_relate)
+    attributes(unique, secure, foreign, table_as, crypto, relate, back_relate, pagin)
 )]
 pub fn derive_store(input: TokenStream) -> TokenStream {
     match derive_store_impl(parse_macro_input!(input as DeriveInput)) {
@@ -81,6 +81,22 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         .filter(|field| has_unique_attr(&field.attrs))
         .map(|field| field.ident.clone().expect("named field"))
         .collect::<Vec<_>>();
+
+    let pagin_fields = named_fields
+        .iter()
+        .filter_map(|field| match field_pagin_attr(field) {
+            Ok(Some(attr)) => Some(parse_pagin_field(field, attr)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+    if pagin_fields.len() > 1 {
+        return Err(Error::new_spanned(
+            &pagin_fields[1].ident,
+            "Store supports at most one #[pagin] field",
+        ));
+    }
+    let pagin_field = pagin_fields.first().cloned();
 
     if id_fields.len() > 1 {
         return Err(Error::new_spanned(
@@ -189,6 +205,44 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         ));
     }
 
+    if let Some(invalid_field) = named_fields.iter().find(|field| {
+        field_pagin_attr(field).ok().flatten().is_some() && has_secure_attr(&field.attrs)
+    }) {
+        let ident = invalid_field.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            "#[pagin] fields cannot be marked #[secure]",
+        ));
+    }
+
+    if let Some(invalid_field) = named_fields.iter().find(|field| {
+        field_pagin_attr(field).ok().flatten().is_some()
+            && field_foreign_attr(field).ok().flatten().is_some()
+    }) {
+        let ident = invalid_field.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            "#[pagin] cannot be combined with #[foreign]",
+        ));
+    }
+
+    if let Some(invalid_field) = named_fields.iter().find_map(|field| {
+        field_pagin_attr(field)
+            .ok()
+            .flatten()
+            .and_then(|_| field_relation_attr(field).ok().flatten())
+            .map(|attr| (field, attr))
+    }) {
+        let ident = invalid_field.0.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            format!(
+                "#[pagin] cannot be combined with {}",
+                relation_attr_label(invalid_field.1)
+            ),
+        ));
+    }
+
     let mut seen_relation_names = HashSet::new();
     for field in &relate_fields {
         if !seen_relation_names.insert(field.relation_name.clone()) {
@@ -270,6 +324,34 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
     });
 
+    let pagin_schema_impl = pagin_field.iter().map(|field| {
+        let field_name = field.ident.to_string();
+        let index_name = format!(
+            "{}_{}_id_pagin",
+            resolved_schema_table_name(&struct_ident, table_alias.as_ref()),
+            field_name
+        );
+        let ddl = if field_name == "id" {
+            format!(
+                "DEFINE INDEX IF NOT EXISTS {index_name} ON {} FIELDS id;",
+                resolved_schema_table_name(&struct_ident, table_alias.as_ref())
+            )
+        } else {
+            format!(
+                "DEFINE INDEX IF NOT EXISTS {index_name} ON {} FIELDS {field_name},id;",
+                resolved_schema_table_name(&struct_ident, table_alias.as_ref())
+            )
+        };
+
+        quote! {
+            ::inventory::submit! {
+                ::appdb::model::schema::SchemaItem {
+                    ddl: #ddl,
+                }
+            }
+        }
+    });
+
     let lookup_fields = if unique_fields.is_empty() {
         named_fields
             .iter()
@@ -310,6 +392,41 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         ));
     }
     let lookup_field_literals = lookup_fields.iter().map(|field| quote! { #field });
+
+    let pagination_meta_impl = if let Some(field) = &pagin_field {
+        let field_name = field.ident.to_string();
+        quote! {
+            impl ::appdb::model::meta::PaginationMeta for #struct_ident {
+                fn pagination_field() -> ::std::option::Option<&'static str> {
+                    ::std::option::Option::Some(#field_name)
+                }
+            }
+        }
+    } else {
+        quote! {
+            impl ::appdb::model::meta::PaginationMeta for #struct_ident {}
+        }
+    };
+
+    let pagination_methods_impl = if pagin_field.is_some() {
+        quote! {
+            pub async fn pagin_desc(
+                count: i64,
+                cursor: ::std::option::Option<::appdb::PageCursor>,
+            ) -> ::anyhow::Result<::appdb::Page<Self>> {
+                ::appdb::repository::Repo::<Self>::pagin_desc(count, cursor).await
+            }
+
+            pub async fn pagin_asc(
+                count: i64,
+                cursor: ::std::option::Option<::appdb::PageCursor>,
+            ) -> ::anyhow::Result<::appdb::Page<Self>> {
+                ::appdb::repository::Repo::<Self>::pagin_asc(count, cursor).await
+            }
+        }
+    } else {
+        quote! {}
+    };
 
     let stored_model_impl = if !foreign_fields.is_empty() {
         quote! {}
@@ -602,6 +719,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 
         impl ::appdb::model::meta::StoreModelMarker for #struct_ident {}
         impl ::appdb::model::meta::StoreModelMarker for #store_marker_ident {}
+        #pagination_meta_impl
 
         impl ::appdb::model::meta::UniqueLookupMeta for #struct_ident {
             fn lookup_fields() -> &'static [&'static str] {
@@ -619,6 +737,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         #resolve_record_id_impl
 
         #( #unique_schema_impls )*
+        #( #pagin_schema_impl )*
 
         impl ::appdb::repository::Crud for #struct_ident {}
 
@@ -652,6 +771,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             pub async fn list_limit(count: i64) -> ::anyhow::Result<::std::vec::Vec<Self>> {
                 ::appdb::repository::Repo::<Self>::list_limit(count).await
             }
+            #pagination_methods_impl
 
             pub async fn relate_by_name<Target>(&self, target: &Target, relation: &str) -> ::anyhow::Result<()>
             where
@@ -1386,6 +1506,27 @@ fn field_relation_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
     Ok(relate_attr)
 }
 
+fn field_pagin_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
+    let mut pagin_attr = None;
+
+    for attr in &field.attrs {
+        if !attr.path().is_ident("pagin") {
+            continue;
+        }
+
+        if pagin_attr.is_some() {
+            return Err(Error::new_spanned(
+                attr,
+                "duplicate #[pagin] attribute is not supported",
+            ));
+        }
+
+        pagin_attr = Some(attr);
+    }
+
+    Ok(pagin_attr)
+}
+
 fn validate_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
     if attr.path().is_ident("foreign") {
         return foreign_leaf_type(&field.ty)
@@ -1401,6 +1542,8 @@ const BINDREF_BRIDGE_STORE_ONLY: &str =
     "#[foreign] leaf types must derive Store or #[derive(Bridge)] dispatcher enums";
 
 const RELATE_ACCEPTED_SHAPES: &str = "relation-backed fields support Child / Option<Child> / Vec<Child> / Option<Vec<Child>> shapes whose leaf type implements appdb::Bridge";
+
+const PAGIN_ACCEPTED_SHAPES: &str = "#[pagin] supports direct scalar fields plus Id/RecordId; Option<_> and Vec<_> wrappers are not supported";
 
 #[derive(Clone, Copy)]
 enum RelationFieldDirection {
@@ -1495,6 +1638,11 @@ struct RelateField {
     direction: RelationFieldDirection,
 }
 
+#[derive(Clone)]
+struct PaginField {
+    ident: syn::Ident,
+}
+
 fn parse_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<ForeignField> {
     validate_foreign_field(field, attr)?;
     let ident = field.ident.clone().expect("named field");
@@ -1539,6 +1687,13 @@ fn parse_relate_field(field: &Field, attr: &Attribute) -> syn::Result<RelateFiel
     })
 }
 
+fn parse_pagin_field(field: &Field, attr: &Attribute) -> syn::Result<PaginField> {
+    validate_pagin_field(field, attr)?;
+    Ok(PaginField {
+        ident: field.ident.clone().expect("named field"),
+    })
+}
+
 fn validate_relate_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
     if !attr.path().is_ident("relate") && !attr.path().is_ident("back_relate") {
         return Err(Error::new_spanned(attr, "unsupported relate attribute"));
@@ -1547,6 +1702,18 @@ fn validate_relate_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
     let accepted = relate_leaf_type(&field.ty).cloned().map(Type::Path);
 
     accepted.ok_or_else(|| Error::new_spanned(&field.ty, RELATE_ACCEPTED_SHAPES))
+}
+
+fn validate_pagin_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
+    if !attr.path().is_ident("pagin") {
+        return Err(Error::new_spanned(attr, "unsupported pagination attribute"));
+    }
+
+    if pagination_leaf_type(&field.ty).is_none() {
+        return Err(Error::new_spanned(&field.ty, PAGIN_ACCEPTED_SHAPES));
+    }
+
+    Ok(field.ty.clone())
 }
 
 fn relate_leaf_type(ty: &Type) -> Option<&TypePath> {
@@ -1568,6 +1735,22 @@ fn relate_leaf_type(ty: &Type) -> Option<&TypePath> {
 
     if let Some(inner) = vec_inner_type(ty) {
         return direct_store_child_type(inner);
+    }
+
+    None
+}
+
+fn pagination_leaf_type(ty: &Type) -> Option<Type> {
+    if option_inner_type(ty).is_some() || vec_inner_type(ty).is_some() {
+        return None;
+    }
+
+    if is_id_type(ty)
+        || is_record_id_type(ty)
+        || is_string_type(ty)
+        || is_common_non_store_leaf_type(ty)
+    {
+        return Some(ty.clone());
     }
 
     None

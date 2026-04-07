@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **appdb** (1112 symbols, 3069 relationships, 93 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **appdb** (1543 symbols, 4149 relationships, 130 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -99,3 +99,9 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Test File Placement
+
+- All tests must live in dedicated files. Do not add inline `#[cfg(test)] mod tests` blocks inside production source bodies.
+- For module-private Rust tests, use a separate sibling test file wired with `#[cfg(test)] mod tests;` or an explicit `#[path = ...]` test module.
+- Keep test naming business-agnostic unless the user explicitly requests domain-specific naming.
