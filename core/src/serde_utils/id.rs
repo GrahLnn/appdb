@@ -202,6 +202,14 @@ pub fn record_id_to_plain_string(record: &RecordId) -> String {
     }
 }
 
+pub fn record_id_to_plain_json(record: &RecordId) -> serde_json::Value {
+    match &record.key {
+        RecordIdKey::String(value) => serde_json::Value::String(value.trim_matches('`').to_owned()),
+        RecordIdKey::Number(value) => serde_json::Value::Number((*value).into()),
+        other => serde_json::Value::String(other.to_sql()),
+    }
+}
+
 pub fn parse_record_id_or_plain_string<'a>(
     text: &'a str,
     fallback_table: Option<&str>,
@@ -225,10 +233,10 @@ pub fn normalize_public_root_id_value(value: &mut serde_json::Value) {
     let normalized = match id {
         serde_json::Value::String(text) => parse_record_id_or_plain_string(text, None)
             .ok()
-            .map(|record| serde_json::Value::String(record_id_to_plain_string(&record))),
+            .map(|record| record_id_to_plain_json(&record)),
         serde_json::Value::Object(_) => serde_json::from_value::<RecordId>(id.clone())
             .ok()
-            .map(|record| serde_json::Value::String(record_id_to_plain_string(&record))),
+            .map(|record| record_id_to_plain_json(&record)),
         _ => None,
     };
 

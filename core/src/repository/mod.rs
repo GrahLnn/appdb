@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use anyhow::Result;
@@ -189,6 +190,15 @@ where
                 DBError::Decode(format!("stored row contains invalid id value `{invalid}`")).into()
             })
         }
+        serde_json::Value::Number(value) => value
+            .as_i64()
+            .map(|value| RecordId::new(T::storage_table(), value))
+            .ok_or_else(|| {
+                DBError::Decode(format!(
+                    "stored row contains unsupported numeric id value `{value}`"
+                ))
+                .into()
+            }),
         serde_json::Value::Object(_) => Ok(serde_json::from_value(id)?),
         other => Err(DBError::Decode(format!(
             "stored row contains unsupported id shape `{other}`"
@@ -227,6 +237,134 @@ async fn sync_relation_writes(writes: &[RelationWrite]) -> Result<()> {
         return Ok(());
     }
 
+    match sync_relation_writes_batched(writes).await {
+        Ok(()) => Ok(()),
+        Err(err) => match DBError::from(err) {
+            DBError::MissingTable(_) => sync_relation_writes_individually(writes).await,
+            other => Err(other.into()),
+        },
+    }
+}
+
+#[derive(Debug)]
+struct RelationWriteBatch<'a> {
+    relation: &'a str,
+    direction: RelationWriteDirection,
+    records: Vec<RecordId>,
+    edges: Vec<crate::graph::OrderedRelationEdge>,
+}
+
+fn relation_write_batches(writes: &[RelationWrite]) -> Result<Vec<RelationWriteBatch<'_>>> {
+    let mut groups = Vec::new();
+    let mut index_by_key = BTreeMap::new();
+
+    for write in writes {
+        let key = (
+            write.relation,
+            match write.direction {
+                RelationWriteDirection::Outgoing => 0u8,
+                RelationWriteDirection::Incoming => 1u8,
+            },
+        );
+
+        let group_index = if let Some(index) = index_by_key.get(&key) {
+            *index
+        } else {
+            let index = groups.len();
+            groups.push(RelationWriteBatch {
+                relation: write.relation,
+                direction: write.direction,
+                records: Vec::new(),
+                edges: Vec::new(),
+            });
+            index_by_key.insert(key, index);
+            index
+        };
+
+        let batch = groups
+            .get_mut(group_index)
+            .expect("relation batch index should remain valid");
+        batch.records.push(write.record.clone());
+        batch.edges.extend(write.edges.iter().cloned());
+    }
+
+    for batch in &groups {
+        for edge in &batch.edges {
+            if edge._in.is_none() {
+                return Err(DBError::InvalidModel(
+                    "relation edge write is missing its source record id".to_owned(),
+                )
+                .into());
+            }
+        }
+    }
+
+    Ok(groups)
+}
+
+async fn sync_relation_writes_batched(writes: &[RelationWrite]) -> Result<()> {
+    let batches = relation_write_batches(writes)?;
+    let db = get_db()?;
+    let mut sql = String::from("BEGIN TRANSACTION;");
+
+    for (batch_idx, batch) in batches.iter().enumerate() {
+        let field = match batch.direction {
+            RelationWriteDirection::Outgoing => "in",
+            RelationWriteDirection::Incoming => "out",
+        };
+        sql.push_str(&format!("DELETE $rel_{batch_idx} WHERE "));
+        for (record_idx, _) in batch.records.iter().enumerate() {
+            if record_idx > 0 {
+                sql.push_str(" OR ");
+            }
+            sql.push_str(&format!("{field} = $record_{batch_idx}_{record_idx}"));
+        }
+        sql.push_str(" RETURN NONE;");
+    }
+
+    for (batch_idx, batch) in batches.iter().enumerate() {
+        if batch.edges.is_empty() {
+            continue;
+        }
+
+        sql.push_str(&format!("INSERT RELATION INTO $rel_{batch_idx} ["));
+        for (edge_idx, _) in batch.edges.iter().enumerate() {
+            if edge_idx > 0 {
+                sql.push_str(", ");
+            }
+            sql.push_str(&format!(
+                "{{ in: $in_{batch_idx}_{edge_idx}, out: $out_{batch_idx}_{edge_idx}, position: $position_{batch_idx}_{edge_idx} }}"
+            ));
+        }
+        sql.push_str("] RETURN NONE;");
+    }
+
+    sql.push_str("COMMIT TRANSACTION;");
+
+    let mut query = db.query(sql);
+    for (batch_idx, batch) in batches.iter().enumerate() {
+        query = query.bind((format!("rel_{batch_idx}"), Table::from(batch.relation)));
+        for (record_idx, record) in batch.records.iter().enumerate() {
+            query = query.bind((format!("record_{batch_idx}_{record_idx}"), record.clone()));
+        }
+        for (edge_idx, edge) in batch.edges.iter().enumerate() {
+            let in_record = edge._in.clone().ok_or_else(|| {
+                DBError::InvalidModel(
+                    "relation edge write is missing its source record id".to_owned(),
+                )
+            })?;
+            query = query
+                .bind((format!("in_{batch_idx}_{edge_idx}"), in_record))
+                .bind((format!("out_{batch_idx}_{edge_idx}"), edge.out.clone()))
+                .bind((format!("position_{batch_idx}_{edge_idx}"), edge.position));
+        }
+    }
+
+    query.await?.check()?;
+    Ok(())
+}
+
+async fn sync_relation_writes_individually(writes: &[RelationWrite]) -> Result<()> {
     let db = get_db()?;
     for write in writes {
         let delete_sql = match write.direction {

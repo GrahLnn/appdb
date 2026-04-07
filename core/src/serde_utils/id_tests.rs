@@ -1,6 +1,6 @@
 use super::{
     Id, deserialize_id_or_record_id_as_string, deserialize_record_id_or_compat_string,
-    serialize_id_as_string,
+    normalize_public_root_id_value, record_id_to_plain_json, serialize_id_as_string,
 };
 use serde::{Deserialize, Serialize};
 use surrealdb::types::RecordId;
@@ -123,4 +123,33 @@ fn id_serializes_number_as_number() {
     };
     let json = serde_json::to_string(&row).expect("must serialize");
     assert_eq!(json, r#"{"id":42}"#);
+}
+
+#[test]
+fn record_id_to_plain_json_preserves_numeric_keys() {
+    let record = RecordId::new("user", 42i64);
+    let json = record_id_to_plain_json(&record);
+    assert_eq!(json, serde_json::json!(42));
+}
+
+#[test]
+fn normalize_public_root_id_value_converts_numeric_record_id_string_to_number() {
+    let mut row = serde_json::json!({
+        "id": "user:42",
+    });
+
+    normalize_public_root_id_value(&mut row);
+
+    assert_eq!(row, serde_json::json!({ "id": 42 }));
+}
+
+#[test]
+fn normalize_public_root_id_value_converts_numeric_record_id_object_to_number() {
+    let mut row = serde_json::json!({
+        "id": RecordId::new("user", 42i64),
+    });
+
+    normalize_public_root_id_value(&mut row);
+
+    assert_eq!(row, serde_json::json!({ "id": 42 }));
 }

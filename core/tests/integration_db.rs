@@ -80,6 +80,19 @@ struct ItNumberUser {
     id: Id,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItNumberForeignChild {
+    id: Id,
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItNumberForeignParent {
+    id: Id,
+    #[foreign]
+    child: ItNumberForeignChild,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 struct ItRecordUser {
     #[serde(deserialize_with = "appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
@@ -1685,6 +1698,44 @@ fn number_id_repo_roundtrip_passes() {
             .expect("list should succeed");
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].id, Id::from(42i64));
+    });
+}
+
+#[test]
+fn number_id_foreign_roundtrip_preserves_numeric_public_ids() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItNumberForeignParent>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItNumberForeignChild>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let saved = Repo::<ItNumberForeignParent>::save_many(vec![ItNumberForeignParent {
+            id: Id::from(42i64),
+            child: ItNumberForeignChild {
+                id: Id::from("child-42"),
+                name: "child".to_owned(),
+            },
+        }])
+        .await
+        .expect("save_many should succeed");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].id, Id::from(42i64));
+
+        let loaded = Repo::<ItNumberForeignParent>::get(42i64)
+            .await
+            .expect("get should succeed");
+        assert_eq!(loaded.id, Id::from(42i64));
+
+        let listed = Repo::<ItNumberForeignParent>::list()
+            .await
+            .expect("list should succeed");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, Id::from(42i64));
     });
 }
 
