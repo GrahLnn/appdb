@@ -123,6 +123,21 @@ struct ItAliasedPost {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItPagedEntry {
+    id: Id,
+    #[pagin]
+    created_at: i64,
+    title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItIdPagedEntry {
+    #[pagin]
+    id: Id,
+    title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 #[table_as(ItAliasedPost)]
 struct ItAliasedPostBase {
     id: Id,
@@ -3396,6 +3411,211 @@ fn store_unique_field_registers_schema_index() {
             && ddl.contains("ON it_aliased_post")
             && ddl.contains("FIELDS slug UNIQUE")
     }));
+
+    assert!(ddls.iter().any(|ddl| {
+        ddl.contains("DEFINE INDEX IF NOT EXISTS it_paged_entry_created_at_id_pagin")
+            && ddl.contains("ON it_paged_entry")
+            && ddl.contains("FIELDS created_at,id")
+            && !ddl.contains("UNIQUE")
+    }));
+}
+
+#[test]
+fn store_pagin_roundtrips_with_stable_desc_and_asc_cursor_order() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItPagedEntry::delete_all()
+            .await
+            .expect("paged entry cleanup should succeed");
+
+        ItPagedEntry::save_many(vec![
+            ItPagedEntry {
+                id: Id::from(1i64),
+                created_at: 100,
+                title: "first".to_owned(),
+            },
+            ItPagedEntry {
+                id: Id::from(2i64),
+                created_at: 100,
+                title: "second".to_owned(),
+            },
+            ItPagedEntry {
+                id: Id::from(3i64),
+                created_at: 90,
+                title: "third".to_owned(),
+            },
+            ItPagedEntry {
+                id: Id::from(4i64),
+                created_at: 80,
+                title: "fourth".to_owned(),
+            },
+        ])
+        .await
+        .expect("save_many should succeed");
+
+        let first_desc = ItPagedEntry::pagin_desc(2, None)
+            .await
+            .expect("first desc page should succeed");
+        assert_eq!(
+            first_desc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(2i64), Id::from(1i64)]
+        );
+        assert!(
+            first_desc.next.is_some(),
+            "first desc page should expose a next cursor"
+        );
+
+        let second_desc = ItPagedEntry::pagin_desc(2, first_desc.next.clone())
+            .await
+            .expect("second desc page should succeed");
+        assert_eq!(
+            second_desc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(3i64), Id::from(4i64)]
+        );
+        assert!(
+            second_desc.next.is_none(),
+            "last desc page should not expose another cursor"
+        );
+
+        let first_asc = ItPagedEntry::pagin_asc(3, None)
+            .await
+            .expect("first asc page should succeed");
+        assert_eq!(
+            first_asc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(4i64), Id::from(3i64), Id::from(1i64)]
+        );
+        assert!(
+            first_asc.next.is_some(),
+            "first asc page should expose a next cursor"
+        );
+
+        let second_asc = ItPagedEntry::pagin_asc(3, first_asc.next.clone())
+            .await
+            .expect("second asc page should succeed");
+        assert_eq!(
+            second_asc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(2i64)]
+        );
+        assert!(
+            second_asc.next.is_none(),
+            "last asc page should not expose another cursor"
+        );
+    });
+}
+
+#[test]
+fn store_pagin_supports_id_as_pagination_field() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItIdPagedEntry::delete_all()
+            .await
+            .expect("id-paged entry cleanup should succeed");
+
+        ItIdPagedEntry::save_many(vec![
+            ItIdPagedEntry {
+                id: Id::from(1i64),
+                title: "first".to_owned(),
+            },
+            ItIdPagedEntry {
+                id: Id::from(2i64),
+                title: "second".to_owned(),
+            },
+            ItIdPagedEntry {
+                id: Id::from(3i64),
+                title: "third".to_owned(),
+            },
+            ItIdPagedEntry {
+                id: Id::from(4i64),
+                title: "fourth".to_owned(),
+            },
+        ])
+        .await
+        .expect("save_many should succeed");
+
+        let first_desc = ItIdPagedEntry::pagin_desc(2, None)
+            .await
+            .expect("first desc page should succeed");
+        assert_eq!(
+            first_desc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(4i64), Id::from(3i64)]
+        );
+        assert!(
+            first_desc.next.is_some(),
+            "first desc page should expose a next cursor"
+        );
+
+        let second_desc = ItIdPagedEntry::pagin_desc(2, first_desc.next.clone())
+            .await
+            .expect("second desc page should succeed");
+        assert_eq!(
+            second_desc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(2i64), Id::from(1i64)]
+        );
+        assert!(
+            second_desc.next.is_none(),
+            "last desc page should not expose another cursor"
+        );
+
+        let first_asc = ItIdPagedEntry::pagin_asc(3, None)
+            .await
+            .expect("first asc page should succeed");
+        assert_eq!(
+            first_asc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(1i64), Id::from(2i64), Id::from(3i64)]
+        );
+        assert!(
+            first_asc.next.is_some(),
+            "first asc page should expose a next cursor"
+        );
+
+        let second_asc = ItIdPagedEntry::pagin_asc(3, first_asc.next.clone())
+            .await
+            .expect("second asc page should succeed");
+        assert_eq!(
+            second_asc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(4i64)]
+        );
+        assert!(
+            second_asc.next.is_none(),
+            "last asc page should not expose another cursor"
+        );
+    });
 }
 
 #[test]
@@ -6077,6 +6297,83 @@ fn relate_fields_are_stored_in_edge_tables_and_hydrated_on_read() {
 }
 
 #[test]
+fn relate_fields_roundtrip_through_create() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItRelateRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItRelateLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let input = ItRelateRoot {
+            id: Id::from("relate-create-root"),
+            title: "created".to_owned(),
+            primary: ItRelateLeaf {
+                id: Id::from("relate-create-leaf-1"),
+                label: "first".to_owned(),
+            },
+            optional: Some(ItRelateLeaf {
+                id: Id::from("relate-create-leaf-2"),
+                label: "second".to_owned(),
+            }),
+            items: vec![
+                ItRelateLeaf {
+                    id: Id::from("relate-create-leaf-3"),
+                    label: "third".to_owned(),
+                },
+                ItRelateLeaf {
+                    id: Id::from("relate-create-leaf-1"),
+                    label: "first".to_owned(),
+                },
+            ],
+        };
+
+        let created = Repo::<ItRelateRoot>::create(input.clone())
+            .await
+            .expect("relate create should succeed");
+        let loaded = ItRelateRoot::get("relate-create-root")
+            .await
+            .expect("relate get after create should succeed");
+        let primary_edges = load_relate_edges("it_relate_primary", "relate-create-root").await;
+        let optional_edges = load_relate_edges("it_relate_optional", "relate-create-root").await;
+        let item_edges = load_relate_edges("it_relate_many", "relate-create-root").await;
+
+        assert_eq!(created, input);
+        assert_eq!(loaded, input);
+        assert_eq!(primary_edges.len(), 1);
+        assert_eq!(
+            primary_edges[0].out,
+            RecordId::new(ItRelateLeaf::table_name(), "relate-create-leaf-1")
+        );
+        assert_eq!(optional_edges.len(), 1);
+        assert_eq!(
+            optional_edges[0].out,
+            RecordId::new(ItRelateLeaf::table_name(), "relate-create-leaf-2")
+        );
+        assert_eq!(
+            item_edges
+                .iter()
+                .map(|row| (row.position, row.out.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    0,
+                    RecordId::new(ItRelateLeaf::table_name(), "relate-create-leaf-3")
+                ),
+                (
+                    1,
+                    RecordId::new(ItRelateLeaf::table_name(), "relate-create-leaf-1")
+                ),
+            ]
+        );
+    });
+}
+
+#[test]
 fn relate_fields_roundtrip_through_save_many() {
     let _guard = acquire_test_lock();
     run_async(async {
@@ -6143,6 +6440,100 @@ fn relate_fields_roundtrip_through_save_many() {
                 .map(|row| row.position)
                 .collect::<Vec<_>>(),
             vec![0, 1]
+        );
+    });
+}
+
+#[test]
+fn back_relate_fields_roundtrip_through_create() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItBackRelateRoot>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItBackRelateLeaf>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let input = ItBackRelateRoot {
+            id: Id::from("back-relate-create-root"),
+            title: "created".to_owned(),
+            primary: ItBackRelateLeaf {
+                id: Id::from("back-relate-create-leaf-1"),
+                label: "first".to_owned(),
+            },
+            optional: Some(ItBackRelateLeaf {
+                id: Id::from("back-relate-create-leaf-2"),
+                label: "second".to_owned(),
+            }),
+            items: vec![
+                ItBackRelateLeaf {
+                    id: Id::from("back-relate-create-leaf-3"),
+                    label: "third".to_owned(),
+                },
+                ItBackRelateLeaf {
+                    id: Id::from("back-relate-create-leaf-1"),
+                    label: "first".to_owned(),
+                },
+            ],
+            maybe_items: Some(vec![ItBackRelateLeaf {
+                id: Id::from("back-relate-create-leaf-4"),
+                label: "fourth".to_owned(),
+            }]),
+        };
+
+        let created = Repo::<ItBackRelateRoot>::create(input.clone())
+            .await
+            .expect("back relate create should succeed");
+        let loaded = ItBackRelateRoot::get("back-relate-create-root")
+            .await
+            .expect("back relate get after create should succeed");
+        let primary_edges =
+            load_back_relate_edges("it_back_relate_primary", "back-relate-create-root").await;
+        let optional_edges =
+            load_back_relate_edges("it_back_relate_optional", "back-relate-create-root").await;
+        let item_edges =
+            load_back_relate_edges("it_back_relate_many", "back-relate-create-root").await;
+        let maybe_item_edges = load_back_relate_edges(
+            "it_back_relate_optional_many",
+            "back-relate-create-root",
+        )
+        .await;
+
+        assert_eq!(created, input);
+        assert_eq!(loaded, input);
+        assert_eq!(primary_edges.len(), 1);
+        assert_eq!(
+            primary_edges[0].source,
+            RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-create-leaf-1")
+        );
+        assert_eq!(optional_edges.len(), 1);
+        assert_eq!(
+            optional_edges[0].source,
+            RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-create-leaf-2")
+        );
+        assert_eq!(
+            item_edges
+                .iter()
+                .map(|row| (row.position, row.source.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    0,
+                    RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-create-leaf-3")
+                ),
+                (
+                    1,
+                    RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-create-leaf-1")
+                ),
+            ]
+        );
+        assert_eq!(maybe_item_edges.len(), 1);
+        assert_eq!(
+            maybe_item_edges[0].source,
+            RecordId::new(ItBackRelateLeaf::table_name(), "back-relate-create-leaf-4")
         );
     });
 }

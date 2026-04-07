@@ -12,6 +12,7 @@ pub mod error;
 pub mod graph;
 /// Model metadata, schema registration, and relation metadata.
 pub mod model;
+mod pagination;
 /// Common re-exports for application code.
 pub mod prelude;
 /// Raw and builder-style query helpers.

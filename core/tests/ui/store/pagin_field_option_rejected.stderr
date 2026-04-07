@@ -1,0 +1,5 @@
+error: #[pagin] supports direct scalar fields plus Id/RecordId; Option<_> and Vec<_> wrappers are not supported
+ --> tests/ui/store/pagin_field_option_rejected.rs:9:17
+  |
+9 |     created_at: Option<i64>,
+  |                 ^^^^^^^^^^^

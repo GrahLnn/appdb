@@ -5,6 +5,7 @@ use surrealdb::types::RecordId;
 pub struct QueryKind;
 
 /// Sort direction for pagination and ordered scans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Order {
     /// Ascending order.
     Asc,
@@ -25,27 +26,24 @@ impl QueryKind {
     pub fn pagin(
         _table: &str,
         _count: i64,
-        cursor: Option<String>,
+        has_cursor: bool,
         order: Order,
-        _order_key: &str,
+        order_key: &str,
     ) -> String {
-        match (cursor.is_some(), order) {
-            (true, Order::Asc) => {
-                "SELECT * FROM $table WHERE [$order_key] > $cursor ORDER BY [$order_key] ASC LIMIT $count;"
-                    .to_owned()
-            }
-            (true, Order::Desc) => {
-                "SELECT * FROM $table WHERE [$order_key] < $cursor ORDER BY [$order_key] DESC LIMIT $count;"
-                    .to_owned()
-            }
-            (false, Order::Asc) => {
-                "SELECT * FROM $table ORDER BY [$order_key] ASC LIMIT $count;"
-                    .to_owned()
-            }
-            (false, Order::Desc) => {
-                "SELECT * FROM $table ORDER BY [$order_key] DESC LIMIT $count;"
-                    .to_owned()
-            }
+        let (than, order_str) = match order {
+            Order::Asc => (">", "ASC"),
+            Order::Desc => ("<", "DESC"),
+        };
+        if has_cursor {
+            format!(
+                "LET $rows = (SELECT *, id AS __page_record, record::id(id) AS __page_public_id FROM $table); SELECT *, __page_public_id AS id FROM $rows WHERE ({page_order_key} {than} $cursor_value OR ({page_order_key} = $cursor_value AND __page_record {than} $cursor_record)) ORDER BY {page_order_key} {order_str}, __page_record {order_str} LIMIT $count;",
+                page_order_key = order_key
+            )
+        } else {
+            format!(
+                "LET $rows = (SELECT *, id AS __page_record, record::id(id) AS __page_public_id FROM $table); SELECT *, __page_public_id AS id FROM $rows ORDER BY {page_order_key} {order_str}, __page_record {order_str} LIMIT $count;",
+                page_order_key = order_key
+            )
         }
     }
     /// Builds a keyset pagination query scoped to relation rows.

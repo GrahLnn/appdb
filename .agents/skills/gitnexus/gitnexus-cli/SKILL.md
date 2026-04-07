@@ -15,14 +15,14 @@ All commands work via `npx` — no global install required.
 npx gitnexus analyze
 ```
 
-Run from the project root. This parses all source files, builds the knowledge graph, writes it to `.gitnexus/`, and generates CLAUDE.md / AGENTS.md context files.
+Run from the project root. This parses all source files, builds the knowledge graph, writes it to `.gitnexus/`, and generates AGENTS.md / AGENTS.md context files.
 
 | Flag           | Effect                                                           |
 | -------------- | ---------------------------------------------------------------- |
 | `--force`      | Force full re-index even if up to date                           |
 | `--embeddings` | Enable embedding generation for semantic search (off by default) |
 
-**When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Claude Code, a PostToolUse hook runs `analyze` automatically after `git commit` and `git merge`, preserving embeddings if previously generated.
+**When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Codex, a PostToolUse hook runs `analyze` automatically after `git commit` and `git merge`, preserving embeddings if previously generated.
 
 ### status — Check index freshness
 
@@ -78,5 +78,5 @@ Lists all repositories registered in `~/.gitnexus/registry.json`. The MCP `list_
 ## Troubleshooting
 
 - **"Not inside a git repository"**: Run from a directory inside a git repo
-- **Index is stale after re-analyzing**: Restart Claude Code to reload the MCP server
+- **Index is stale after re-analyzing**: Restart Codex to reload the MCP server
 - **Embeddings slow**: Omit `--embeddings` (it's off by default) or set `OPENAI_API_KEY` for faster API-based embedding

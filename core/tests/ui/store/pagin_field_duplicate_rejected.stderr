@@ -1,0 +1,5 @@
+error: Store supports at most one #[pagin] field
+  --> tests/ui/store/pagin_field_duplicate_rejected.rs:11:5
+   |
+11 |     updated_at: i64,
+   |     ^^^^^^^^^^
