@@ -46,9 +46,20 @@ pub trait UniqueLookupMeta {
     /// Field names used for automatic unique lookup.
     fn lookup_fields() -> &'static [&'static str];
 
-    /// Field names that are explicit foreigns and must be excluded from automatic lookup.
+    /// Field names backed by `#[foreign]` and resolved to `RecordId` values during lookup.
     fn foreign_fields() -> &'static [&'static str] {
         &[]
+    }
+
+    /// Resolves one lookup field into the value that should be bound into the lookup query.
+    ///
+    /// Plain fields can return `None` to fall back to the model's serialized value, while
+    /// `#[foreign]` fields should return their resolved `RecordId` serde shape.
+    fn resolve_lookup_field_value(
+        &self,
+        _field: &str,
+    ) -> impl std::future::Future<Output = Result<Option<surrealdb::types::Value>>> {
+        async { Ok(None) }
     }
 }
 

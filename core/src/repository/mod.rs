@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value;
 use surrealdb::opt::PatchOp;
-use surrealdb::types::{RecordId, RecordIdKey, Table, Value as SurrealDbValue};
+use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Table, Value as SurrealDbValue};
 
 use crate::connection::get_db;
 use crate::error::{DBError, DBErrorKind, classify_db_error_text};
@@ -32,13 +32,13 @@ fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
     }
 }
 
-fn strip_null_fields(value: &mut Value) {
+fn strip_null_db_fields(value: &mut SurrealDbValue) {
     match value {
-        Value::Object(map) => {
+        SurrealDbValue::Object(map) => {
             let null_keys = map
                 .iter()
                 .filter_map(|(key, value)| {
-                    if value.is_null() {
+                    if value.is_null() || value.is_none() {
                         Some(key.clone())
                     } else {
                         None
@@ -51,12 +51,12 @@ fn strip_null_fields(value: &mut Value) {
             }
 
             for nested in map.values_mut() {
-                strip_null_fields(nested);
+                strip_null_db_fields(nested);
             }
         }
-        Value::Array(items) => {
-            for nested in items {
-                strip_null_fields(nested);
+        SurrealDbValue::Array(items) => {
+            for nested in items.iter_mut() {
+                strip_null_db_fields(nested);
             }
         }
         _ => {}
@@ -216,9 +216,9 @@ where
     }
 }
 
-fn prepare_save_parts<M, T>(table: &str, data: T) -> Result<(RecordId, Value, Value)>
+fn prepare_save_parts<M, T>(table: &str, data: T) -> Result<(RecordId, SurrealDbValue, Value)>
 where
-    T: Serialize,
+    T: Serialize + SurrealValue,
     M: ForeignModel,
 {
     let key = extract_record_id_key(&data)?;
@@ -227,28 +227,34 @@ where
     Ok((record, prepare_content::<M, _>(data)?, id))
 }
 
-fn prepare_content<M, T>(data: T) -> Result<Value>
+fn prepare_content<M, T>(data: T) -> Result<SurrealDbValue>
 where
-    T: Serialize,
+    T: SurrealValue,
     M: ForeignModel,
 {
-    let mut content = serde_json::to_value(&data)?;
-    if let Value::Object(map) = &mut content {
+    let mut content = data.into_value();
+    if let SurrealDbValue::Object(map) = &mut content {
         map.remove("id");
+        for field in M::relation_field_names() {
+            map.remove(*field);
+        }
     }
-    M::strip_relation_fields(&mut content);
-    strip_null_fields(&mut content);
+    strip_null_db_fields(&mut content);
     Ok(content)
 }
 
-fn prepare_create_content<M, T>(data: T) -> Result<Value>
+fn prepare_create_content<M, T>(data: T) -> Result<SurrealDbValue>
 where
-    T: Serialize,
+    T: SurrealValue,
     M: ForeignModel,
 {
-    let mut content = serde_json::to_value(&data)?;
-    M::strip_relation_fields(&mut content);
-    strip_null_fields(&mut content);
+    let mut content = data.into_value();
+    if let SurrealDbValue::Object(map) = &mut content {
+        for field in M::relation_field_names() {
+            map.remove(*field);
+        }
+    }
+    strip_null_db_fields(&mut content);
     Ok(content)
 }
 
@@ -356,7 +362,7 @@ pub(crate) async fn record_exists(record: RecordId) -> Result<bool> {
     }
 }
 
-fn collect_lookup_parts<T>(data: &T) -> Result<Vec<(String, Value)>>
+async fn collect_lookup_parts<T>(data: &T) -> Result<Vec<(String, SurrealDbValue)>>
 where
     T: UniqueLookupMeta + Serialize,
 {
@@ -380,12 +386,19 @@ where
 
     let mut parts = Vec::with_capacity(fields.len());
     for field in fields {
-        let value = map.get(*field).cloned().ok_or_else(|| {
-            DBError::InvalidModel(format!(
-                "model `{}` is missing lookup field `{field}` during automatic unique lookup",
-                std::any::type_name::<T>()
-            ))
-        })?;
+        let value = match data.resolve_lookup_field_value(field).await? {
+            Some(value) => value,
+            None => map
+                .get(*field)
+                .cloned()
+                .ok_or_else(|| {
+                    DBError::InvalidModel(format!(
+                        "model `{}` is missing lookup field `{field}` during automatic unique lookup",
+                        std::any::type_name::<T>()
+                    ))
+                })?
+                .into_value(),
+        };
         parts.push(((*field).to_owned(), value));
     }
 
@@ -829,7 +842,7 @@ where
         T: UniqueLookupMeta,
     {
         let db = get_db()?;
-        let lookup_parts = collect_lookup_parts(data)?;
+        let lookup_parts = collect_lookup_parts(data).await?;
         let fields = lookup_parts
             .iter()
             .map(|(field, _)| field.clone())

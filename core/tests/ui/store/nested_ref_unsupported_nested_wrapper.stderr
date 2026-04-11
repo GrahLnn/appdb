@@ -28,3 +28,32 @@ help: the trait `ForeignShape` is implemented for `Vec<T>`
    | |     T::Stored: Send,
    | |____________________^
    = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Vec<Wrapper>: ForeignLookupShape` is not satisfied
+  --> tests/ui/store/nested_ref_unsupported_nested_wrapper.rs:18:15
+   |
+18 |     children: Vec<Wrapper>,
+   |               ^^^^^^^^^^^^ the trait `ForeignLookupShape` is not implemented for `Vec<Wrapper>`
+   |
+help: the trait `ForeignLookupShape` is implemented for `Vec<T>`
+  --> src/lib.rs
+   |
+   | / impl<T> ForeignLookupShape for Vec<T>
+   | | where
+   | |     T: ForeignLookupShape,
+   | |__________________________^
+
+error[E0277]: the trait bound `Vec<Wrapper>: ForeignLookupShape` is not satisfied
+  --> tests/ui/store/nested_ref_unsupported_nested_wrapper.rs:14:62
+   |
+14 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+   |                                                              ^^^^^ the trait `ForeignLookupShape` is not implemented for `Vec<Wrapper>`
+   |
+help: the trait `ForeignLookupShape` is implemented for `Vec<T>`
+  --> src/lib.rs
+   |
+   | / impl<T> ForeignLookupShape for Vec<T>
+   | | where
+   | |     T: ForeignLookupShape,
+   | |__________________________^
+   = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)

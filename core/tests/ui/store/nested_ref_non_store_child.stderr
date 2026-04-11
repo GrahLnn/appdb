@@ -45,3 +45,49 @@ help: the trait `Crud` is implemented for `ParentModel`
    = note: required for `PlainChild` to implement `Bridge`
    = note: required for `PlainChild` to implement `ForeignShape`
    = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `PlainChild: ResolveRecordId` is not satisfied
+  --> tests/ui/store/nested_ref_non_store_child.rs:10:62
+   |
+10 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+   |                                                              ^^^^^ unsatisfied trait bound
+   |
+help: the trait `ResolveRecordId` is not implemented for `PlainChild`
+  --> tests/ui/store/nested_ref_non_store_child.rs:6:1
+   |
+ 6 | struct PlainChild {
+   | ^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `ResolveRecordId`
+  --> tests/ui/store/nested_ref_non_store_child.rs:10:62
+   |
+10 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+   |                                                              ^^^^^ `ParentModel`
+   |
+  ::: src/model/meta.rs
+   |
+   | impl ResolveRecordId for RecordId {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `appdb::prelude::RecordId`
+...
+   | impl ResolveRecordId for &RecordId {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `&appdb::prelude::RecordId`
+   = note: required for `PlainChild` to implement `ForeignLookupShape`
+   = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `PlainChild: Crud` is not satisfied
+  --> tests/ui/store/nested_ref_non_store_child.rs:10:62
+   |
+10 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+   |                                                              ^^^^^ unsatisfied trait bound
+   |
+help: the trait `Crud` is not implemented for `PlainChild`
+  --> tests/ui/store/nested_ref_non_store_child.rs:6:1
+   |
+ 6 | struct PlainChild {
+   | ^^^^^^^^^^^^^^^^^
+help: the trait `Crud` is implemented for `ParentModel`
+  --> tests/ui/store/nested_ref_non_store_child.rs:10:62
+   |
+10 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+   |                                                              ^^^^^
+   = note: required for `PlainChild` to implement `ForeignLookupShape`
+   = note: this error originates in the derive macro `Store` (in Nightly builds, run with -Z macro-backtrace for more info)
