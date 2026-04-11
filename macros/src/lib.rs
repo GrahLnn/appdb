@@ -144,16 +144,6 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         ));
     }
 
-    if let Some(invalid_field) = named_fields.iter().find(|field| {
-        field_foreign_attr(field).ok().flatten().is_some() && has_unique_attr(&field.attrs)
-    }) {
-        let ident = invalid_field.ident.as_ref().expect("named field");
-        return Err(Error::new_spanned(
-            ident,
-            "#[foreign] fields cannot be used as #[unique] lookup keys",
-        ));
-    }
-
     if let Some(invalid_field) = named_fields.iter().find_map(|field| {
         field_relation_attr(field)
             .ok()
@@ -359,7 +349,6 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 let ident = field.ident.as_ref()?;
                 if ident == "id"
                     || secure_fields.iter().any(|secure| secure == ident)
-                    || foreign_fields.iter().any(|foreign| foreign.ident == *ident)
                     || relate_fields.iter().any(|relate| relate.ident == *ident)
                 {
                     None
@@ -392,6 +381,18 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         ));
     }
     let lookup_field_literals = lookup_fields.iter().map(|field| quote! { #field });
+    let resolve_lookup_field_value_arms = foreign_fields.iter().map(|field| {
+        let ident = &field.ident;
+        let field_name = ident.to_string();
+        let original_ty = &field.kind.original_ty;
+        quote! {
+            #field_name => Ok(::std::option::Option::Some(
+                ::surrealdb::types::SurrealValue::into_value(
+                    <#original_ty as ::appdb::ForeignLookupShape>::resolve_foreign_lookup_shape(&self.#ident).await?
+                )
+            )),
+        }
+    });
 
     let pagination_meta_impl = if let Some(field) = &pagin_field {
         let field_name = field.ident.to_string();
@@ -729,6 +730,20 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             fn foreign_fields() -> &'static [&'static str] {
                 &[ #( #foreign_field_literals ),* ]
             }
+
+            fn resolve_lookup_field_value(
+                &self,
+                field: &str,
+            ) -> impl ::std::future::Future<
+                Output = ::anyhow::Result<::std::option::Option<::surrealdb::types::Value>>
+            > {
+                async move {
+                    match field {
+                        #( #resolve_lookup_field_value_arms )*
+                        _ => Ok(::std::option::Option::None),
+                    }
+                }
+            }
         }
         #stored_model_impl
         #foreign_model_impl
@@ -940,6 +955,17 @@ fn derive_bridge_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStrea
         }
     });
 
+    let lookup_match_arms = payloads.iter().map(|variant| {
+        let variant_ident = &variant.variant_ident;
+        let payload_ty = &variant.payload_ty;
+
+        quote! {
+            Self::#variant_ident(value) => {
+                <#payload_ty as ::appdb::ForeignLookupShape>::resolve_foreign_lookup_shape(value).await
+            }
+        }
+    });
+
     Ok(quote! {
         #( #from_impls )*
 
@@ -960,6 +986,20 @@ fn derive_bridge_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStrea
                         "unsupported foreign table `{table}` for enum dispatcher `{}`",
                         ::std::stringify!(#enum_ident)
                     ),
+                }
+            }
+        }
+
+        impl ::appdb::ForeignLookupShape for #enum_ident {
+            type LookupStored = ::surrealdb::types::RecordId;
+
+            fn resolve_foreign_lookup_shape(
+                &self,
+            ) -> impl ::std::future::Future<Output = ::anyhow::Result<Self::LookupStored>> {
+                async move {
+                    match self {
+                        #( #lookup_match_arms, )*
+                    }
                 }
             }
         }

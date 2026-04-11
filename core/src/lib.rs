@@ -64,6 +64,17 @@ pub trait ForeignShape: Sized + Send {
     async fn hydrate_foreign_shape(stored: Self::Stored) -> anyhow::Result<Self>;
 }
 
+/// Read-only lookup seam for `#[foreign]` container shapes.
+pub trait ForeignLookupShape: Sized {
+    /// Stored representation used when matching a foreign-backed field in a lookup query.
+    type LookupStored: surrealdb::types::SurrealValue;
+
+    /// Resolves the caller-facing foreign shape into its lookup-time stored representation.
+    fn resolve_foreign_lookup_shape(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self::LookupStored>>;
+}
+
 /// Prepared relation-table writes for one `#[relate(...)]` field.
 #[derive(Debug, Clone)]
 pub struct RelationWrite {
@@ -914,6 +925,63 @@ where
             out.push(<T as ForeignShape>::hydrate_foreign_shape(value).await?);
         }
         Ok(out)
+    }
+}
+
+impl<T> ForeignLookupShape for T
+where
+    T: model::meta::ModelMeta
+        + model::meta::ResolveRecordId
+        + repository::Crud
+        + ForeignModel
+        + Clone
+        + Send
+        + Sync,
+{
+    type LookupStored = surrealdb::types::RecordId;
+
+    fn resolve_foreign_lookup_shape(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self::LookupStored>> {
+        let value = self.clone();
+        async move { value.resolve_record_id().await }
+    }
+}
+
+impl<T> ForeignLookupShape for Option<T>
+where
+    T: ForeignLookupShape,
+{
+    type LookupStored = Option<T::LookupStored>;
+
+    fn resolve_foreign_lookup_shape(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self::LookupStored>> {
+        async move {
+            match self {
+                Some(value) => Ok(Some(value.resolve_foreign_lookup_shape().await?)),
+                None => Ok(None),
+            }
+        }
+    }
+}
+
+impl<T> ForeignLookupShape for Vec<T>
+where
+    T: ForeignLookupShape,
+{
+    type LookupStored = Vec<T::LookupStored>;
+
+    fn resolve_foreign_lookup_shape(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self::LookupStored>> {
+        async move {
+            let mut out = Vec::with_capacity(self.len());
+            for value in self {
+                out.push(value.resolve_foreign_lookup_shape().await?);
+            }
+            Ok(out)
+        }
     }
 }
 

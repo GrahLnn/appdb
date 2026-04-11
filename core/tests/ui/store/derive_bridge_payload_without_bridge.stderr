@@ -1,3 +1,56 @@
+error[E0277]: the trait bound `PlainChild: ResolveRecordId` is not satisfied
+  --> tests/ui/store/derive_bridge_payload_without_bridge.rs:11:62
+   |
+11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Bridge)]
+   |                                                              ^^^^^^ unsatisfied trait bound
+   |
+help: the trait `ResolveRecordId` is not implemented for `PlainChild`
+  --> tests/ui/store/derive_bridge_payload_without_bridge.rs:7:1
+   |
+ 7 | struct PlainChild {
+   | ^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `ResolveRecordId`
+  --> src/model/meta.rs
+   |
+   | impl ResolveRecordId for RecordId {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `appdb::prelude::RecordId`
+...
+   | impl ResolveRecordId for &RecordId {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `&appdb::prelude::RecordId`
+   = note: required for `PlainChild` to implement `ForeignLookupShape`
+   = note: this error originates in the derive macro `Bridge` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `PlainChild: appdb::Crud` is not satisfied
+  --> tests/ui/store/derive_bridge_payload_without_bridge.rs:11:62
+   |
+11 | #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Bridge)]
+   |                                                              ^^^^^^ unsatisfied trait bound
+   |
+help: the trait `appdb::Crud` is not implemented for `PlainChild`
+  --> tests/ui/store/derive_bridge_payload_without_bridge.rs:7:1
+   |
+ 7 | struct PlainChild {
+   | ^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `ForeignLookupShape`
+  --> tests/ui/store/derive_bridge_payload_without_bridge.rs:11:62
+   |
+11 |   #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Bridge)]
+   |                                                                ^^^^^^ `Dispatcher`
+   |
+  ::: src/lib.rs
+   |
+   | / impl<T> ForeignLookupShape for Option<T>
+   | | where
+   | |     T: ForeignLookupShape,
+   | |__________________________^ `std::option::Option<T>`
+...
+   | / impl<T> ForeignLookupShape for Vec<T>
+   | | where
+   | |     T: ForeignLookupShape,
+   | |__________________________^ `Vec<T>`
+   = note: required for `PlainChild` to implement `ForeignLookupShape`
+   = note: this error originates in the derive macro `Bridge` (in Nightly builds, run with -Z macro-backtrace for more info)
+
 error[E0277]: the trait bound `PlainChild: Bridge` is not satisfied
   --> tests/ui/store/derive_bridge_payload_without_bridge.rs:11:62
    |

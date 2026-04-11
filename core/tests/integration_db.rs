@@ -472,6 +472,20 @@ struct ItLookupTarget {
     code: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct ItForeignOnlyLookup {
+    #[foreign]
+    child: ItLookupTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct ItForeignUniqueLookup {
+    id: Id,
+    #[foreign]
+    #[unique]
+    child: ItLookupTarget,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store, Sensitive)]
 struct ItSensitiveProfile {
     id: Id,
@@ -3913,6 +3927,137 @@ fn store_auto_lookup_falls_back_to_non_id_fields() {
 }
 
 #[test]
+fn store_auto_lookup_resolves_foreign_only_models_through_record_ids() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItForeignOnlyLookup>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItLookupTarget>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let child = Repo::<ItLookupTarget>::create(ItLookupTarget {
+            code: "foreign-only-target".to_owned(),
+        })
+        .await
+        .expect("foreign child create should succeed");
+
+        Repo::<ItForeignOnlyLookup>::create(ItForeignOnlyLookup {
+            child: child.clone(),
+        })
+        .await
+        .expect("foreign-only parent create should succeed");
+
+        assert_eq!(ItForeignOnlyLookup::lookup_fields(), &["child"]);
+
+        let id = Repo::<ItForeignOnlyLookup>::find_unique_id_for(&ItForeignOnlyLookup {
+            child: ItLookupTarget {
+                code: "foreign-only-target".to_owned(),
+            },
+        })
+        .await
+        .expect("foreign-only lookup should resolve through child record id");
+
+        let loaded = Repo::<ItForeignOnlyLookup>::get_record(id)
+            .await
+            .expect("get_record should succeed");
+        assert_eq!(loaded.child.code, child.code);
+    });
+}
+
+#[test]
+fn store_auto_lookup_uses_unique_foreign_fields() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItForeignUniqueLookup>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItLookupTarget>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let child = Repo::<ItLookupTarget>::create(ItLookupTarget {
+            code: "foreign-unique-target".to_owned(),
+        })
+        .await
+        .expect("foreign child create should succeed");
+
+        let saved = Repo::<ItForeignUniqueLookup>::save(ItForeignUniqueLookup {
+            id: Id::from("foreign-unique-parent"),
+            child: child.clone(),
+        })
+        .await
+        .expect("save should succeed");
+
+        assert_eq!(ItForeignUniqueLookup::lookup_fields(), &["child"]);
+
+        let id = Repo::<ItForeignUniqueLookup>::find_unique_id_for(&ItForeignUniqueLookup {
+            id: Id::from("ignored"),
+            child: ItLookupTarget {
+                code: "foreign-unique-target".to_owned(),
+            },
+        })
+        .await
+        .expect("unique foreign lookup should resolve through child record id");
+
+        assert_eq!(id, saved.id());
+    });
+}
+
+#[test]
+fn store_auto_lookup_for_foreign_fields_does_not_create_missing_children() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        let bootstrap_child = Repo::<ItLookupTarget>::create(ItLookupTarget {
+            code: "foreign-missing-bootstrap".to_owned(),
+        })
+        .await
+        .expect("bootstrap child create should succeed");
+        Repo::<ItForeignOnlyLookup>::create(ItForeignOnlyLookup {
+            child: bootstrap_child,
+        })
+        .await
+        .expect("bootstrap parent create should succeed");
+
+        Repo::<ItForeignOnlyLookup>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+        Repo::<ItLookupTarget>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        let err = Repo::<ItForeignOnlyLookup>::find_unique_id_for(&ItForeignOnlyLookup {
+            child: ItLookupTarget {
+                code: "missing-foreign-child".to_owned(),
+            },
+        })
+        .await
+        .expect_err("missing foreign child should not resolve");
+
+        assert!(err.to_string().contains("Record not found"), "{err}");
+        assert!(
+            Repo::<ItLookupTarget>::list_record_ids()
+                .await
+                .expect("list_record_ids should succeed")
+                .is_empty()
+        );
+        assert!(
+            Repo::<ItForeignOnlyLookup>::list_record_ids()
+                .await
+                .expect("list_record_ids should succeed")
+                .is_empty()
+        );
+    });
+}
+
+#[test]
 fn store_auto_lookup_errors_when_match_is_not_unique() {
     let _guard = acquire_test_lock();
     run_async(async {
@@ -6496,11 +6641,8 @@ fn back_relate_fields_roundtrip_through_create() {
             load_back_relate_edges("it_back_relate_optional", "back-relate-create-root").await;
         let item_edges =
             load_back_relate_edges("it_back_relate_many", "back-relate-create-root").await;
-        let maybe_item_edges = load_back_relate_edges(
-            "it_back_relate_optional_many",
-            "back-relate-create-root",
-        )
-        .await;
+        let maybe_item_edges =
+            load_back_relate_edges("it_back_relate_optional_many", "back-relate-create-root").await;
 
         assert_eq!(created, input);
         assert_eq!(loaded, input);

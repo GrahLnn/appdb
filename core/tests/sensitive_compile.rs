@@ -4,6 +4,8 @@ fn sensitive_macro_rules_are_enforced() {
     tests.pass("tests/ui/store/impl_schema_expr_surface.rs");
     tests.pass("tests/ui/store/nested_ref_supported_shapes.rs");
     tests.pass("tests/ui/store/nested_ref_public_foreign.rs");
+    tests.pass("tests/ui/store/nested_ref_foreign_only_lookup_supported.rs");
+    tests.pass("tests/ui/store/nested_ref_foreign_unique_supported.rs");
     tests.pass("tests/ui/store/relate_field_supported_shapes.rs");
     tests.pass("tests/ui/store/back_relate_field_supported_shapes.rs");
     tests.pass("tests/ui/store/relation_supported_shapes.rs");
@@ -19,7 +21,6 @@ fn sensitive_macro_rules_are_enforced() {
     tests.compile_fail("tests/ui/store/relate_field_unique_rejected.rs");
     tests.compile_fail("tests/ui/store/relate_field_duplicate_relation_rejected.rs");
     tests.compile_fail("tests/ui/store/nested_ref_legacy_attr_rejected.rs");
-    tests.compile_fail("tests/ui/store/nested_ref_foreign_unique_rejected.rs");
     tests.compile_fail("tests/ui/store/table_as_duplicate_rejected.rs");
     tests.compile_fail("tests/ui/store/table_as_invalid_target_rejected.rs");
     tests.compile_fail("tests/ui/store/pagin_field_option_rejected.rs");

@@ -96,6 +96,8 @@ Every `Sensitive` model also exposes stable secure-field metadata through `Model
 
 Use `#[foreign]` on supported child model fields to persist related values as record links while hydrating them back into full models when reading.
 
+Foreign-backed fields also participate in automatic Store lookup by resolving the caller-facing child value into its stored `RecordId` shape before querying.
+
 Supported shapes include:
 
 - `Child`
