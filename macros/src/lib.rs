@@ -16,10 +16,28 @@ pub fn derive_sensitive(input: TokenStream) -> TokenStream {
 
 #[proc_macro_derive(
     Store,
-    attributes(unique, secure, foreign, table_as, crypto, relate, back_relate, pagin)
+    attributes(
+        unique,
+        secure,
+        foreign,
+        table_as,
+        crypto,
+        relate,
+        back_relate,
+        pagin,
+        fill
+    )
 )]
 pub fn derive_store(input: TokenStream) -> TokenStream {
     match derive_store_impl(parse_macro_input!(input as DeriveInput)) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_derive(View, attributes(view))]
+pub fn derive_view(input: TokenStream) -> TokenStream {
+    match derive_view_impl(parse_macro_input!(input as DeriveInput)) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }
@@ -97,6 +115,15 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         ));
     }
     let pagin_field = pagin_fields.first().cloned();
+
+    let fill_fields = named_fields
+        .iter()
+        .filter_map(|field| match field_fill_attr(field) {
+            Ok(Some(attr)) => Some(parse_fill_field(field, attr)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
 
     if id_fields.len() > 1 {
         return Err(Error::new_spanned(
@@ -230,6 +257,61 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 "#[pagin] cannot be combined with {}",
                 relation_attr_label(invalid_field.1)
             ),
+        ));
+    }
+
+    if let Some(invalid_field) = named_fields.iter().find_map(|field| {
+        field_fill_attr(field)
+            .ok()
+            .flatten()
+            .filter(|_| has_secure_attr(&field.attrs))
+            .map(|attr| (field, attr))
+    }) {
+        let ident = invalid_field.0.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            "#[fill(...)] fields cannot be marked #[secure]",
+        ));
+    }
+
+    if let Some(invalid_field) = named_fields.iter().find_map(|field| {
+        field_fill_attr(field)
+            .ok()
+            .flatten()
+            .filter(|_| field_foreign_attr(field).ok().flatten().is_some())
+            .map(|attr| (field, attr))
+    }) {
+        let ident = invalid_field.0.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            "#[fill(...)] cannot be combined with #[foreign]",
+        ));
+    }
+
+    if let Some(invalid_field) = named_fields.iter().find_map(|field| {
+        field_fill_attr(field)
+            .ok()
+            .flatten()
+            .and_then(|_| field_relation_attr(field).ok().flatten())
+            .map(|attr| (field, attr))
+    }) {
+        let ident = invalid_field.0.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            format!(
+                "#[fill(...)] cannot be combined with {}",
+                relation_attr_label(invalid_field.1)
+            ),
+        ));
+    }
+
+    if let Some(invalid_field) = named_fields.iter().find(|field| {
+        is_autofill_type(&field.ty) && field_fill_attr(field).ok().flatten().is_none()
+    }) {
+        let ident = invalid_field.ident.as_ref().expect("named field");
+        return Err(Error::new_spanned(
+            ident,
+            "appdb::AutoFill fields require #[fill(...)]",
         ));
     }
 
@@ -500,6 +582,15 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
     });
 
+    let fill_assignments = fill_fields.iter().map(|field| {
+        let ident = &field.ident;
+        match field.provider {
+            FillProvider::Now => quote! {
+                value.#ident.fill_now_if_pending();
+            },
+        }
+    });
+
     let decode_foreign_fields = foreign_fields.iter().map(|field| {
         let ident = field.ident.to_string();
         quote! {
@@ -613,6 +704,8 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         quote! {
             impl ::appdb::ForeignModel for #struct_ident {
                 async fn persist_foreign(value: Self) -> ::anyhow::Result<Self::Stored> {
+                    let mut value = value;
+                    #( #fill_assignments )*
                     <Self as ::appdb::StoredModel>::into_stored(value)
                 }
 
@@ -660,7 +753,8 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 
             impl ::appdb::ForeignModel for #struct_ident {
                 async fn persist_foreign(value: Self) -> ::anyhow::Result<Self::Stored> {
-                    let value = value;
+                    let mut value = value;
+                    #( #fill_assignments )*
                     Ok(#stored_struct_ident {
                         #( #into_stored_assignments, )*
                     })
@@ -779,8 +873,8 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 ::appdb::repository::Repo::<Self>::get(id).await
             }
 
-            pub async fn list() -> ::anyhow::Result<::std::vec::Vec<Self>> {
-                ::appdb::repository::Repo::<Self>::list().await
+            pub fn list() -> ::appdb::repository::ListQuery<Self> {
+                ::appdb::repository::Repo::<Self>::list()
             }
 
             pub async fn list_limit(count: i64) -> ::anyhow::Result<::std::vec::Vec<Self>> {
@@ -898,6 +992,158 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 T: Send,
             {
                 ::appdb::repository::Repo::<Self>::delete(id).await
+            }
+        }
+    })
+}
+
+fn derive_view_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let struct_ident = input.ident;
+    let vis = input.vis.clone();
+    let source_ty = view_source_target(&input.attrs)?;
+
+    let named_fields = match input.data {
+        Data::Struct(data) => match data.fields {
+            Fields::Named(fields) => fields.named,
+            _ => {
+                return Err(Error::new_spanned(
+                    struct_ident,
+                    "View can only be derived for structs with named fields",
+                ));
+            }
+        },
+        _ => {
+            return Err(Error::new_spanned(
+                struct_ident,
+                "View can only be derived for structs",
+            ));
+        }
+    };
+
+    let stored_struct_ident = format_ident!("AppdbStoredView{}", struct_ident);
+    let view_fields = named_fields
+        .iter()
+        .map(|field| field.ident.as_ref().expect("named field").to_string())
+        .collect::<Vec<_>>();
+    let view_field_literals = view_fields.iter().map(|field| quote! { #field });
+    let nested_view_fields = named_fields
+        .iter()
+        .filter_map(|field| match field_view_nested_attr(field) {
+            Ok(true) => Some(Ok(field.ident.as_ref().expect("named field").to_string())),
+            Ok(false) => None,
+            Err(err) => Some(Err(err)),
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+    let nested_view_field_literals = nested_view_fields.iter().map(|field| quote! { #field });
+
+    let stored_fields = named_fields
+        .iter()
+        .map(|field| {
+            let ident = field.ident.clone().expect("named field");
+            let ty = view_stored_type(field)?;
+            if is_record_id_type(&ty) {
+                Ok(quote! {
+                    #[serde(deserialize_with = "::appdb::serde_utils::id::deserialize_record_id_or_compat_string")]
+                    #ident: #ty
+                })
+            } else {
+                Ok(quote! { #ident: #ty })
+            }
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+
+    let hydrate_assignments = named_fields.iter().map(|field| {
+        let ident = field.ident.clone().expect("named field");
+        let ty = field.ty.clone();
+        if nested_view_fields.contains(&ident.to_string()) {
+            quote! {
+                #ident: <#ty as ::appdb::ViewShape>::hydrate_view_shape(stored.#ident).await?
+            }
+        } else {
+            quote! {
+                #ident: stored.#ident
+            }
+        }
+    });
+
+    Ok(quote! {
+        #[derive(
+            Debug,
+            Clone,
+            ::serde::Serialize,
+            ::serde::Deserialize,
+            ::surrealdb::types::SurrealValue,
+        )]
+        #vis struct #stored_struct_ident {
+            #( #stored_fields, )*
+        }
+
+        #[::async_trait::async_trait]
+        impl ::appdb::model::meta::ViewMeta for #struct_ident {
+            type Source = #source_ty;
+            type Stored = #stored_struct_ident;
+
+            fn view_fields() -> &'static [&'static str] {
+                &[ #( #view_field_literals ),* ]
+            }
+
+            fn nested_view_fields() -> &'static [&'static str] {
+                &[ #( #nested_view_field_literals ),* ]
+            }
+
+            fn decode_stored_view_row(
+                row: ::serde_json::Value,
+            ) -> ::anyhow::Result<Self::Stored> {
+                Ok(::serde_json::from_value(row)?)
+            }
+
+            async fn hydrate_view(stored: Self::Stored) -> ::anyhow::Result<Self> {
+                Ok(Self {
+                    #( #hydrate_assignments, )*
+                })
+            }
+        }
+
+        #[::async_trait::async_trait]
+        impl ::appdb::ViewShape for #struct_ident {
+            type Stored = ::surrealdb::types::RecordId;
+
+            async fn hydrate_view_shape(stored: Self::Stored) -> ::anyhow::Result<Self> {
+                ::appdb::repository::ViewRepo::<Self>::get_record(stored).await
+            }
+        }
+
+        impl #struct_ident {
+            pub fn list() -> ::appdb::repository::ViewListQuery<Self> {
+                ::appdb::repository::ViewRepo::<Self>::list()
+            }
+
+            pub async fn get<T>(id: T) -> ::anyhow::Result<Self>
+            where
+                ::surrealdb::types::RecordIdKey: ::std::convert::From<T>,
+                T: Send,
+            {
+                ::appdb::repository::ViewRepo::<Self>::get(id).await
+            }
+
+            pub async fn get_record(
+                id: ::surrealdb::types::RecordId,
+            ) -> ::anyhow::Result<Self> {
+                ::appdb::repository::ViewRepo::<Self>::get_record(id).await
+            }
+
+            pub async fn find_one(
+                k: &str,
+                v: &str,
+            ) -> ::anyhow::Result<Self> {
+                ::appdb::repository::ViewRepo::<Self>::find_one(k, v).await
+            }
+
+            pub async fn find_one_id(
+                k: &str,
+                v: &str,
+            ) -> ::anyhow::Result<::surrealdb::types::RecordId> {
+                ::appdb::repository::ViewRepo::<Self>::find_one_id(k, v).await
             }
         }
     })
@@ -1491,6 +1737,73 @@ fn table_alias_target(attrs: &[Attribute]) -> syn::Result<Option<Type>> {
     Ok(target)
 }
 
+fn view_source_target(attrs: &[Attribute]) -> syn::Result<Type> {
+    let mut target = None;
+
+    for attr in attrs {
+        if !attr.path().is_ident("view") {
+            continue;
+        }
+
+        if target.is_some() {
+            return Err(Error::new_spanned(
+                attr,
+                "duplicate #[view(...)] attribute is not supported",
+            ));
+        }
+
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("source") {
+                let value = meta.value()?;
+                let parsed: Type = value.parse()?;
+                match parsed {
+                    Type::Path(TypePath { ref path, .. }) if !path.segments.is_empty() => {
+                        target = Some(parsed);
+                        Ok(())
+                    }
+                    _ => Err(Error::new_spanned(
+                        parsed,
+                        "#[view(source = ...)] source must be a type path",
+                    )),
+                }
+            } else {
+                Err(meta.error("unsupported view attribute; expected `source = Type`"))
+            }
+        })?;
+    }
+
+    target.ok_or_else(|| {
+        Error::new(
+            proc_macro2::Span::call_site(),
+            "View requires #[view(source = SourceStoreType)]",
+        )
+    })
+}
+
+fn field_view_nested_attr(field: &Field) -> syn::Result<bool> {
+    let mut is_nested = false;
+
+    for attr in &field.attrs {
+        if !attr.path().is_ident("view") {
+            continue;
+        }
+
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("nested") {
+                if is_nested {
+                    return Err(meta.error("duplicate #[view(nested)] marker is not supported"));
+                }
+                is_nested = true;
+                Ok(())
+            } else {
+                Err(meta.error("unsupported view field attribute; expected #[view(nested)]"))
+            }
+        })?;
+    }
+
+    Ok(is_nested)
+}
+
 fn resolved_schema_table_name(struct_ident: &syn::Ident, table_alias: Option<&Type>) -> String {
     match table_alias {
         Some(Type::Path(type_path)) => type_path
@@ -1567,6 +1880,27 @@ fn field_pagin_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
     Ok(pagin_attr)
 }
 
+fn field_fill_attr(field: &Field) -> syn::Result<Option<&Attribute>> {
+    let mut fill_attr = None;
+
+    for attr in &field.attrs {
+        if !attr.path().is_ident("fill") {
+            continue;
+        }
+
+        if fill_attr.is_some() {
+            return Err(Error::new_spanned(
+                attr,
+                "duplicate #[fill(...)] attribute is not supported",
+            ));
+        }
+
+        fill_attr = Some(attr);
+    }
+
+    Ok(fill_attr)
+}
+
 fn validate_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
     if attr.path().is_ident("foreign") {
         return foreign_leaf_type(&field.ty)
@@ -1585,10 +1919,17 @@ const RELATE_ACCEPTED_SHAPES: &str = "relation-backed fields support Child / Opt
 
 const PAGIN_ACCEPTED_SHAPES: &str = "#[pagin] supports direct scalar fields plus Id/RecordId; Option<_> and Vec<_> wrappers are not supported";
 
+const FILL_ACCEPTED_SHAPES: &str = "#[fill(...)] fields must use appdb::AutoFill";
+
 #[derive(Clone, Copy)]
 enum RelationFieldDirection {
     Outgoing,
     Incoming,
+}
+
+#[derive(Clone, Copy)]
+enum FillProvider {
+    Now,
 }
 
 impl RelationFieldDirection {
@@ -1683,6 +2024,12 @@ struct PaginField {
     ident: syn::Ident,
 }
 
+#[derive(Clone)]
+struct FillField {
+    ident: syn::Ident,
+    provider: FillProvider,
+}
+
 fn parse_foreign_field(field: &Field, attr: &Attribute) -> syn::Result<ForeignField> {
     validate_foreign_field(field, attr)?;
     let ident = field.ident.clone().expect("named field");
@@ -1734,6 +2081,14 @@ fn parse_pagin_field(field: &Field, attr: &Attribute) -> syn::Result<PaginField>
     })
 }
 
+fn parse_fill_field(field: &Field, attr: &Attribute) -> syn::Result<FillField> {
+    let provider = validate_fill_field(field, attr)?;
+    Ok(FillField {
+        ident: field.ident.clone().expect("named field"),
+        provider,
+    })
+}
+
 fn validate_relate_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
     if !attr.path().is_ident("relate") && !attr.path().is_ident("back_relate") {
         return Err(Error::new_spanned(attr, "unsupported relate attribute"));
@@ -1754,6 +2109,36 @@ fn validate_pagin_field(field: &Field, attr: &Attribute) -> syn::Result<Type> {
     }
 
     Ok(field.ty.clone())
+}
+
+fn validate_fill_field(field: &Field, attr: &Attribute) -> syn::Result<FillProvider> {
+    if !attr.path().is_ident("fill") {
+        return Err(Error::new_spanned(attr, "unsupported fill attribute"));
+    }
+
+    if !is_autofill_type(&field.ty) {
+        return Err(Error::new_spanned(&field.ty, FILL_ACCEPTED_SHAPES));
+    }
+
+    parse_fill_provider(attr)
+}
+
+fn parse_fill_provider(attr: &Attribute) -> syn::Result<FillProvider> {
+    let provider = attr.parse_args::<syn::Path>().map_err(|_| {
+        Error::new_spanned(
+            attr,
+            "#[fill(...)] requires exactly one provider like #[fill(now)]",
+        )
+    })?;
+
+    if provider.is_ident("now") {
+        Ok(FillProvider::Now)
+    } else {
+        Err(Error::new_spanned(
+            attr,
+            "unsupported fill provider; expected #[fill(now)]",
+        ))
+    }
 }
 
 fn relate_leaf_type(ty: &Type) -> Option<&TypePath> {
@@ -1787,6 +2172,7 @@ fn pagination_leaf_type(ty: &Type) -> Option<Type> {
 
     if is_id_type(ty)
         || is_record_id_type(ty)
+        || is_autofill_type(ty)
         || is_string_type(ty)
         || is_common_non_store_leaf_type(ty)
     {
@@ -1850,6 +2236,55 @@ fn stored_field_type(field: &Field, foreign_fields: &[ForeignField]) -> Type {
     }
 }
 
+fn view_stored_type(field: &Field) -> syn::Result<Type> {
+    if field_view_nested_attr(field)? {
+        view_record_shape_type(&field.ty).ok_or_else(|| {
+            Error::new_spanned(
+                &field.ty,
+                "#[view(nested)] fields must be a View type, Option<View>, Vec<View>, or nested Option/Vec wrappers",
+            )
+        })
+    } else {
+        Ok(field.ty.clone())
+    }
+}
+
+fn view_record_shape_type(ty: &Type) -> Option<Type> {
+    if let Some(inner) = option_inner_type(ty) {
+        let inner = view_record_shape_type(inner)?;
+        return Some(syn::parse_quote!(::std::option::Option<#inner>));
+    }
+
+    if let Some(inner) = vec_inner_type(ty) {
+        let inner = view_record_shape_type(inner)?;
+        return Some(syn::parse_quote!(::std::vec::Vec<#inner>));
+    }
+
+    view_leaf_type(ty).map(|_| syn::parse_quote!(::surrealdb::types::RecordId))
+}
+
+fn view_leaf_type(ty: &Type) -> Option<&TypePath> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    let segment = type_path.path.segments.last()?;
+    if !matches!(segment.arguments, PathArguments::None) {
+        return None;
+    }
+
+    if is_id_type(ty)
+        || is_record_id_type(ty)
+        || is_autofill_type(ty)
+        || is_string_type(ty)
+        || is_common_non_store_leaf_type(ty)
+    {
+        return None;
+    }
+
+    Some(type_path)
+}
+
 fn foreign_stored_type(ty: &Type) -> Option<Type> {
     if let Some(inner) = option_inner_type(ty) {
         let inner = foreign_stored_type(inner)?;
@@ -1903,7 +2338,11 @@ fn direct_store_child_type(ty: &Type) -> Option<&TypePath> {
         return None;
     }
 
-    if is_id_type(ty) || is_string_type(ty) || is_common_non_store_leaf_type(ty) {
+    if is_id_type(ty)
+        || is_autofill_type(ty)
+        || is_string_type(ty)
+        || is_common_non_store_leaf_type(ty)
+    {
         return None;
     }
 
@@ -2108,6 +2547,16 @@ fn is_id_type(ty: &Type) -> bool {
             let ident = segment.ident.to_string();
             ident == "Id"
         }),
+        _ => false,
+    }
+}
+
+fn is_autofill_type(ty: &Type) -> bool {
+    match ty {
+        Type::Path(TypePath { path, .. }) => path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "AutoFill"),
         _ => false,
     }
 }

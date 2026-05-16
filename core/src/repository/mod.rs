@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, pin::Pin};
 
 mod relation_sync;
 
@@ -11,7 +11,9 @@ use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Table, Value as Surr
 
 use crate::connection::get_db;
 use crate::error::{DBError, DBErrorKind, classify_db_error_text};
-use crate::model::meta::{HasId, ModelMeta, PaginationMeta, ResolveRecordId, UniqueLookupMeta};
+use crate::model::meta::{
+    HasId, ModelMeta, PaginationMeta, ResolveRecordId, UniqueLookupMeta, ViewMeta,
+};
 use crate::pagination::PaginationPlan;
 use crate::query::builder::{Order, QueryKind};
 use crate::query::{RawSqlStmt, query_bound, query_bound_checked};
@@ -443,6 +445,282 @@ where
     Ok(values)
 }
 
+fn decode_view_row_error<V>(row: Value, err: anyhow::Error) -> anyhow::Error
+where
+    V: ViewMeta,
+{
+    let classified = classify_db_error_text(format!(
+        "failed to decode view `{}` over `{}` row: {err}; row={row}",
+        std::any::type_name::<V>(),
+        V::source_table()
+    ));
+    debug_assert_eq!(classified.kind, DBErrorKind::Decode);
+    classified.into_db_error().into()
+}
+
+async fn raw_rows_to_views<V>(rows: Vec<SurrealDbValue>) -> Result<Vec<V>>
+where
+    V: ViewMeta,
+{
+    let mut values = Vec::with_capacity(rows.len());
+    for row in rows {
+        values.push(decode_view_row::<V>(row.into_json_value()).await?);
+    }
+    Ok(values)
+}
+
+fn exactly_one_lookup_id<M>(ids: Vec<RecordId>, field: &str, value: &str) -> Result<RecordId> {
+    match ids.len() {
+        0 => Err(DBError::NotFound.into()),
+        1 => Ok(ids
+            .into_iter()
+            .next()
+            .expect("length checked before single lookup id extraction")),
+        _ => Err(DBError::InvalidModel(format!(
+            "`find_one` for `{}` by `{field}` = `{value}` matched multiple records",
+            std::any::type_name::<M>()
+        ))
+        .into()),
+    }
+}
+
+async fn decode_view_row<V>(mut row: Value) -> Result<V>
+where
+    V: ViewMeta,
+{
+    if let Value::Object(map) = &mut row {
+        for field in V::nested_view_fields() {
+            if let Some(value) = map.get_mut(*field) {
+                crate::decode_stored_record_links(value);
+            }
+        }
+    }
+    normalize_public_output_ids(&mut row);
+    let stored = V::decode_stored_view_row(row.clone())
+        .map_err(|err| decode_view_row_error::<V>(row, err))?;
+    V::hydrate_view(stored).await
+}
+
+/// Lazy list query surface that can either execute immediately or be refined
+/// into an ordered scan before awaiting.
+#[must_use = "list queries do nothing until awaited"]
+pub struct ListQuery<T>(PhantomData<T>);
+
+impl<T> ListQuery<T> {
+    fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> ListQuery<T>
+where
+    T: ModelMeta + StoredModel + ForeignModel + PaginationMeta,
+{
+    /// Orders the full list by `id` or the declared `#[pagin]` field.
+    pub fn order_by(self, field: impl Into<String>, order: Order) -> OrderedListQuery<T> {
+        OrderedListQuery {
+            field: field.into(),
+            order,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> std::future::IntoFuture for ListQuery<T>
+where
+    T: ModelMeta + StoredModel + ForeignModel,
+{
+    type Output = Result<Vec<T>>;
+    type IntoFuture = Pin<Box<dyn std::future::Future<Output = Self::Output> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move { Repo::<T>::list_all().await })
+    }
+}
+
+/// Ordered full-table scan produced from [`ListQuery::order_by`].
+#[must_use = "ordered list queries do nothing until awaited"]
+pub struct OrderedListQuery<T> {
+    field: String,
+    order: Order,
+    _marker: PhantomData<T>,
+}
+
+impl<T> std::future::IntoFuture for OrderedListQuery<T>
+where
+    T: ModelMeta + StoredModel + ForeignModel + PaginationMeta,
+{
+    type Output = Result<Vec<T>>;
+    type IntoFuture = Pin<Box<dyn std::future::Future<Output = Self::Output> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move { Repo::<T>::list_ordered(&self.field, self.order).await })
+    }
+}
+
+/// Lazy read-only View list query surface.
+#[must_use = "view list queries do nothing until awaited"]
+pub struct ViewListQuery<V>(PhantomData<V>);
+
+impl<V> ViewListQuery<V> {
+    fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<V> ViewListQuery<V>
+where
+    V: ViewMeta,
+{
+    /// Orders a View list by `id`, a declared view field, or the source `#[pagin]` field.
+    pub fn order_by(self, field: impl Into<String>, order: Order) -> ViewOrderedListQuery<V> {
+        ViewOrderedListQuery {
+            field: field.into(),
+            order,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<V> std::future::IntoFuture for ViewListQuery<V>
+where
+    V: ViewMeta,
+{
+    type Output = Result<Vec<V>>;
+    type IntoFuture = Pin<Box<dyn std::future::Future<Output = Self::Output> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move { ViewRepo::<V>::list_all().await })
+    }
+}
+
+/// Ordered projected scan produced from [`ViewListQuery::order_by`].
+#[must_use = "ordered view list queries do nothing until awaited"]
+pub struct ViewOrderedListQuery<V> {
+    field: String,
+    order: Order,
+    _marker: PhantomData<V>,
+}
+
+impl<V> std::future::IntoFuture for ViewOrderedListQuery<V>
+where
+    V: ViewMeta,
+{
+    type Output = Result<Vec<V>>;
+    type IntoFuture = Pin<Box<dyn std::future::Future<Output = Self::Output> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move { ViewRepo::<V>::list_ordered(&self.field, self.order).await })
+    }
+}
+
+/// Internal repository building blocks for read-only View projections.
+pub struct ViewRepo<V>(PhantomData<V>);
+
+impl<V> ViewRepo<V>
+where
+    V: ViewMeta,
+{
+    fn validate_view_order_field(field: &str) -> Result<&str> {
+        if field == "id" || V::view_fields().contains(&field) {
+            return Ok(field);
+        }
+
+        match V::source_pagination_field() {
+            Some(pagination_field) if pagination_field == field => Ok(field),
+            Some(pagination_field) => Err(DBError::InvalidModel(format!(
+                "view `{}` only supports ordered list by `id`, declared view fields, or source #[pagin] field `{pagination_field}`, got `{field}`",
+                std::any::type_name::<V>()
+            ))
+            .into()),
+            None => Err(DBError::InvalidModel(format!(
+                "view `{}` only supports ordered list by `id` or declared view fields, got `{field}`",
+                std::any::type_name::<V>()
+            ))
+            .into()),
+        }
+    }
+
+    /// Starts a projected list query that can be ordered before awaiting.
+    pub fn list() -> ViewListQuery<V> {
+        ViewListQuery::new()
+    }
+
+    /// Lists every row projected to the View's declared fields.
+    async fn list_all() -> Result<Vec<V>> {
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::view_all(V::view_fields()))
+            .bind(("table", Table::from(V::source_table())))
+            .await?
+            .check()?;
+        let rows: Vec<SurrealDbValue> = result.take(0)?;
+        raw_rows_to_views::<V>(rows).await
+    }
+
+    /// Lists every projected row ordered by an allowed field.
+    pub async fn list_ordered(field: &str, order: Order) -> Result<Vec<V>> {
+        let field = Self::validate_view_order_field(field)?;
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::view_all_by_order(
+                order,
+                field,
+                V::view_fields(),
+            ))
+            .bind(("table", Table::from(V::source_table())))
+            .await?
+            .check()?;
+        let rows: Vec<SurrealDbValue> = result.take(1)?;
+        raw_rows_to_views::<V>(rows).await
+    }
+
+    /// Fetches one projected row by table-local id key.
+    pub async fn get<K>(id: K) -> Result<V>
+    where
+        RecordIdKey: From<K>,
+        K: Send,
+    {
+        let record = RecordId::new(V::source_table(), id);
+        Self::get_record(record).await
+    }
+
+    /// Fetches one projected row by full record id.
+    pub async fn get_record(record: RecordId) -> Result<V> {
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::view_by_id(V::view_fields()))
+            .bind(("record", record))
+            .await?
+            .check()?;
+        let row: Option<SurrealDbValue> = result.take(0)?;
+        match row {
+            Some(row) => decode_view_row::<V>(row.into_json_value()).await,
+            None => Err(DBError::NotFound.into()),
+        }
+    }
+
+    /// Finds one matching source row and returns it as this View.
+    pub async fn find_one(k: &str, v: &str) -> Result<V> {
+        let id = Self::find_one_id(k, v).await?;
+        Self::get_record(id).await
+    }
+
+    /// Finds exactly one source record id matching a field equality filter.
+    pub async fn find_one_id(k: &str, v: &str) -> Result<RecordId> {
+        let db = get_db()?;
+        let ids: Vec<RecordId> = db
+            .query(QueryKind::select_id_single(V::source_table()))
+            .bind(("table", Table::from(V::source_table())))
+            .bind(("k", k.to_owned()))
+            .bind(("v", v.to_owned()))
+            .await?
+            .check()?
+            .take(0)?;
+        exactly_one_lookup_id::<V>(ids, k, v)
+    }
+}
+
 /// Internal repository building blocks for a model type.
 ///
 /// This type remains public for advanced integration seams and mission-internal
@@ -454,6 +732,29 @@ impl<T> Repo<T>
 where
     T: ModelMeta + StoredModel + ForeignModel,
 {
+    fn validate_list_order_field(field: &str) -> Result<&str>
+    where
+        T: PaginationMeta,
+    {
+        if field == "id" {
+            return Ok(field);
+        }
+
+        match T::pagination_field() {
+            Some(pagination_field) if pagination_field == field => Ok(field),
+            Some(pagination_field) => Err(DBError::InvalidModel(format!(
+                "model `{}` only supports ordered list by `id` or its #[pagin] field `{pagination_field}`, got `{field}`",
+                std::any::type_name::<T>()
+            ))
+            .into()),
+            None => Err(DBError::InvalidModel(format!(
+                "model `{}` does not declare a #[pagin] field, so ordered list only supports `id`, got `{field}`",
+                std::any::type_name::<T>()
+            ))
+            .into()),
+        }
+    }
+
     /// Creates a new row in the model table.
     /// Creates a new row in the model table.
     pub async fn create(data: T) -> Result<T> {
@@ -780,7 +1081,7 @@ where
         Ok(())
     }
 
-    /// Finds the first record id matching a field equality filter.
+    /// Finds exactly one record id matching a field equality filter.
     pub async fn find_one_id(k: &str, v: &str) -> Result<RecordId> {
         let db = get_db()?;
         let ids: Vec<RecordId> = db
@@ -791,8 +1092,7 @@ where
             .await?
             .check()?
             .take(0)?;
-        let id = ids.into_iter().next();
-        id.ok_or(DBError::NotFound.into())
+        exactly_one_lookup_id::<T>(ids, k, v)
     }
 
     /// Lists all record ids in the model table.
@@ -952,7 +1252,7 @@ where
 
     /// Lists all rows with a normalized `id` field.
     /// Lists all rows with normalized `id` values.
-    pub async fn list() -> Result<Vec<T>> {
+    async fn list_all() -> Result<Vec<T>> {
         if T::has_foreign_fields() || T::has_relation_fields() {
             let db = get_db()?;
             let mut result = db
@@ -971,6 +1271,33 @@ where
             .await?
             .check()?;
         let rows: Vec<T::Stored> = result.take(0)?;
+        stored_rows_to_public_hydrated::<T>(rows).await
+    }
+
+    /// Starts a full-table list query that can be ordered before awaiting.
+    pub fn list() -> ListQuery<T> {
+        ListQuery::new()
+    }
+
+    /// Lists every row ordered by `id` or the declared `#[pagin]` field.
+    pub async fn list_ordered(field: &str, order: Order) -> Result<Vec<T>>
+    where
+        T: PaginationMeta,
+    {
+        let field = Self::validate_list_order_field(field)?;
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::all_by_order(T::storage_table(), order, field))
+            .bind(("table", Table::from(T::storage_table())))
+            .await?
+            .check()?;
+
+        if T::has_foreign_fields() || T::has_relation_fields() {
+            let rows: Vec<SurrealDbValue> = result.take(1)?;
+            return raw_rows_to_public_hydrated::<T>(rows).await;
+        }
+
+        let rows: Vec<T::Stored> = result.take(1)?;
         stored_rows_to_public_hydrated::<T>(rows).await
     }
 

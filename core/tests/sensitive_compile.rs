@@ -11,6 +11,7 @@ fn sensitive_macro_rules_are_enforced() {
     tests.pass("tests/ui/store/relation_supported_shapes.rs");
     tests.pass("tests/ui/store/table_as_supported.rs");
     tests.pass("tests/ui/store/pagin_field_supported.rs");
+    tests.pass("tests/ui/store/fill_field_supported.rs");
     tests.pass("tests/ui/store/derive_bridge_enum_dispatcher.rs");
     tests.compile_fail("tests/ui/store/relation_enum_rejected.rs");
     tests.compile_fail("tests/ui/store/relation_tuple_struct_rejected.rs");
@@ -25,6 +26,9 @@ fn sensitive_macro_rules_are_enforced() {
     tests.compile_fail("tests/ui/store/table_as_invalid_target_rejected.rs");
     tests.compile_fail("tests/ui/store/pagin_field_option_rejected.rs");
     tests.compile_fail("tests/ui/store/pagin_field_duplicate_rejected.rs");
+    tests.compile_fail("tests/ui/store/fill_non_autofill_rejected.rs");
+    tests.compile_fail("tests/ui/store/autofill_without_fill_rejected.rs");
+    tests.compile_fail("tests/ui/store/fill_foreign_conflict.rs");
     tests.compile_fail("tests/ui/store/derive_bridge_unit_variant.rs");
     tests.compile_fail("tests/ui/store/derive_bridge_struct_variant.rs");
     tests.compile_fail("tests/ui/store/derive_bridge_multi_field_variant.rs");

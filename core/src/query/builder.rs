@@ -70,11 +70,38 @@ impl QueryKind {
     }
 
     /// Builds a full ordered table scan.
-    pub fn all_by_order(_table: &str, order: Order, _key: &str) -> String {
-        match order {
-            Order::Asc => "SELECT * FROM $table ORDER BY [$key] ASC;".to_owned(),
-            Order::Desc => "SELECT * FROM $table ORDER BY [$key] DESC;".to_owned(),
-        }
+    pub fn all_by_order(_table: &str, order: Order, key: &str) -> String {
+        let order_key = if key == "id" { "__page_public_id" } else { key };
+        let order_str = match order {
+            Order::Asc => "ASC",
+            Order::Desc => "DESC",
+        };
+        format!(
+            "LET $rows = (SELECT *, id AS __page_record, record::id(id) AS __page_public_id FROM $table); SELECT *, __page_public_id AS id FROM $rows ORDER BY {order_key} {order_str}, __page_record {order_str};"
+        )
+    }
+    /// Builds a full projected table scan for a read-only View.
+    pub fn view_all(fields: &[&str]) -> String {
+        let projection = view_projection(fields);
+        format!("SELECT {projection} FROM $table;")
+    }
+    /// Builds a full ordered projected table scan for a read-only View.
+    pub fn view_all_by_order(order: Order, key: &str, fields: &[&str]) -> String {
+        let projection = view_order_projection(fields, key);
+        let outer_projection = view_order_projection(fields, key);
+        let order_key = if key == "id" { "__page_public_id" } else { key };
+        let order_str = match order {
+            Order::Asc => "ASC",
+            Order::Desc => "DESC",
+        };
+        format!(
+            "LET $rows = (SELECT {projection}, id AS __page_record, record::id(id) AS __page_public_id FROM $table); SELECT {outer_projection}, __page_public_id AS id, __page_record FROM $rows ORDER BY {order_key} {order_str}, __page_record {order_str};"
+        )
+    }
+    /// Builds a single-record projected fetch for a read-only View.
+    pub fn view_by_id(fields: &[&str]) -> String {
+        let projection = view_projection(fields);
+        format!("SELECT {projection} FROM ONLY $record;")
     }
     /// Builds a bounded table scan.
     pub fn limit(_table: &str, _count: i64) -> String {
@@ -105,7 +132,7 @@ impl QueryKind {
     }
     /// Builds a query that returns one record id by field equality.
     pub fn select_id_single(_table: &str) -> String {
-        "RETURN (SELECT id FROM ONLY $table WHERE [$k] = $v LIMIT 1).id;".to_owned()
+        "SELECT VALUE id FROM $table WHERE type::field($k) = $v LIMIT 2;".to_owned()
     }
     /// Builds a query that returns up to two record ids by multiple field equalities.
     pub fn select_id_by_fields(fields: &[String]) -> String {
@@ -228,6 +255,48 @@ impl QueryKind {
     pub fn select_limit_with_id() -> String {
         "SELECT *, record::id(id) AS id FROM $table LIMIT $count;".to_owned()
     }
+}
+
+fn view_projection(fields: &[&str]) -> String {
+    let mut parts = view_projection_without_id(fields)
+        .split(", ")
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    parts.push("record::id(id) AS id".to_owned());
+    parts.join(", ")
+}
+
+fn view_projection_without_id(fields: &[&str]) -> String {
+    let mut projection = fields
+        .iter()
+        .copied()
+        .filter(|field| *field != "id")
+        .collect::<Vec<_>>();
+    projection.sort_unstable();
+    projection.dedup();
+
+    let parts = projection
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    parts.join(", ")
+}
+
+fn view_order_projection(fields: &[&str], order_key: &str) -> String {
+    let mut projection = fields
+        .iter()
+        .copied()
+        .filter(|field| *field != "id")
+        .collect::<Vec<_>>();
+
+    if order_key != "id" {
+        projection.push(order_key);
+    }
+
+    projection.sort_unstable();
+    projection.dedup();
+    projection.join(", ")
 }
 
 #[cfg(test)]
