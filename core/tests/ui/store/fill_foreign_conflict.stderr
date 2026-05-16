@@ -1,0 +1,5 @@
+error: #[foreign] supports recursive Option<_> / Vec<_> shapes whose leaf type implements appdb::Bridge
+  --> tests/ui/store/fill_foreign_conflict.rs:10:17
+   |
+10 |     created_at: AutoFill,
+   |                 ^^^^^^^^

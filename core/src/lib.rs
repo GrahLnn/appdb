@@ -2,6 +2,7 @@ extern crate self as appdb;
 
 /// Authentication helpers for bootstrapping the embedded database.
 pub mod auth;
+mod autofill;
 /// Database runtime setup and global handle access.
 pub mod connection;
 /// Encryption helpers and key-provider abstractions.
@@ -24,12 +25,14 @@ pub mod serde_utils;
 /// Explicit transaction runner helpers.
 pub mod tx;
 
-pub use appdb_macros::{Bridge, Relation, Sensitive, Store};
+pub use appdb_macros::{Bridge, Relation, Sensitive, Store, View};
 pub use auth::*;
+pub use autofill::*;
 pub use connection::*;
 pub use crypto::*;
 pub use error::*;
 pub use graph::*;
+pub use query::Order;
 pub use repository::*;
 pub use serde_utils::id::*;
 pub use tx::*;
@@ -62,6 +65,16 @@ pub trait ForeignShape: Sized + Send {
 
     /// Rehydrates a stored recursive shape back into caller-facing values.
     async fn hydrate_foreign_shape(stored: Self::Stored) -> anyhow::Result<Self>;
+}
+
+/// Recursive runtime seam for read-only View container shapes.
+#[::async_trait::async_trait]
+pub trait ViewShape: Sized + Send {
+    /// Stored representation for this view shape with `RecordId` leaves.
+    type Stored: Clone + serde::de::DeserializeOwned + surrealdb::types::SurrealValue + Send;
+
+    /// Hydrates a stored recursive shape into caller-facing view values.
+    async fn hydrate_view_shape(stored: Self::Stored) -> anyhow::Result<Self>;
 }
 
 /// Read-only lookup seam for `#[foreign]` container shapes.
@@ -982,6 +995,39 @@ where
             }
             Ok(out)
         }
+    }
+}
+
+#[::async_trait::async_trait]
+impl<T> ViewShape for Option<T>
+where
+    T: ViewShape + Send,
+    T::Stored: Send,
+{
+    type Stored = Option<T::Stored>;
+
+    async fn hydrate_view_shape(stored: Self::Stored) -> anyhow::Result<Self> {
+        match stored {
+            Some(value) => Ok(Some(<T as ViewShape>::hydrate_view_shape(value).await?)),
+            None => Ok(None),
+        }
+    }
+}
+
+#[::async_trait::async_trait]
+impl<T> ViewShape for Vec<T>
+where
+    T: ViewShape + Send,
+    T::Stored: Send,
+{
+    type Stored = Vec<T::Stored>;
+
+    async fn hydrate_view_shape(stored: Self::Stored) -> anyhow::Result<Self> {
+        let mut out = Vec::with_capacity(stored.len());
+        for value in stored {
+            out.push(<T as ViewShape>::hydrate_view_shape(value).await?);
+        }
+        Ok(out)
     }
 }
 

@@ -15,8 +15,8 @@ use appdb::query::{RawSqlStmt, query_bound_checked, query_bound_return};
 use appdb::repository::Repo;
 use appdb::tx::{TxStmt, run_tx};
 use appdb::{
-    Bridge, Crud, DBError, DBErrorKind, Id, Relation, Sensitive, SensitiveShape, SensitiveValueOf,
-    Store, StoredModel,
+    AutoFill, Bridge, Crud, DBError, DBErrorKind, Id, Order, Relation, Sensitive, SensitiveShape,
+    SensitiveValueOf, Store, StoredModel, View,
 };
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
@@ -133,6 +133,65 @@ struct ItPagedEntry {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 struct ItIdPagedEntry {
     #[pagin]
+    id: Id,
+    title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItAutoFilledEntry {
+    id: Id,
+    #[pagin]
+    #[fill(now)]
+    created_at: AutoFill,
+    title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItViewChild {
+    id: Id,
+    label: String,
+    heavy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItViewParent {
+    id: Id,
+    #[pagin]
+    created_at: i64,
+    title: String,
+    #[foreign]
+    children: Vec<ItViewChild>,
+    heavy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, View)]
+#[view(source = ItViewChild)]
+struct ItViewChildSurface {
+    id: Id,
+    label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, View)]
+#[view(source = ItViewParent)]
+struct ItViewParentList {
+    id: Id,
+    created_at: i64,
+    title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, View)]
+#[view(source = ItViewParent)]
+struct ItViewParentConfig {
+    id: Id,
+    created_at: i64,
+    title: String,
+    #[view(nested)]
+    children: Vec<ItViewChildSurface>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, View)]
+#[view(source = ItViewParent)]
+struct ItViewParentTitleList {
     id: Id,
     title: String,
 }
@@ -3432,6 +3491,13 @@ fn store_unique_field_registers_schema_index() {
             && ddl.contains("FIELDS created_at,id")
             && !ddl.contains("UNIQUE")
     }));
+
+    assert!(ddls.iter().any(|ddl| {
+        ddl.contains("DEFINE INDEX IF NOT EXISTS it_auto_filled_entry_created_at_id_pagin")
+            && ddl.contains("ON it_auto_filled_entry")
+            && ddl.contains("FIELDS created_at,id")
+            && !ddl.contains("UNIQUE")
+    }));
 }
 
 #[test]
@@ -3628,6 +3694,374 @@ fn store_pagin_supports_id_as_pagination_field() {
         assert!(
             second_asc.next.is_none(),
             "last asc page should not expose another cursor"
+        );
+    });
+}
+
+#[test]
+fn store_fill_now_resolves_pending_autofill_without_overwriting_existing_values() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItAutoFilledEntry::delete_all()
+            .await
+            .expect("auto filled entry cleanup should succeed");
+
+        let saved = ItAutoFilledEntry::save(ItAutoFilledEntry {
+            id: Id::from("auto-filled-now"),
+            created_at: AutoFill::pending(),
+            title: "first".to_owned(),
+        })
+        .await
+        .expect("save should resolve pending autofill");
+        assert!(
+            !saved.created_at.is_pending(),
+            "save should fill pending autofill values"
+        );
+
+        let saved_many = ItAutoFilledEntry::save_many(vec![
+            ItAutoFilledEntry {
+                id: Id::from("auto-filled-many-1"),
+                created_at: AutoFill::pending(),
+                title: "second".to_owned(),
+            },
+            ItAutoFilledEntry {
+                id: Id::from("auto-filled-many-2"),
+                created_at: AutoFill::pending(),
+                title: "third".to_owned(),
+            },
+        ])
+        .await
+        .expect("save_many should resolve pending autofill values");
+        assert!(saved_many.iter().all(|item| !item.created_at.is_pending()));
+
+        let original_created_at = saved.created_at.clone();
+        let updated = ItAutoFilledEntry::save(ItAutoFilledEntry {
+            title: "updated".to_owned(),
+            ..saved.clone()
+        })
+        .await
+        .expect("save should preserve resolved autofill values");
+        assert_eq!(updated.created_at, original_created_at);
+    });
+}
+
+#[test]
+fn store_autofill_supports_ordered_list_and_keyset_pagination() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItAutoFilledEntry::delete_all()
+            .await
+            .expect("auto filled entry cleanup should succeed");
+
+        ItAutoFilledEntry::save_many(vec![
+            ItAutoFilledEntry {
+                id: Id::from(1i64),
+                created_at: AutoFill::resolved("2026-04-23T08:00:00Z"),
+                title: "first".to_owned(),
+            },
+            ItAutoFilledEntry {
+                id: Id::from(2i64),
+                created_at: AutoFill::resolved("2026-04-23T08:00:00Z"),
+                title: "second".to_owned(),
+            },
+            ItAutoFilledEntry {
+                id: Id::from(3i64),
+                created_at: AutoFill::resolved("2026-04-23T07:00:00Z"),
+                title: "third".to_owned(),
+            },
+            ItAutoFilledEntry {
+                id: Id::from(4i64),
+                created_at: AutoFill::resolved("2026-04-23T06:00:00Z"),
+                title: "fourth".to_owned(),
+            },
+        ])
+        .await
+        .expect("save_many should succeed");
+
+        let ordered_desc = ItAutoFilledEntry::list()
+            .order_by("created_at", Order::Desc)
+            .await
+            .expect("ordered list should succeed");
+        assert_eq!(
+            ordered_desc
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                Id::from(2i64),
+                Id::from(1i64),
+                Id::from(3i64),
+                Id::from(4i64)
+            ]
+        );
+
+        let ordered_by_id = ItAutoFilledEntry::list()
+            .order_by("id", Order::Asc)
+            .await
+            .expect("ordering by id should succeed");
+        assert_eq!(
+            ordered_by_id
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                Id::from(1i64),
+                Id::from(2i64),
+                Id::from(3i64),
+                Id::from(4i64)
+            ]
+        );
+
+        let first_desc = ItAutoFilledEntry::pagin_desc(2, None)
+            .await
+            .expect("first desc page should succeed");
+        assert_eq!(
+            first_desc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(2i64), Id::from(1i64)]
+        );
+
+        let second_desc = ItAutoFilledEntry::pagin_desc(2, first_desc.next.clone())
+            .await
+            .expect("second desc page should succeed");
+        assert_eq!(
+            second_desc
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from(3i64), Id::from(4i64)]
+        );
+
+        let invalid = ItAutoFilledEntry::list()
+            .order_by("title", Order::Desc)
+            .await
+            .expect_err("ordering by undeclared fields should be rejected");
+        let typed = appdb::classify_db_error(&invalid);
+        assert!(
+            matches!(typed, DBError::InvalidModel(_)),
+            "expected invalid model error, got {typed:?}"
+        );
+    });
+}
+
+#[test]
+fn view_list_projects_declared_fields_and_orders_without_full_store_hydration() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItViewParent::delete_all()
+            .await
+            .expect("view parent cleanup should succeed");
+        ItViewChild::delete_all()
+            .await
+            .expect("view child cleanup should succeed");
+
+        ItViewParent::save_many(vec![
+            ItViewParent {
+                id: Id::from("view-parent-a"),
+                created_at: 2,
+                title: "second".to_owned(),
+                children: vec![ItViewChild {
+                    id: Id::from("view-child-a"),
+                    label: "alpha".to_owned(),
+                    heavy: "child-heavy-a".to_owned(),
+                }],
+                heavy: "parent-heavy-a".to_owned(),
+            },
+            ItViewParent {
+                id: Id::from("view-parent-b"),
+                created_at: 1,
+                title: "first".to_owned(),
+                children: vec![ItViewChild {
+                    id: Id::from("view-child-b"),
+                    label: "beta".to_owned(),
+                    heavy: "child-heavy-b".to_owned(),
+                }],
+                heavy: "parent-heavy-b".to_owned(),
+            },
+        ])
+        .await
+        .expect("view fixtures should save");
+
+        let listed = ItViewParentList::list()
+            .order_by("created_at", Order::Asc)
+            .await
+            .expect("view list should load");
+        assert_eq!(
+            listed
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            vec![Id::from("view-parent-b"), Id::from("view-parent-a")]
+        );
+        assert_eq!(listed[0].title, "first");
+
+        let invalid = ItViewParentList::list()
+            .order_by("heavy", Order::Asc)
+            .await
+            .expect_err("undeclared view fields should not order view reads");
+        let typed = appdb::classify_db_error(&invalid);
+        assert!(
+            matches!(typed, DBError::InvalidModel(_)),
+            "expected invalid model error, got {typed:?}"
+        );
+    });
+}
+
+#[test]
+fn view_list_can_order_by_source_pagination_field_without_exposing_it() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItViewParent::delete_all()
+            .await
+            .expect("view parent cleanup should succeed");
+        ItViewChild::delete_all()
+            .await
+            .expect("view child cleanup should succeed");
+
+        ItViewParent::save_many(vec![
+            ItViewParent {
+                id: Id::from("view-title-parent-a"),
+                created_at: 20,
+                title: "later".to_owned(),
+                children: vec![],
+                heavy: "hidden-a".to_owned(),
+            },
+            ItViewParent {
+                id: Id::from("view-title-parent-b"),
+                created_at: 10,
+                title: "earlier".to_owned(),
+                children: vec![],
+                heavy: "hidden-b".to_owned(),
+            },
+        ])
+        .await
+        .expect("view fixtures should save");
+
+        let listed = ItViewParentTitleList::list()
+            .order_by("created_at", Order::Asc)
+            .await
+            .expect("view should sort by hidden source pagination field");
+        assert_eq!(
+            listed
+                .iter()
+                .map(|item| (item.id.clone(), item.title.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Id::from("view-title-parent-b"), "earlier".to_owned()),
+                (Id::from("view-title-parent-a"), "later".to_owned())
+            ]
+        );
+    });
+}
+
+#[test]
+fn view_nested_fields_hydrate_through_declared_child_views() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItViewParent::delete_all()
+            .await
+            .expect("view parent cleanup should succeed");
+        ItViewChild::delete_all()
+            .await
+            .expect("view child cleanup should succeed");
+
+        ItViewParent::save(ItViewParent {
+            id: Id::from("view-parent-nested"),
+            created_at: 7,
+            title: "nested".to_owned(),
+            children: vec![
+                ItViewChild {
+                    id: Id::from("view-child-nested-a"),
+                    label: "alpha".to_owned(),
+                    heavy: "child-heavy-a".to_owned(),
+                },
+                ItViewChild {
+                    id: Id::from("view-child-nested-b"),
+                    label: "beta".to_owned(),
+                    heavy: "child-heavy-b".to_owned(),
+                },
+            ],
+            heavy: "parent-heavy".to_owned(),
+        })
+        .await
+        .expect("view fixture should save");
+
+        let loaded = ItViewParentConfig::get("view-parent-nested")
+            .await
+            .expect("config view should load");
+        assert_eq!(loaded.title, "nested");
+        assert_eq!(
+            loaded
+                .children
+                .iter()
+                .map(|child| (child.id.clone(), child.label.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Id::from("view-child-nested-a"), "alpha".to_owned()),
+                (Id::from("view-child-nested-b"), "beta".to_owned())
+            ]
+        );
+
+        let found = ItViewParentConfig::find_one("title", "nested")
+            .await
+            .expect("config view should support string field lookup");
+        assert_eq!(found.id, Id::from("view-parent-nested"));
+    });
+}
+
+#[test]
+fn view_find_one_rejects_ambiguous_matches() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItViewParent::delete_all()
+            .await
+            .expect("view parent cleanup should succeed");
+        ItViewChild::delete_all()
+            .await
+            .expect("view child cleanup should succeed");
+
+        ItViewParent::save_many(vec![
+            ItViewParent {
+                id: Id::from("view-duplicate-a"),
+                created_at: 1,
+                title: "duplicate".to_owned(),
+                children: vec![],
+                heavy: "hidden-a".to_owned(),
+            },
+            ItViewParent {
+                id: Id::from("view-duplicate-b"),
+                created_at: 2,
+                title: "duplicate".to_owned(),
+                children: vec![],
+                heavy: "hidden-b".to_owned(),
+            },
+        ])
+        .await
+        .expect("view fixtures should save");
+
+        let error = ItViewParentTitleList::find_one("title", "duplicate")
+            .await
+            .expect_err("find_one should reject non-unique matches");
+        let typed = appdb::classify_db_error(&error);
+        assert!(
+            matches!(typed, DBError::InvalidModel(_)),
+            "expected invalid model error, got {typed:?}"
         );
     });
 }

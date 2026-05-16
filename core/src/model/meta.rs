@@ -71,6 +71,49 @@ pub trait PaginationMeta {
     }
 }
 
+/// Metadata and decoder contract for read-only typed projections.
+#[async_trait::async_trait]
+pub trait ViewMeta:
+    Serialize
+    + for<'de> Deserialize<'de>
+    + SurrealValue
+    + std::fmt::Debug
+    + 'static
+    + Clone
+    + Send
+    + Sync
+{
+    /// Store model that owns the source table and write semantics.
+    type Source: ModelMeta + PaginationMeta;
+
+    /// Stored projection shape decoded from SurrealDB before nested views hydrate.
+    type Stored: Clone + serde::de::DeserializeOwned + SurrealValue + Send;
+
+    /// Field names this view is allowed to observe.
+    fn view_fields() -> &'static [&'static str];
+
+    /// Declared fields whose values are nested View references.
+    fn nested_view_fields() -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Source table read by this view.
+    fn source_table() -> &'static str {
+        <Self::Source as ModelMeta>::storage_table()
+    }
+
+    /// Source model's pagination field, exposed only for stable ordering.
+    fn source_pagination_field() -> Option<&'static str> {
+        <Self::Source as PaginationMeta>::pagination_field()
+    }
+
+    /// Decodes one projected DB row into the stored projection shape.
+    fn decode_stored_view_row(row: serde_json::Value) -> Result<Self::Stored>;
+
+    /// Hydrates nested view fields while preserving the declared projection boundary.
+    async fn hydrate_view(stored: Self::Stored) -> Result<Self>;
+}
+
 /// Narrow marker seam proving a type participates in `#[derive(Store)]`.
 #[doc(hidden)]
 pub trait StoreModelMarker {}

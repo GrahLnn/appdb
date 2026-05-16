@@ -1,0 +1,5 @@
+error: appdb::AutoFill fields require #[fill(...)]
+ --> tests/ui/store/autofill_without_fill_rejected.rs:8:5
+  |
+8 |     created_at: AutoFill,
+  |     ^^^^^^^^^^
