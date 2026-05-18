@@ -40,6 +40,59 @@ pub use tx::*;
 use surrealdb::types::RecordId;
 use surrealdb_types::Kind;
 
+/// One-shot overrides for `#[foreign]` fields during a Store write.
+///
+/// The domain model stays unchanged; this plan only gives the foreign write
+/// interpreter already-known record ids for selected fields in one transaction.
+#[derive(Debug, Clone, Default)]
+pub struct ForeignWritePlan {
+    fields: std::collections::BTreeMap<&'static str, serde_json::Value>,
+}
+
+impl ForeignWritePlan {
+    /// Creates an empty plan.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Replaces one foreign field with its stored record-id shape.
+    pub fn set_field_shape<T>(&mut self, field: &'static str, value: T) -> anyhow::Result<()>
+    where
+        T: serde::Serialize,
+    {
+        self.fields.insert(field, serde_json::to_value(value)?);
+        Ok(())
+    }
+
+    /// Reads one planned stored field shape.
+    pub fn field_shape<T>(&self, field: &'static str) -> anyhow::Result<Option<T>>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        self.fields
+            .get(field)
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(anyhow::Error::from)
+    }
+
+    /// Ensures every planned field is owned by the model's declared foreign fields.
+    pub fn ensure_known_fields(&self, known_fields: &[&'static str]) -> anyhow::Result<()> {
+        for field in self.fields.keys() {
+            if !known_fields.iter().any(|known| known == field) {
+                anyhow::bail!("foreign write plan contains unknown foreign field `{field}`");
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns whether the plan contains no field overrides.
+    pub fn is_empty(&self) -> bool {
+        self.fields.is_empty()
+    }
+}
+
 #[::async_trait::async_trait]
 /// Runtime seam for values persisted by `#[foreign]` fields.
 pub trait Bridge: Sized + Send {
@@ -414,6 +467,21 @@ pub trait ForeignModel: StoredModel {
     fn persist_foreign(
         value: Self,
     ) -> impl std::future::Future<Output = anyhow::Result<Self::Stored>> + Send;
+
+    /// Rewrites a caller-facing value while allowing selected foreign fields to
+    /// use caller-provided stored record-id shapes instead of persisting children.
+    fn persist_foreign_with_plan(
+        value: Self,
+        foreign_plan: &ForeignWritePlan,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self::Stored>> + Send
+    where
+        Self: Send,
+    {
+        async move {
+            foreign_plan.ensure_known_fields(Self::foreign_field_names())?;
+            <Self as ForeignModel>::persist_foreign(value).await
+        }
+    }
 
     /// Rehydrates nested refs in a stored representation back into the caller-facing value.
     fn hydrate_foreign(

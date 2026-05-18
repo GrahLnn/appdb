@@ -572,6 +572,25 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
     });
 
+    let into_stored_with_plan_assignments = named_fields.iter().map(|field| {
+        let ident = field.ident.clone().expect("named field");
+        let field_name = ident.to_string();
+        match foreign_field_kind(&ident, &foreign_fields) {
+            Some(ForeignFieldKind {
+                original_ty,
+                stored_ty,
+            }) => quote! {
+                #ident: match foreign_plan.field_shape::<#stored_ty>(#field_name)? {
+                    ::std::option::Option::Some(stored) => stored,
+                    ::std::option::Option::None => {
+                        <#original_ty as ::appdb::ForeignShape>::persist_foreign_shape(value.#ident).await?
+                    }
+                }
+            },
+            None => quote! { #ident: value.#ident },
+        }
+    });
+
     let from_stored_assignments = named_fields.iter().map(|field| {
         let ident = field.ident.clone().expect("named field");
         match foreign_field_kind(&ident, &foreign_fields) {
@@ -582,14 +601,17 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
     });
 
-    let fill_assignments = fill_fields.iter().map(|field| {
-        let ident = &field.ident;
-        match field.provider {
-            FillProvider::Now => quote! {
-                value.#ident.fill_now_if_pending();
-            },
-        }
-    });
+    let fill_assignments = fill_fields
+        .iter()
+        .map(|field| {
+            let ident = &field.ident;
+            match field.provider {
+                FillProvider::Now => quote! {
+                    value.#ident.fill_now_if_pending();
+                },
+            }
+        })
+        .collect::<Vec<_>>();
 
     let decode_foreign_fields = foreign_fields.iter().map(|field| {
         let ident = field.ident.to_string();
@@ -709,6 +731,14 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                     <Self as ::appdb::StoredModel>::into_stored(value)
                 }
 
+                async fn persist_foreign_with_plan(
+                    value: Self,
+                    foreign_plan: &::appdb::ForeignWritePlan,
+                ) -> ::anyhow::Result<Self::Stored> {
+                    foreign_plan.ensure_known_fields(Self::foreign_field_names())?;
+                    <Self as ::appdb::ForeignModel>::persist_foreign(value).await
+                }
+
                 async fn hydrate_foreign(stored: Self::Stored) -> ::anyhow::Result<Self> {
                     <Self as ::appdb::StoredModel>::from_stored(stored)
                 }
@@ -760,6 +790,18 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                     })
                 }
 
+                async fn persist_foreign_with_plan(
+                    value: Self,
+                    foreign_plan: &::appdb::ForeignWritePlan,
+                ) -> ::anyhow::Result<Self::Stored> {
+                    foreign_plan.ensure_known_fields(Self::foreign_field_names())?;
+                    let mut value = value;
+                    #( #fill_assignments )*
+                    Ok(#stored_struct_ident {
+                        #( #into_stored_with_plan_assignments, )*
+                    })
+                }
+
                 async fn hydrate_foreign(stored: Self::Stored) -> ::anyhow::Result<Self> {
                     Ok(Self {
                         #( #from_stored_assignments, )*
@@ -788,6 +830,97 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 }
 
                 #relation_methods_impl
+            }
+        }
+    };
+
+    let foreign_write_api_impl = if foreign_fields.is_empty() {
+        quote! {}
+    } else {
+        let foreign_write_ident = format_ident!("AppdbForeignWrite{}", struct_ident);
+        let foreign_write_field_methods = foreign_fields.iter().map(|field| {
+            let ident = &field.ident;
+            let field_name = ident.to_string();
+            let stored_ty = &field.kind.stored_ty;
+            quote! {
+                pub fn #ident(mut self, value: #stored_ty) -> ::anyhow::Result<Self> {
+                    self.query = self.query.set_field_shape(#field_name, value)?;
+                    Ok(self)
+                }
+            }
+        });
+
+        quote! {
+            #vis struct #foreign_write_ident {
+                query: ::appdb::repository::ForeignWriteQuery<#struct_ident>,
+            }
+
+            impl #foreign_write_ident {
+                #( #foreign_write_field_methods )*
+
+                pub async fn create_at(
+                    self,
+                    id: ::surrealdb::types::RecordId,
+                ) -> ::anyhow::Result<#struct_ident> {
+                    self.query.create_at(id).await
+                }
+
+                pub async fn upsert_at(
+                    self,
+                    id: ::surrealdb::types::RecordId,
+                ) -> ::anyhow::Result<#struct_ident> {
+                    self.query.upsert_at(id).await
+                }
+
+                pub async fn update_at(
+                    self,
+                    id: ::surrealdb::types::RecordId,
+                ) -> ::anyhow::Result<#struct_ident> {
+                    self.query.update_at(id).await
+                }
+
+                pub async fn create_at_returning<View>(
+                    self,
+                    id: ::surrealdb::types::RecordId,
+                ) -> ::anyhow::Result<View>
+                where
+                    View: ::appdb::repository::WriteReturnView<#struct_ident>,
+                {
+                    self.query.create_at_returning::<View>(id).await
+                }
+
+                pub async fn upsert_at_returning<View>(
+                    self,
+                    id: ::surrealdb::types::RecordId,
+                ) -> ::anyhow::Result<View>
+                where
+                    View: ::appdb::repository::WriteReturnView<#struct_ident>,
+                {
+                    self.query.upsert_at_returning::<View>(id).await
+                }
+
+                pub async fn update_at_returning<View>(
+                    self,
+                    id: ::surrealdb::types::RecordId,
+                ) -> ::anyhow::Result<View>
+                where
+                    View: ::appdb::repository::WriteReturnView<#struct_ident>,
+                {
+                    self.query.update_at_returning::<View>(id).await
+                }
+            }
+        }
+    };
+
+    let foreign_write_constructor_impl = if foreign_fields.is_empty() {
+        quote! {}
+    } else {
+        let foreign_write_ident = format_ident!("AppdbForeignWrite{}", struct_ident);
+        quote! {
+            pub fn foreign(self) -> #foreign_write_ident {
+                #foreign_write_ident {
+                    query: ::appdb::repository::ForeignWriteQuery::new(self),
+                }
             }
         }
     };
@@ -841,6 +974,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         }
         #stored_model_impl
         #foreign_model_impl
+        #foreign_write_api_impl
 
         #auto_has_id_impl
         #resolve_record_id_impl
@@ -985,6 +1119,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 ::appdb::repository::Repo::<Self>::update_at(id, self).await
             }
 
+            #foreign_write_constructor_impl
 
             pub async fn delete<T>(id: T) -> ::anyhow::Result<()>
             where

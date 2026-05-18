@@ -999,13 +999,19 @@ async fn load_aliased_foreign_parent_raw(id: &str) -> StoredAliasedForeignParent
         .expect("aliased foreign raw row should be an object");
     let featured = map
         .remove("featured")
-        .map(serde_json::from_value::<Option<RecordId>>)
+        .map(|mut value| {
+            appdb::decode_record_link_value(&mut value);
+            serde_json::from_value::<Option<RecordId>>(value)
+        })
         .transpose()
         .expect("aliased foreign featured should decode as optional record id")
         .flatten();
     let nested = map
         .remove("nested")
-        .map(serde_json::from_value::<Option<Vec<Vec<RecordId>>>>)
+        .map(|mut value| {
+            appdb::decode_record_link_value(&mut value);
+            serde_json::from_value::<Option<Vec<Vec<RecordId>>>>(value)
+        })
         .transpose()
         .expect("aliased foreign nested should decode as nested optional record ids")
         .flatten();
@@ -2685,6 +2691,10 @@ impl appdb::ForeignModel for ItAtomicSaveParent {
     fn has_foreign_fields() -> bool {
         true
     }
+
+    fn foreign_field_names() -> &'static [&'static str] {
+        &["child"]
+    }
 }
 
 async fn load_atomic_save_parent_raw(id: &str) -> Option<StoredAtomicSaveParentRow> {
@@ -2708,7 +2718,10 @@ async fn load_atomic_save_parent_raw(id: &str) -> Option<StoredAtomicSaveParentR
         let child = value
             .get("child")
             .cloned()
-            .map(serde_json::from_value::<RecordId>)
+            .map(|mut value| {
+                appdb::decode_record_link_value(&mut value);
+                serde_json::from_value::<RecordId>(value)
+            })
             .expect("atomic save raw row should contain child")
             .expect("atomic save raw child should decode as record id");
 
@@ -4020,6 +4033,66 @@ fn view_nested_fields_hydrate_through_declared_child_views() {
             .await
             .expect("config view should support string field lookup");
         assert_eq!(found.id, Id::from("view-parent-nested"));
+    });
+}
+
+#[test]
+fn foreign_write_plan_uses_known_ids_without_saving_child_values() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItViewParent::delete_all()
+            .await
+            .expect("view parent cleanup should succeed");
+        ItViewChild::delete_all()
+            .await
+            .expect("view child cleanup should succeed");
+
+        let child_record = RecordId::new(ItViewChild::table_name(), "known-child");
+        ItViewChild::create_at(
+            child_record.clone(),
+            ItViewChild {
+                id: Id::from("known-child"),
+                label: "real".to_owned(),
+                heavy: "kept".to_owned(),
+            },
+        )
+        .await
+        .expect("known child should save");
+
+        let parent = ItViewParent {
+            id: Id::from("foreign-plan-parent"),
+            created_at: 9,
+            title: "planned".to_owned(),
+            children: vec![ItViewChild {
+                id: Id::from("known-child"),
+                label: "wrong".to_owned(),
+                heavy: "clobber".to_owned(),
+            }],
+            heavy: "parent-heavy".to_owned(),
+        };
+        let parent_record = RecordId::new(ItViewParent::table_name(), "foreign-plan-parent");
+        let returned = parent
+            .foreign()
+            .children(vec![child_record.clone()])
+            .expect("known child ids should shape the foreign write")
+            .upsert_at_returning::<ItViewParentConfig>(parent_record.clone())
+            .await
+            .expect("parent write should return projected config view");
+
+        let child = ItViewChild::get_record(child_record)
+            .await
+            .expect("known child should reload");
+        let parent_view = ItViewParentConfig::get_record(parent_record)
+            .await
+            .expect("parent config view should reload");
+
+        assert_eq!(child.label, "real");
+        assert_eq!(child.heavy, "kept");
+        assert_eq!(returned.title, "planned");
+        assert_eq!(returned.children[0].label, "real");
+        assert_eq!(parent_view.children[0].label, "real");
     });
 }
 

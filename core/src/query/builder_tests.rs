@@ -45,9 +45,9 @@ fn view_ordered_scan_includes_hidden_source_order_field() {
     let sql = QueryKind::view_all_by_order(Order::Asc, "created_at", &["title"]);
 
     assert!(sql.contains("SELECT created_at, title, id AS __page_record"));
-    assert!(sql.contains(
-        "SELECT created_at, title, __page_public_id AS id, __page_record FROM $rows"
-    ));
+    assert!(
+        sql.contains("SELECT created_at, title, __page_public_id AS id, __page_record FROM $rows")
+    );
     assert!(sql.contains("ORDER BY created_at ASC, __page_record ASC"));
 }
 

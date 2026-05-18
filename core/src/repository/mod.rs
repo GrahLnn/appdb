@@ -18,7 +18,7 @@ use crate::pagination::PaginationPlan;
 use crate::query::builder::{Order, QueryKind};
 use crate::query::{RawSqlStmt, query_bound, query_bound_checked};
 use crate::serde_utils::id::parse_record_id_or_plain_string;
-use crate::{ForeignModel, StoredModel};
+use crate::{ForeignModel, ForeignWritePlan, StoredModel};
 
 pub use crate::pagination::{Page, PageCursor};
 use relation_sync::{
@@ -260,21 +260,80 @@ where
     Ok(content)
 }
 
+#[derive(Clone, Copy)]
+enum ExplicitWriteMode {
+    CreateOnly,
+    Upsert,
+    Update,
+}
+
+impl ExplicitWriteMode {
+    fn write_sql(self) -> &'static str {
+        match self {
+            Self::CreateOnly => "CREATE ONLY $record CONTENT $data RETURN AFTER;",
+            Self::Upsert => "UPSERT ONLY $record CONTENT $data RETURN AFTER;",
+            Self::Update => "UPDATE $record CONTENT $data RETURN AFTER;",
+        }
+    }
+
+    fn map_error(self, err: DBError) -> DBError {
+        match self {
+            Self::CreateOnly if matches!(err, DBError::EmptyResult(_)) => {
+                DBError::Conflict("record already exists".to_owned())
+            }
+            _ => err,
+        }
+    }
+
+    fn empty_result_error(self) -> DBError {
+        match self {
+            Self::CreateOnly => DBError::Conflict("record already exists".to_owned()),
+            Self::Upsert => DBError::EmptyResult("persist_explicit_id_primitive"),
+            Self::Update => DBError::NotFound,
+        }
+    }
+}
+
+async fn decode_write_return_view<V>(row: SurrealDbValue, id: RecordId) -> Result<V>
+where
+    V: ViewMeta,
+{
+    let mut value = row.into_json_value();
+    if let Value::Object(map) = &mut value {
+        map.insert("id".to_owned(), serde_json::to_value(id)?);
+    }
+    decode_view_row::<V>(value).await
+}
+
 async fn persist_explicit_id_primitive<T>(record: RecordId, data: T, create_only: bool) -> Result<T>
 where
     T: ModelMeta + StoredModel + ForeignModel,
 {
+    persist_explicit_id_primitive_with_foreign_plan::<T>(
+        record,
+        data,
+        create_only,
+        &ForeignWritePlan::new(),
+    )
+    .await
+}
+
+async fn write_explicit_id_primitive_with_foreign_plan<T>(
+    record: RecordId,
+    data: T,
+    mode: ExplicitWriteMode,
+    foreign_plan: &ForeignWritePlan,
+) -> Result<(SurrealDbValue, T)>
+where
+    T: ModelMeta + StoredModel + ForeignModel,
+{
     let original = data.clone();
-    let stored_input = T::persist_foreign(data).await?;
+    let stored_input = T::persist_foreign_with_plan(data, foreign_plan).await?;
     let content = prepare_content::<T, _>(stored_input)?;
     let relation_writes = original.prepare_relation_writes(record.clone()).await?;
     ensure_relation_tables(&relation_writes).await?;
     let mut stmt = RawSqlStmt::new("BEGIN TRANSACTION;");
-    stmt.sql.push_str(if create_only {
-        "CREATE ONLY $record CONTENT $data RETURN AFTER;"
-    } else {
-        "UPSERT ONLY $record CONTENT $data RETURN AFTER;"
-    });
+    stmt.sql.push_str(mode.write_sql());
     stmt = stmt.bind("record", record.clone()).bind("data", content);
     let (stmt_with_relations, _) = append_relation_sync_to_stmt(stmt, &relation_writes, "rel")?;
     let mut stmt = stmt_with_relations;
@@ -285,33 +344,43 @@ where
         Ok(result) => result,
         Err(err) => {
             let typed = DBError::from(err);
-            return if create_only && matches!(typed, DBError::EmptyResult(_)) {
-                Err(DBError::Conflict("record already exists".to_owned()).into())
-            } else {
-                Err(typed.into())
-            };
+            return Err(mode.map_error(typed).into());
         }
     };
     result = match result.check() {
         Ok(result) => result,
         Err(err) => {
             let typed = DBError::from(err);
-            return if create_only && matches!(typed, DBError::EmptyResult(_)) {
-                Err(DBError::Conflict("record already exists".to_owned()).into())
-            } else {
-                Err(typed.into())
-            };
+            return Err(mode.map_error(typed).into());
         }
     };
 
     let row: Option<SurrealDbValue> = result.take(1)?;
-    let row = row.ok_or_else(|| {
-        if create_only {
-            DBError::Conflict("record already exists".to_owned())
-        } else {
-            DBError::EmptyResult("persist_explicit_id_primitive")
-        }
-    })?;
+    let row = row.ok_or_else(|| mode.empty_result_error())?;
+    Ok((row, original))
+}
+
+async fn persist_explicit_id_primitive_with_foreign_plan<T>(
+    record: RecordId,
+    data: T,
+    create_only: bool,
+    foreign_plan: &ForeignWritePlan,
+) -> Result<T>
+where
+    T: ModelMeta + StoredModel + ForeignModel,
+{
+    let mode = if create_only {
+        ExplicitWriteMode::CreateOnly
+    } else {
+        ExplicitWriteMode::Upsert
+    };
+    let (row, original) = write_explicit_id_primitive_with_foreign_plan::<T>(
+        record.clone(),
+        data,
+        mode,
+        foreign_plan,
+    )
+    .await?;
     let stored =
         decode_saved_row_from_model::<T>(row, serde_json::to_value(record.clone())?, &original)?;
     let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
@@ -614,6 +683,20 @@ where
     }
 }
 
+/// Marker for View projections that can be returned after writing their Store source.
+pub trait WriteReturnView<T>: ViewMeta<Source = T>
+where
+    T: ModelMeta + PaginationMeta,
+{
+}
+
+impl<T, V> WriteReturnView<T> for V
+where
+    T: ModelMeta + PaginationMeta,
+    V: ViewMeta<Source = T>,
+{
+}
+
 /// Internal repository building blocks for read-only View projections.
 pub struct ViewRepo<V>(PhantomData<V>);
 
@@ -663,11 +746,7 @@ where
         let field = Self::validate_view_order_field(field)?;
         let db = get_db()?;
         let mut result = db
-            .query(QueryKind::view_all_by_order(
-                order,
-                field,
-                V::view_fields(),
-            ))
+            .query(QueryKind::view_all_by_order(order, field, V::view_fields()))
             .bind(("table", Table::from(V::source_table())))
             .await?
             .check()?;
@@ -718,6 +797,73 @@ where
             .check()?
             .take(0)?;
         exactly_one_lookup_id::<V>(ids, k, v)
+    }
+}
+
+/// One-shot write builder for replacing selected `#[foreign]` fields with
+/// already-known record-id shapes.
+#[must_use = "foreign writes do nothing until create_at/upsert_at/update_at is awaited"]
+pub struct ForeignWriteQuery<T> {
+    data: T,
+    plan: ForeignWritePlan,
+}
+
+impl<T> ForeignWriteQuery<T> {
+    pub fn new(data: T) -> Self {
+        Self {
+            data,
+            plan: ForeignWritePlan::new(),
+        }
+    }
+
+    pub fn set_field_shape<S>(
+        mut self,
+        field: &'static str,
+        shape: S,
+    ) -> Result<ForeignWriteQuery<T>>
+    where
+        S: Serialize,
+    {
+        self.plan.set_field_shape(field, shape)?;
+        Ok(self)
+    }
+}
+
+impl<T> ForeignWriteQuery<T>
+where
+    T: ModelMeta + StoredModel + ForeignModel + PaginationMeta,
+{
+    pub async fn create_at(self, id: RecordId) -> Result<T> {
+        Repo::<T>::create_at_with_foreign_plan(id, self.data, &self.plan).await
+    }
+
+    pub async fn upsert_at(self, id: RecordId) -> Result<T> {
+        Repo::<T>::upsert_at_with_foreign_plan(id, self.data, &self.plan).await
+    }
+
+    pub async fn update_at(self, id: RecordId) -> Result<T> {
+        Repo::<T>::update_at_with_foreign_plan(id, self.data, &self.plan).await
+    }
+
+    pub async fn create_at_returning<V>(self, id: RecordId) -> Result<V>
+    where
+        V: WriteReturnView<T>,
+    {
+        Repo::<T>::create_at_with_foreign_plan_returning::<V>(id, self.data, &self.plan).await
+    }
+
+    pub async fn upsert_at_returning<V>(self, id: RecordId) -> Result<V>
+    where
+        V: WriteReturnView<T>,
+    {
+        Repo::<T>::upsert_at_with_foreign_plan_returning::<V>(id, self.data, &self.plan).await
+    }
+
+    pub async fn update_at_returning<V>(self, id: RecordId) -> Result<V>
+    where
+        V: WriteReturnView<T>,
+    {
+        Repo::<T>::update_at_with_foreign_plan_returning::<V>(id, self.data, &self.plan).await
     }
 }
 
@@ -836,6 +982,36 @@ where
         persist_explicit_id_primitive::<T>(id, data, true).await
     }
 
+    /// Creates a new row while replacing selected `#[foreign]` fields with
+    /// already-known record-id shapes for this write only.
+    pub async fn create_at_with_foreign_plan(
+        id: RecordId,
+        data: T,
+        foreign_plan: &ForeignWritePlan,
+    ) -> Result<T> {
+        persist_explicit_id_primitive_with_foreign_plan::<T>(id, data, true, foreign_plan).await
+    }
+
+    /// Creates a new row with selected `#[foreign]` field overrides and returns a View.
+    pub async fn create_at_with_foreign_plan_returning<V>(
+        id: RecordId,
+        data: T,
+        foreign_plan: &ForeignWritePlan,
+    ) -> Result<V>
+    where
+        T: PaginationMeta,
+        V: WriteReturnView<T>,
+    {
+        let (row, _) = write_explicit_id_primitive_with_foreign_plan::<T>(
+            id.clone(),
+            data,
+            ExplicitWriteMode::CreateOnly,
+            foreign_plan,
+        )
+        .await?;
+        decode_write_return_view::<V>(row, id).await
+    }
+
     /// Upserts a row using [`HasId::id`] as the record id.
     /// Upserts a row using the record id exposed by `HasId`.
     pub async fn upsert(data: T) -> Result<T>
@@ -849,6 +1025,36 @@ where
     /// Upserts a row at the provided record id.
     pub async fn upsert_at(id: RecordId, data: T) -> Result<T> {
         persist_explicit_id_primitive::<T>(id, data, false).await
+    }
+
+    /// Upserts a row while replacing selected `#[foreign]` fields with
+    /// already-known record-id shapes for this write only.
+    pub async fn upsert_at_with_foreign_plan(
+        id: RecordId,
+        data: T,
+        foreign_plan: &ForeignWritePlan,
+    ) -> Result<T> {
+        persist_explicit_id_primitive_with_foreign_plan::<T>(id, data, false, foreign_plan).await
+    }
+
+    /// Upserts a row with selected `#[foreign]` field overrides and returns a View.
+    pub async fn upsert_at_with_foreign_plan_returning<V>(
+        id: RecordId,
+        data: T,
+        foreign_plan: &ForeignWritePlan,
+    ) -> Result<V>
+    where
+        T: PaginationMeta,
+        V: WriteReturnView<T>,
+    {
+        let (row, _) = write_explicit_id_primitive_with_foreign_plan::<T>(
+            id.clone(),
+            data,
+            ExplicitWriteMode::Upsert,
+            foreign_plan,
+        )
+        .await?;
+        decode_write_return_view::<V>(row, id).await
     }
 
     /// Fetches a row by full record id.
@@ -917,6 +1123,45 @@ where
             Some(stored) => Ok(T::hydrate_foreign(stored).await?),
             None => Err(DBError::NotFound.into()),
         }
+    }
+
+    /// Replaces a row while using selected caller-provided foreign record-id shapes.
+    pub async fn update_at_with_foreign_plan(
+        id: RecordId,
+        data: T,
+        foreign_plan: &ForeignWritePlan,
+    ) -> Result<T> {
+        let (row, original) = write_explicit_id_primitive_with_foreign_plan::<T>(
+            id.clone(),
+            data,
+            ExplicitWriteMode::Update,
+            foreign_plan,
+        )
+        .await?;
+        let stored = decode_saved_row_from_model::<T>(row, serde_json::to_value(id)?, &original)?;
+        let mut value = serde_json::to_value(T::hydrate_foreign(stored).await?)?;
+        normalize_public_output_ids(&mut value);
+        Ok(serde_json::from_value(value)?)
+    }
+
+    /// Replaces a row with selected `#[foreign]` field overrides and returns a View.
+    pub async fn update_at_with_foreign_plan_returning<V>(
+        id: RecordId,
+        data: T,
+        foreign_plan: &ForeignWritePlan,
+    ) -> Result<V>
+    where
+        T: PaginationMeta,
+        V: WriteReturnView<T>,
+    {
+        let (row, _) = write_explicit_id_primitive_with_foreign_plan::<T>(
+            id.clone(),
+            data,
+            ExplicitWriteMode::Update,
+            foreign_plan,
+        )
+        .await?;
+        decode_write_return_view::<V>(row, id).await
     }
 
     /// Merges a partial JSON object into the row at `id`.
