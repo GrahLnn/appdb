@@ -538,6 +538,30 @@ where
     Ok(values)
 }
 
+async fn raw_rows_to_view_records<V>(rows: Vec<SurrealDbValue>) -> Result<Vec<ViewRecord<V>>>
+where
+    V: ViewMeta,
+{
+    let mut values = Vec::with_capacity(rows.len());
+    for row in rows {
+        values.push(decode_view_record::<V>(row.into_json_value()).await?);
+    }
+    Ok(values)
+}
+
+async fn raw_rows_to_view_related_records<V>(
+    rows: Vec<SurrealDbValue>,
+) -> Result<Vec<ViewRelatedRecord<V>>>
+where
+    V: ViewMeta,
+{
+    let mut values = Vec::with_capacity(rows.len());
+    for row in rows {
+        values.push(decode_view_related_record::<V>(row.into_json_value()).await?);
+    }
+    Ok(values)
+}
+
 fn exactly_one_lookup_id<M>(ids: Vec<RecordId>, field: &str, value: &str) -> Result<RecordId> {
     match ids.len() {
         0 => Err(DBError::NotFound.into()),
@@ -568,6 +592,54 @@ where
     let stored = V::decode_stored_view_row(row.clone())
         .map_err(|err| decode_view_row_error::<V>(row, err))?;
     V::hydrate_view(stored).await
+}
+
+async fn decode_view_record<V>(mut row: Value) -> Result<ViewRecord<V>>
+where
+    V: ViewMeta,
+{
+    let record = match row
+        .as_object_mut()
+        .and_then(|map| map.remove("__appdb_record"))
+    {
+        Some(Value::String(text)) => {
+            parse_record_id_or_plain_string(&text, Some(V::source_table())).map_err(|invalid| {
+                DBError::Decode(format!(
+                    "view row contains invalid source record id `{invalid}`"
+                ))
+            })?
+        }
+        Some(value) => serde_json::from_value(value)?,
+        None => {
+            return Err(DBError::Decode("view row is missing source record id".to_owned()).into());
+        }
+    };
+    let value = decode_view_row::<V>(row).await?;
+    Ok(ViewRecord { id: record, value })
+}
+
+async fn decode_view_related_record<V>(mut row: Value) -> Result<ViewRelatedRecord<V>>
+where
+    V: ViewMeta,
+{
+    let owner = match row
+        .as_object_mut()
+        .and_then(|map| map.remove("__appdb_owner"))
+    {
+        Some(Value::String(text)) => {
+            parse_record_id_or_plain_string(&text, None).map_err(|invalid| {
+                DBError::Decode(format!(
+                    "view relation row contains invalid owner id `{invalid}`"
+                ))
+            })?
+        }
+        Some(value) => serde_json::from_value(value)?,
+        None => {
+            return Err(DBError::Decode("view relation row is missing owner id".to_owned()).into());
+        }
+    };
+    let record = decode_view_record::<V>(row).await?;
+    Ok(ViewRelatedRecord { owner, record })
 }
 
 /// Lazy list query surface that can either execute immediately or be refined
@@ -648,6 +720,68 @@ where
             order,
             _marker: PhantomData,
         }
+    }
+}
+
+/// Read-only View value paired with the source record that produced it.
+///
+/// This is appdb-owned evidence for composing View reads across relations. It
+/// keeps record identity out of domain models while still letting callers ask
+/// for related View projections without re-identifying rows through business
+/// fields.
+#[derive(Debug, Clone)]
+pub struct ViewRecord<V> {
+    id: RecordId,
+    value: V,
+}
+
+impl<V> ViewRecord<V> {
+    pub fn id(&self) -> &RecordId {
+        &self.id
+    }
+
+    pub fn into_id(self) -> RecordId {
+        self.id
+    }
+
+    pub fn value(&self) -> &V {
+        &self.value
+    }
+
+    pub fn into_value(self) -> V {
+        self.value
+    }
+}
+
+impl<V> std::ops::Deref for ViewRecord<V> {
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+/// Read-only View relation result paired with the relation owner that produced it.
+///
+/// The owner is the relation anchor supplied to the batch query: the `in`
+/// record for outgoing queries, or the `out` record for incoming queries.
+#[derive(Debug, Clone)]
+pub struct ViewRelatedRecord<V> {
+    owner: RecordId,
+    record: ViewRecord<V>,
+}
+
+impl<V> ViewRelatedRecord<V> {
+    pub fn owner(&self) -> &RecordId {
+        &self.owner
+    }
+
+    pub fn record(&self) -> &ViewRecord<V> {
+        &self.record
+    }
+
+    pub fn into_parts(self) -> (RecordId, ViewRecord<V>) {
+        (self.owner, self.record)
     }
 }
 
@@ -741,6 +875,18 @@ where
         raw_rows_to_views::<V>(rows).await
     }
 
+    /// Lists projected rows with source-record evidence.
+    pub async fn list_records() -> Result<Vec<ViewRecord<V>>> {
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::view_all_with_record(V::view_fields()))
+            .bind(("table", Table::from(V::source_table())))
+            .await?
+            .check()?;
+        let rows: Vec<SurrealDbValue> = result.take(0)?;
+        raw_rows_to_view_records::<V>(rows).await
+    }
+
     /// Lists every projected row ordered by an allowed field.
     pub async fn list_ordered(field: &str, order: Order) -> Result<Vec<V>> {
         let field = Self::validate_view_order_field(field)?;
@@ -777,6 +923,76 @@ where
             Some(row) => decode_view_row::<V>(row.into_json_value()).await,
             None => Err(DBError::NotFound.into()),
         }
+    }
+
+    /// Loads outgoing related rows projected as this View.
+    pub async fn outgoing_records(record: RecordId, relation: &str) -> Result<Vec<ViewRecord<V>>> {
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::view_outgoing(V::view_fields()))
+            .bind(("rel", Table::from(relation)))
+            .bind(("in", record))
+            .bind(("out_table", V::source_table().to_owned()))
+            .await?
+            .check()?;
+        let rows: Vec<SurrealDbValue> = result.take(1)?;
+        raw_rows_to_view_records::<V>(rows).await
+    }
+
+    /// Loads outgoing related rows for many records, preserving each relation owner.
+    pub async fn outgoing_records_by_owners(
+        records: Vec<RecordId>,
+        relation: &str,
+    ) -> Result<Vec<ViewRelatedRecord<V>>> {
+        if records.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::view_outgoing_many(V::view_fields()))
+            .bind(("rel", Table::from(relation)))
+            .bind(("ins", records))
+            .bind(("out_table", V::source_table().to_owned()))
+            .await?
+            .check()?;
+        let rows: Vec<SurrealDbValue> = result.take(0)?;
+        raw_rows_to_view_related_records::<V>(rows).await
+    }
+
+    /// Loads incoming related rows projected as this View.
+    pub async fn incoming_records(record: RecordId, relation: &str) -> Result<Vec<ViewRecord<V>>> {
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::view_incoming(V::view_fields()))
+            .bind(("rel", Table::from(relation)))
+            .bind(("out", record))
+            .bind(("in_table", V::source_table().to_owned()))
+            .await?
+            .check()?;
+        let rows: Vec<SurrealDbValue> = result.take(1)?;
+        raw_rows_to_view_records::<V>(rows).await
+    }
+
+    /// Loads incoming related rows for many records, preserving each relation owner.
+    pub async fn incoming_records_by_owners(
+        records: Vec<RecordId>,
+        relation: &str,
+    ) -> Result<Vec<ViewRelatedRecord<V>>> {
+        if records.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::view_incoming_many(V::view_fields()))
+            .bind(("rel", Table::from(relation)))
+            .bind(("outs", records))
+            .bind(("in_table", V::source_table().to_owned()))
+            .await?
+            .check()?;
+        let rows: Vec<SurrealDbValue> = result.take(0)?;
+        raw_rows_to_view_related_records::<V>(rows).await
     }
 
     /// Finds one matching source row and returns it as this View.
