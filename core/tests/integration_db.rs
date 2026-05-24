@@ -197,6 +197,19 @@ struct ItViewParentTitleList {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
+struct ItViewRelationOwner {
+    id: Id,
+    #[relate("it_view_relation_batch")]
+    children: Vec<ItViewChild>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, View)]
+#[view(source = ItViewRelationOwner)]
+struct ItViewRelationOwnerSurface {
+    id: Id,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
 #[table_as(ItAliasedPost)]
 struct ItAliasedPostBase {
     id: Id,
@@ -4033,6 +4046,115 @@ fn view_nested_fields_hydrate_through_declared_child_views() {
             .await
             .expect("config view should support string field lookup");
         assert_eq!(found.id, Id::from("view-parent-nested"));
+    });
+}
+
+#[test]
+fn view_relation_batch_queries_preserve_owner_identity() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItViewRelationOwner::delete_all()
+            .await
+            .expect("view relation owner cleanup should succeed");
+        ItViewChild::delete_all()
+            .await
+            .expect("view child cleanup should succeed");
+
+        ItViewRelationOwner::save_many(vec![
+            ItViewRelationOwner {
+                id: Id::from("view-owner-parent-a"),
+                children: vec![
+                    ItViewChild {
+                        id: Id::from("view-owner-child-a"),
+                        label: "alpha".to_owned(),
+                        heavy: "child-heavy-a".to_owned(),
+                    },
+                    ItViewChild {
+                        id: Id::from("view-owner-child-shared"),
+                        label: "shared".to_owned(),
+                        heavy: "child-heavy-shared".to_owned(),
+                    },
+                ],
+            },
+            ItViewRelationOwner {
+                id: Id::from("view-owner-parent-b"),
+                children: vec![
+                    ItViewChild {
+                        id: Id::from("view-owner-child-b"),
+                        label: "beta".to_owned(),
+                        heavy: "child-heavy-b".to_owned(),
+                    },
+                    ItViewChild {
+                        id: Id::from("view-owner-child-shared"),
+                        label: "shared".to_owned(),
+                        heavy: "child-heavy-shared".to_owned(),
+                    },
+                ],
+            },
+        ])
+        .await
+        .expect("view relation fixtures should save");
+
+        let parent_a = RecordId::new(ItViewRelationOwner::table_name(), "view-owner-parent-a");
+        let parent_b = RecordId::new(ItViewRelationOwner::table_name(), "view-owner-parent-b");
+        let outgoing = ItViewChildSurface::outgoing_records_by_owners(
+            vec![parent_a.clone(), parent_b.clone()],
+            "it_view_relation_batch",
+        )
+        .await
+        .expect("outgoing batch view relation should load");
+        let mut outgoing_pairs = outgoing
+            .into_iter()
+            .map(|related| {
+                let (owner, child) = related.into_parts();
+                (owner, child.label.clone())
+            })
+            .collect::<Vec<_>>();
+        outgoing_pairs.sort_by(|left, right| {
+            format!("{:?}", left.0)
+                .cmp(&format!("{:?}", right.0))
+                .then(left.1.cmp(&right.1))
+        });
+        assert_eq!(
+            outgoing_pairs,
+            vec![
+                (parent_a.clone(), "alpha".to_owned()),
+                (parent_a.clone(), "shared".to_owned()),
+                (parent_b.clone(), "beta".to_owned()),
+                (parent_b.clone(), "shared".to_owned())
+            ]
+        );
+
+        let child_shared = RecordId::new(ItViewChild::table_name(), "view-owner-child-shared");
+        let child_b = RecordId::new(ItViewChild::table_name(), "view-owner-child-b");
+        let incoming = ItViewRelationOwnerSurface::incoming_records_by_owners(
+            vec![child_shared.clone(), child_b.clone()],
+            "it_view_relation_batch",
+        )
+        .await
+        .expect("incoming batch view relation should load");
+        let mut incoming_pairs = incoming
+            .into_iter()
+            .map(|related| {
+                let (owner, parent) = related.into_parts();
+                (owner, parent.id.clone())
+            })
+            .collect::<Vec<_>>();
+        incoming_pairs.sort_by(|left, right| {
+            format!("{:?}", left.0)
+                .cmp(&format!("{:?}", right.0))
+                .then(left.1.cmp(&right.1))
+        });
+        assert_eq!(
+            incoming_pairs,
+            vec![
+                (child_b, Id::from("view-owner-parent-b")),
+                (child_shared.clone(), Id::from("view-owner-parent-a")),
+                (child_shared, Id::from("view-owner-parent-b"))
+            ]
+        );
     });
 }
 

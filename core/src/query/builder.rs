@@ -85,6 +85,11 @@ impl QueryKind {
         let projection = view_projection(fields);
         format!("SELECT {projection} FROM $table;")
     }
+    /// Builds a full projected table scan that also carries the source record id.
+    pub fn view_all_with_record(fields: &[&str]) -> String {
+        let projection = view_projection_with_record(fields);
+        format!("SELECT {projection} FROM $table;")
+    }
     /// Builds a full ordered projected table scan for a read-only View.
     pub fn view_all_by_order(order: Order, key: &str, fields: &[&str]) -> String {
         let projection = view_order_projection(fields, key);
@@ -102,6 +107,34 @@ impl QueryKind {
     pub fn view_by_id(fields: &[&str]) -> String {
         let projection = view_projection(fields);
         format!("SELECT {projection} FROM ONLY $record;")
+    }
+    /// Builds a projected outgoing relation fetch for a read-only View.
+    pub fn view_outgoing(fields: &[&str]) -> String {
+        let projection = view_projection_with_record(fields);
+        format!(
+            "LET $ids = (SELECT VALUE out FROM $rel WHERE in = $in AND record::tb(out) = $out_table); SELECT {projection} FROM $ids;"
+        )
+    }
+    /// Builds a projected outgoing relation fetch for many owners.
+    pub fn view_outgoing_many(fields: &[&str]) -> String {
+        let projection = view_projection_with_record_from_link("out", fields);
+        format!(
+            "SELECT in AS __appdb_owner, {projection} FROM $rel WHERE in IN $ins AND record::tb(out) = $out_table;"
+        )
+    }
+    /// Builds a projected incoming relation fetch for a read-only View.
+    pub fn view_incoming(fields: &[&str]) -> String {
+        let projection = view_projection_with_record(fields);
+        format!(
+            "LET $ids = (SELECT VALUE in FROM $rel WHERE out = $out AND record::tb(in) = $in_table); SELECT {projection} FROM $ids;"
+        )
+    }
+    /// Builds a projected incoming relation fetch for many owners.
+    pub fn view_incoming_many(fields: &[&str]) -> String {
+        let projection = view_projection_with_record_from_link("in", fields);
+        format!(
+            "SELECT out AS __appdb_owner, {projection} FROM $rel WHERE out IN $outs AND record::tb(in) = $in_table;"
+        )
     }
     /// Builds a bounded table scan.
     pub fn limit(_table: &str, _count: i64) -> String {
@@ -264,6 +297,28 @@ fn view_projection(fields: &[&str]) -> String {
         .map(str::to_owned)
         .collect::<Vec<_>>();
     parts.push("record::id(id) AS id".to_owned());
+    parts.join(", ")
+}
+
+fn view_projection_with_record(fields: &[&str]) -> String {
+    let mut parts = view_projection_without_id(fields)
+        .split(", ")
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    parts.push("id AS __appdb_record".to_owned());
+    parts.push("record::id(id) AS id".to_owned());
+    parts.join(", ")
+}
+
+fn view_projection_with_record_from_link(link: &str, fields: &[&str]) -> String {
+    let mut parts = view_projection_without_id(fields)
+        .split(", ")
+        .filter(|part| !part.is_empty())
+        .map(|field| format!("{link}.{field} AS {field}"))
+        .collect::<Vec<_>>();
+    parts.push(format!("{link}.id AS __appdb_record"));
+    parts.push(format!("record::id({link}.id) AS id"));
     parts.join(", ")
 }
 

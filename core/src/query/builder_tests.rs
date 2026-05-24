@@ -52,6 +52,49 @@ fn view_ordered_scan_includes_hidden_source_order_field() {
 }
 
 #[test]
+fn view_record_scan_carries_source_record_without_polluting_view_id() {
+    let sql = QueryKind::view_all_with_record(&["title"]);
+
+    assert!(sql.contains("record::id(id) AS id"));
+    assert!(sql.contains("id AS __appdb_record"));
+    assert!(
+        sql.find("id AS __appdb_record")
+            .expect("source record projection should exist")
+            < sql
+                .find("record::id(id) AS id")
+                .expect("public id projection should exist")
+    );
+}
+
+#[test]
+fn view_relation_queries_project_related_view_rows() {
+    let outgoing = QueryKind::view_outgoing(&["title"]);
+    assert!(outgoing.contains("LET $ids ="));
+    assert!(outgoing.contains("record::tb(out) = $out_table"));
+    assert!(outgoing.contains("id AS __appdb_record"));
+    assert!(outgoing.contains("FROM $ids"));
+
+    let incoming = QueryKind::view_incoming(&["title"]);
+    assert!(incoming.contains("record::tb(in) = $in_table"));
+    assert!(incoming.contains("id AS __appdb_record"));
+}
+
+#[test]
+fn view_relation_batch_queries_preserve_owner_and_related_record_evidence() {
+    let outgoing = QueryKind::view_outgoing_many(&["title"]);
+    assert!(outgoing.contains("in AS __appdb_owner"));
+    assert!(outgoing.contains("out.id AS __appdb_record"));
+    assert!(outgoing.contains("in IN $ins"));
+    assert!(outgoing.contains("record::tb(out) = $out_table"));
+
+    let incoming = QueryKind::view_incoming_many(&["title"]);
+    assert!(incoming.contains("out AS __appdb_owner"));
+    assert!(incoming.contains("in.id AS __appdb_record"));
+    assert!(incoming.contains("out IN $outs"));
+    assert!(incoming.contains("record::tb(in) = $in_table"));
+}
+
+#[test]
 fn single_field_lookup_uses_dynamic_field_and_reports_multiple_matches() {
     let sql = QueryKind::select_id_single("user");
 

@@ -284,14 +284,22 @@ async fn open_db(path: PathBuf, options: &InitDbOptions) -> Result<Surreal<Db>> 
 
 async fn apply_schema(db: &DbHandle) -> Result<()> {
     for item in inventory::iter::<schema::SchemaItem> {
-        let ddl = make_schema_ddl_idempotent(item.ddl);
-        let response = db.query(ddl.as_ref()).await?;
-        if let Err(err) = response.check() {
-            let message = err.to_string();
-            let used_fallback_ddl = matches!(ddl, Cow::Borrowed(_));
-            if !used_fallback_ddl || !is_schema_already_defined_error(&message) {
-                return Err(DBError::QueryResponse(message).into());
-            }
+        apply_schema_ddl(db, item.ddl).await?;
+    }
+    for item in inventory::iter::<schema::HnswSchemaItem> {
+        apply_schema_ddl(db, &item.index.ddl()).await?;
+    }
+    Ok(())
+}
+
+async fn apply_schema_ddl(db: &DbHandle, ddl: &str) -> Result<()> {
+    let ddl = make_schema_ddl_idempotent(ddl);
+    let response = db.query(ddl.as_ref()).await?;
+    if let Err(err) = response.check() {
+        let message = err.to_string();
+        let used_fallback_ddl = matches!(ddl, Cow::Borrowed(_));
+        if !used_fallback_ddl || !is_schema_already_defined_error(&message) {
+            return Err(DBError::QueryResponse(message).into());
         }
     }
     Ok(())

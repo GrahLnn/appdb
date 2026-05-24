@@ -1267,6 +1267,39 @@ fn derive_view_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
                 ::appdb::repository::ViewRepo::<Self>::get_record(id).await
             }
 
+            pub async fn list_records(
+            ) -> ::anyhow::Result<::std::vec::Vec<::appdb::repository::ViewRecord<Self>>> {
+                ::appdb::repository::ViewRepo::<Self>::list_records().await
+            }
+
+            pub async fn outgoing_records(
+                id: ::surrealdb::types::RecordId,
+                relation: &str,
+            ) -> ::anyhow::Result<::std::vec::Vec<::appdb::repository::ViewRecord<Self>>> {
+                ::appdb::repository::ViewRepo::<Self>::outgoing_records(id, relation).await
+            }
+
+            pub async fn outgoing_records_by_owners(
+                ids: ::std::vec::Vec<::surrealdb::types::RecordId>,
+                relation: &str,
+            ) -> ::anyhow::Result<::std::vec::Vec<::appdb::repository::ViewRelatedRecord<Self>>> {
+                ::appdb::repository::ViewRepo::<Self>::outgoing_records_by_owners(ids, relation).await
+            }
+
+            pub async fn incoming_records(
+                id: ::surrealdb::types::RecordId,
+                relation: &str,
+            ) -> ::anyhow::Result<::std::vec::Vec<::appdb::repository::ViewRecord<Self>>> {
+                ::appdb::repository::ViewRepo::<Self>::incoming_records(id, relation).await
+            }
+
+            pub async fn incoming_records_by_owners(
+                ids: ::std::vec::Vec<::surrealdb::types::RecordId>,
+                relation: &str,
+            ) -> ::anyhow::Result<::std::vec::Vec<::appdb::repository::ViewRelatedRecord<Self>>> {
+                ::appdb::repository::ViewRepo::<Self>::incoming_records_by_owners(ids, relation).await
+            }
+
             pub async fn find_one(
                 k: &str,
                 v: &str,
