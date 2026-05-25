@@ -12,7 +12,8 @@ use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Table, Value as Surr
 use crate::connection::get_db;
 use crate::error::{DBError, DBErrorKind, classify_db_error_text};
 use crate::model::meta::{
-    HasId, ModelMeta, PaginationMeta, ResolveRecordId, UniqueLookupMeta, ViewMeta,
+    HasId, ModelMeta, PaginationMeta, ResolveRecordId, UniqueLookupMeta, ViewMeta, ViewParams,
+    ViewSource,
 };
 use crate::pagination::PaginationPlan;
 use crate::query::builder::{Order, QueryKind};
@@ -838,7 +839,21 @@ impl<V> ViewRepo<V>
 where
     V: ViewMeta,
 {
+    fn ensure_table_source(operation: &str) -> Result<()> {
+        if V::source_kind() == ViewSource::Table {
+            return Ok(());
+        }
+
+        Err(DBError::InvalidModel(format!(
+            "view `{}` does not support {operation} because it uses a custom SQL source",
+            std::any::type_name::<V>()
+        ))
+        .into())
+    }
+
     fn validate_view_order_field(field: &str) -> Result<&str> {
+        Self::ensure_table_source("table ordered list operations")?;
+
         if field == "id" || V::view_fields().contains(&field) {
             return Ok(field);
         }
@@ -863,8 +878,23 @@ where
         ViewListQuery::new()
     }
 
+    /// Lists rows from this View's custom SQL source.
+    pub async fn query(params: V::Params) -> Result<Vec<V>> {
+        let sql = V::sql().ok_or_else(|| {
+            DBError::InvalidModel(format!(
+                "view `{}` does not declare a custom SQL source",
+                std::any::type_name::<V>()
+            ))
+        })?;
+        let stmt = V::Params::bind_view_params(params, RawSqlStmt::new(sql))?;
+        let rows: Vec<SurrealDbValue> =
+            crate::query::query_bound_take(stmt, Some(V::sql_result_index())).await?;
+        raw_rows_to_views::<V>(rows).await
+    }
+
     /// Lists every row projected to the View's declared fields.
     async fn list_all() -> Result<Vec<V>> {
+        Self::ensure_table_source("list() without query params")?;
         let db = get_db()?;
         let mut result = db
             .query(QueryKind::view_all(V::view_fields()))
@@ -877,6 +907,7 @@ where
 
     /// Lists projected rows with source-record evidence.
     pub async fn list_records() -> Result<Vec<ViewRecord<V>>> {
+        Self::ensure_table_source("list_records()")?;
         let db = get_db()?;
         let mut result = db
             .query(QueryKind::view_all_with_record(V::view_fields()))
@@ -906,12 +937,14 @@ where
         RecordIdKey: From<K>,
         K: Send,
     {
+        Self::ensure_table_source("get()")?;
         let record = RecordId::new(V::source_table(), id);
         Self::get_record(record).await
     }
 
     /// Fetches one projected row by full record id.
     pub async fn get_record(record: RecordId) -> Result<V> {
+        Self::ensure_table_source("get_record()")?;
         let db = get_db()?;
         let mut result = db
             .query(QueryKind::view_by_id(V::view_fields()))
@@ -927,6 +960,7 @@ where
 
     /// Loads outgoing related rows projected as this View.
     pub async fn outgoing_records(record: RecordId, relation: &str) -> Result<Vec<ViewRecord<V>>> {
+        Self::ensure_table_source("outgoing_records()")?;
         let db = get_db()?;
         let mut result = db
             .query(QueryKind::view_outgoing(V::view_fields()))
@@ -944,6 +978,7 @@ where
         records: Vec<RecordId>,
         relation: &str,
     ) -> Result<Vec<ViewRelatedRecord<V>>> {
+        Self::ensure_table_source("outgoing_records_by_owners()")?;
         if records.is_empty() {
             return Ok(vec![]);
         }
@@ -962,6 +997,7 @@ where
 
     /// Loads incoming related rows projected as this View.
     pub async fn incoming_records(record: RecordId, relation: &str) -> Result<Vec<ViewRecord<V>>> {
+        Self::ensure_table_source("incoming_records()")?;
         let db = get_db()?;
         let mut result = db
             .query(QueryKind::view_incoming(V::view_fields()))
@@ -979,6 +1015,7 @@ where
         records: Vec<RecordId>,
         relation: &str,
     ) -> Result<Vec<ViewRelatedRecord<V>>> {
+        Self::ensure_table_source("incoming_records_by_owners()")?;
         if records.is_empty() {
             return Ok(vec![]);
         }
@@ -997,12 +1034,14 @@ where
 
     /// Finds one matching source row and returns it as this View.
     pub async fn find_one(k: &str, v: &str) -> Result<V> {
+        Self::ensure_table_source("find_one()")?;
         let id = Self::find_one_id(k, v).await?;
         Self::get_record(id).await
     }
 
     /// Finds exactly one source record id matching a field equality filter.
     pub async fn find_one_id(k: &str, v: &str) -> Result<RecordId> {
+        Self::ensure_table_source("find_one_id()")?;
         let db = get_db()?;
         let ids: Vec<RecordId> = db
             .query(QueryKind::select_id_single(V::source_table()))

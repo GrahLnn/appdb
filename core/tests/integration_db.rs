@@ -16,7 +16,7 @@ use appdb::repository::Repo;
 use appdb::tx::{TxStmt, run_tx};
 use appdb::{
     AutoFill, Bridge, Crud, DBError, DBErrorKind, Id, Order, Relation, Sensitive, SensitiveShape,
-    SensitiveValueOf, Store, StoredModel, View,
+    SensitiveValueOf, Store, StoredModel, View, ViewParams,
 };
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue, Table};
@@ -194,6 +194,34 @@ struct ItViewParentConfig {
 struct ItViewParentTitleList {
     id: Id,
     title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, View)]
+#[view(
+    sql = "SELECT record::id(id) AS id, created_at, title FROM $table WHERE created_at <= $before ORDER BY created_at DESC, id DESC LIMIT $limit;",
+    params = ItViewParentSqlParams
+)]
+struct ItViewParentSqlList {
+    id: Id,
+    created_at: i64,
+    title: String,
+}
+
+struct ItViewParentSqlParams {
+    before: i64,
+    limit: i64,
+}
+
+impl ViewParams for ItViewParentSqlParams {
+    fn bind_view_params(self, stmt: RawSqlStmt) -> anyhow::Result<RawSqlStmt> {
+        Ok(stmt
+            .bind(
+                "table",
+                surrealdb::types::Table::from(ItViewParent::storage_table()),
+            )
+            .bind("before", self.before)
+            .bind("limit", self.limit))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SurrealValue, Store)]
@@ -3988,6 +4016,82 @@ fn view_list_can_order_by_source_pagination_field_without_exposing_it() {
                 (Id::from("view-title-parent-b"), "earlier".to_owned()),
                 (Id::from("view-title-parent-a"), "later".to_owned())
             ]
+        );
+    });
+}
+
+#[test]
+fn view_sql_source_queries_with_typed_params() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        ItViewParent::delete_all()
+            .await
+            .expect("view parent cleanup should succeed");
+        ItViewChild::delete_all()
+            .await
+            .expect("view child cleanup should succeed");
+
+        ItViewParent::save_many(vec![
+            ItViewParent {
+                id: Id::from("view-sql-parent-a"),
+                created_at: 30,
+                title: "latest".to_owned(),
+                children: vec![],
+                heavy: "hidden-a".to_owned(),
+            },
+            ItViewParent {
+                id: Id::from("view-sql-parent-b"),
+                created_at: 20,
+                title: "middle".to_owned(),
+                children: vec![],
+                heavy: "hidden-b".to_owned(),
+            },
+            ItViewParent {
+                id: Id::from("view-sql-parent-c"),
+                created_at: 10,
+                title: "oldest".to_owned(),
+                children: vec![],
+                heavy: "hidden-c".to_owned(),
+            },
+        ])
+        .await
+        .expect("view fixtures should save");
+
+        let listed = ItViewParentSqlList::query(ItViewParentSqlParams {
+            before: 25,
+            limit: 2,
+        })
+        .await
+        .expect("sql view should query with typed params");
+
+        assert_eq!(
+            listed
+                .iter()
+                .map(|item| (item.id.clone(), item.created_at, item.title.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Id::from("view-sql-parent-b"), 20, "middle".to_owned()),
+                (Id::from("view-sql-parent-c"), 10, "oldest".to_owned())
+            ]
+        );
+    });
+}
+
+#[test]
+fn view_sql_source_rejects_table_list_api() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        let err = ItViewParentSqlList::list()
+            .await
+            .expect_err("sql view should require query(params)");
+        let typed = DBError::from(err);
+        assert!(
+            matches!(typed, DBError::InvalidModel(_)),
+            "expected invalid model error, got {typed:?}"
         );
     });
 }

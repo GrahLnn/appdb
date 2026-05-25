@@ -71,6 +71,39 @@ pub trait PaginationMeta {
     }
 }
 
+/// Query source owned by a View.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewSource {
+    /// Read from the View's declared Store source table.
+    Table,
+    /// Read from a typed custom SurrealQL statement.
+    Sql,
+}
+
+/// Typed bind values for a custom SQL View.
+pub trait ViewParams: Send {
+    /// Adds this parameter set to a raw SQL statement.
+    fn bind_view_params(self, stmt: crate::query::RawSqlStmt) -> Result<crate::query::RawSqlStmt>;
+}
+
+impl ViewParams for () {
+    fn bind_view_params(self, stmt: crate::query::RawSqlStmt) -> Result<crate::query::RawSqlStmt> {
+        Ok(stmt)
+    }
+}
+
+/// Placeholder source for Views backed by custom SQL instead of one Store table.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, surrealdb::types::SurrealValue)]
+pub struct NoViewSource;
+
+impl ModelMeta for NoViewSource {
+    fn table_name() -> &'static str {
+        "__appdb_no_view_source"
+    }
+}
+
+impl PaginationMeta for NoViewSource {}
+
 /// Metadata and decoder contract for read-only typed projections.
 #[async_trait::async_trait]
 pub trait ViewMeta:
@@ -85,6 +118,24 @@ pub trait ViewMeta:
 {
     /// Store model that owns the source table and write semantics.
     type Source: ModelMeta + PaginationMeta;
+
+    /// Parameter object required by custom SQL Views.
+    type Params: ViewParams + Send;
+
+    /// Source kind used by this View.
+    fn source_kind() -> ViewSource {
+        ViewSource::Table
+    }
+
+    /// SurrealQL used when [`Self::source_kind`] returns [`ViewSource::Sql`].
+    fn sql() -> Option<&'static str> {
+        None
+    }
+
+    /// Result-set index decoded for custom SQL Views.
+    fn sql_result_index() -> usize {
+        0
+    }
 
     /// Stored projection shape decoded from SurrealDB before nested views hydrate.
     type Stored: Clone + serde::de::DeserializeOwned + SurrealValue + Send;
