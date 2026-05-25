@@ -1,17 +1,32 @@
 # appdb
 
-`appdb` is a lightweight SurrealDB helper library for embedded applications, including Tauri-style desktop apps. It provides derive-driven model APIs, a small public surface, and optional field encryption for local-first persistence.
+`appdb` is a lightweight SurrealDB helper library for embedded Rust applications,
+especially local-first desktop apps. It gives domain models a small, derive-driven
+API for persistence, typed projections, graph relations, encrypted fields,
+schema registration, raw SurrealQL, and explicit transaction work.
 
 The workspace publishes two crates:
 
-- `appdb`: the main library
-- `appdb-macros`: procedural macros used by `appdb`
+- `appdb`: the runtime, model APIs, query helpers, and public re-exports
+- `appdb-macros`: the procedural macros re-exported by `appdb`
+
+The current workspace targets Rust 2024 and requires Rust `1.94.0` or newer.
 
 ## Installation
 
+Application crates usually need `appdb`, `serde`, `surrealdb`, `tokio`, and an
+error type such as `anyhow`:
+
 ```bash
 cargo add appdb
+cargo add serde --features derive
+cargo add surrealdb@3.1.0-beta.3 --features kv-surrealkv
+cargo add tokio --features macros,rt-multi-thread
+cargo add anyhow
 ```
+
+`appdb` re-exports its derive macros, so application code can import `Store`,
+`View`, `Sensitive`, `Bridge`, and `Relation` from `appdb`.
 
 ## Quick Start
 
@@ -31,10 +46,11 @@ struct User {
 async fn main() -> anyhow::Result<()> {
     init_db("data/appdb".into()).await?;
 
-    let saved = User::save(User {
+    let saved = User {
         id: Id::from("u1"),
-        name: "alice".into(),
-    })
+        name: "alice".to_owned(),
+    }
+    .save()
     .await?;
 
     let loaded = User::get("u1").await?;
@@ -46,23 +62,307 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-## Core Concepts
+The generated model methods are the intended application-facing API. `Repo<T>`
+remains public for advanced integration seams, but normal application code should
+stay on the model type.
 
-### Model-first CRUD
+## Runtime
 
-`#[derive(Store)]` generates model-level persistence APIs such as `save`, `save_many`, `create`, `get`, and `list`. The intended public API is the model type itself rather than manually assembling repository calls.
+`init_db(path)` opens an embedded SurrealKV database, selects the `app/app`
+namespace and database, applies registered schema items, and installs the handle
+used by model, graph, view, query, and transaction helpers.
 
-Common imports are re-exported from `appdb::prelude::*`.
+Use `init_db_with_options(path, InitDbOptions::default()...)` when the database
+needs SurrealKV versioning, retention, query timeouts, transaction timeouts,
+changefeed garbage collection, or AST payload storage.
 
-### Managed schema startup and schemaless persistence
+Use `DbRuntime::open*` when a caller needs to own a runtime and install it later
+with `DbRuntime::install_global()`.
 
-`init_db*` and `DbRuntime::open*` are the schema-managed startup path. They apply registered schema items such as indexes generated from `#[unique]`.
+## Store Models
 
-Persistence itself keeps a separate contract: first saves on the default embedded runtime still support schemaless storage. Startup management and model CRUD are related, but they are not the same guarantee.
+`#[derive(Store)]` turns a struct with named fields into a persisted model. It
+generates table metadata, id helpers, stored-shape conversion, lookup metadata,
+and model-level methods such as:
 
-### Sensitive fields
+- `save`, `save_many`, `get`, `get_record`
+- `list`, `list_limit`, `list().order_by(...)`
+- `create_at`, `upsert_at`, `update_at`
+- `delete`, `delete_all`, `exists`
+- `find_one_id`, `list_record_ids`
 
-`#[derive(Sensitive)]` supports encrypted fields marked with `#[secure]`.
+```rust
+use appdb::prelude::*;
+use appdb::Store;
+use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct Post {
+    id: Id,
+    #[unique]
+    slug: String,
+    #[pagin]
+    created_at: i64,
+    title: String,
+}
+
+async fn example() -> anyhow::Result<()> {
+    let page = Post::pagin_desc(20, None).await?;
+    let ordered = Post::list().order_by("created_at", Order::Desc).await?;
+    let post_id = Post::find_one_id("slug", "hello").await?;
+    Ok(())
+}
+```
+
+`#[unique]` registers schema indexes for automatic lookup. appdb can resolve a
+record from the declared lookup fields, including foreign-backed lookup fields
+that first resolve to child `RecordId` values.
+
+`#[pagin]` registers a stable keyset-pagination index and enables `pagin_desc` /
+`pagin_asc`, which return `Page<T>` with `items` and an optional `PageCursor`.
+Ordering a full list is limited to `id` and the declared pagination field, which
+keeps list ordering explicit instead of accepting arbitrary field names.
+
+Explicit-id writes use full `RecordId` values. `create_at` fails on conflict,
+while `upsert_at` and `save` update the same addressed record.
+
+## Auto-filled Fields
+
+`AutoFill` is an appdb-managed scalar for fields that should be filled by the
+write path. Today the supported fill policy is `#[fill(now)]`.
+
+```rust
+use appdb::prelude::*;
+use appdb::{AutoFill, Store};
+use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct Entry {
+    id: Id,
+    #[pagin]
+    #[fill(now)]
+    created_at: AutoFill,
+    title: String,
+}
+
+async fn example() -> anyhow::Result<()> {
+    let saved = Entry {
+        id: Id::from("entry-1"),
+        created_at: AutoFill::pending(),
+        title: "created by appdb".to_owned(),
+    }
+    .save()
+    .await?;
+    assert!(!saved.created_at.is_pending());
+    Ok(())
+}
+```
+
+Pending values are resolved on `save` and `save_many`. Already resolved values
+are preserved.
+
+## Foreign Fields
+
+Use `#[foreign]` when a model field should store record links but hydrate back
+into full caller-facing values.
+
+```rust
+use appdb::prelude::*;
+use appdb::Store;
+use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct Author {
+    id: Id,
+    #[unique]
+    handle: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct Article {
+    id: Id,
+    title: String,
+    #[foreign]
+    authors: Vec<Author>,
+}
+```
+
+Supported shapes are recursive `Option<_>` and `Vec<_>` wrappers whose leaf type
+implements appdb's foreign bridge. Store models implement that bridge
+automatically. Use `#[derive(Bridge)]` on an enum when one foreign field can point
+to multiple Store model types.
+
+`#[table_as(Target)]` lets an alias model reuse another Store model's table and
+lookup metadata. That is useful when a caller needs a narrower Rust shape over an
+existing persisted table.
+
+For explicit-id writes where related records already exist, call
+`model.foreign().field_name(record_id_shape).upsert_at(...)`. The generated
+foreign-write builder can also return a `View` directly with
+`create_at_returning::<View>`, `upsert_at_returning::<View>`, and
+`update_at_returning::<View>`.
+
+## Relation Fields And Graph Helpers
+
+Use `#[relate("edge_table")]` or `#[back_relate("edge_table")]` when a field
+should live in a SurrealDB relation table instead of being stored inline on the
+parent row.
+
+```rust
+use appdb::prelude::*;
+use appdb::Store;
+use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct Tag {
+    id: Id,
+    label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct Note {
+    id: Id,
+    title: String,
+    #[relate("note_tags")]
+    tags: Vec<Tag>,
+}
+```
+
+Relation-backed fields support direct, `Option<T>`, `Vec<T>`, and
+`Option<Vec<T>>` shapes. `save`, `save_many`, `create`, `get`, `list`, and
+`list_limit` synchronize and hydrate those relation fields.
+
+For direct graph work, use `#[derive(Relation)]`, `GraphRepo`, the free graph
+functions, or generated model methods such as `relate_by_name`,
+`back_relate_by_name`, `unrelate_by_name`, `outgoing_ids`, `incoming_ids`,
+`outgoing`, `incoming`, `outgoing_count`, `incoming_count`,
+`outgoing_count_as`, and `incoming_count_as`.
+
+```rust
+use appdb::{Relation, Store};
+
+#[derive(Debug, Clone, Copy, Relation)]
+#[relation(name = "note_links")]
+struct NoteLinks;
+```
+
+## Read-only Views
+
+`#[derive(View)]` defines a typed read projection. A table-backed View reads only
+its declared fields from a Store source, so callers can expose list or detail
+surfaces without loading every field from the source model.
+
+```rust
+use appdb::prelude::*;
+use appdb::{Store, View};
+use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, Store)]
+struct Post {
+    id: Id,
+    #[pagin]
+    created_at: i64,
+    title: String,
+    body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, View)]
+#[view(source = Post)]
+struct PostListItem {
+    id: Id,
+    title: String,
+}
+
+async fn example() -> anyhow::Result<()> {
+    let items = PostListItem::list()
+        .order_by("created_at", Order::Desc)
+        .await?;
+    let one = PostListItem::get("post-1").await?;
+    Ok(())
+}
+```
+
+View list ordering accepts `id`, declared View fields, and the source model's
+`#[pagin]` field even when that field is not exposed by the View.
+
+Nested Views are declared with `#[view(nested)]` and can use direct, `Option<_>`,
+`Vec<_>`, or recursive `Option` / `Vec` wrappers:
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, View)]
+#[view(source = Article)]
+struct ArticleConfig {
+    id: Id,
+    title: String,
+    #[view(nested)]
+    authors: Vec<AuthorListItem>,
+}
+```
+
+Table-backed Views expose `list`, `list().order_by(...)`, `get`, `get_record`,
+`find_one`, `find_one_id`, `list_records`, `outgoing_records`,
+`incoming_records`, and batch relation queries that preserve each owner record.
+
+## SQL-backed Views
+
+Views can also be backed by a custom SurrealQL statement. SQL-backed Views use
+typed parameters and are queried through `View::query(params)`.
+
+```rust
+use appdb::model::meta::{ModelMeta, ViewParams};
+use appdb::query::RawSqlStmt;
+use appdb::prelude::*;
+use appdb::View;
+use serde::{Deserialize, Serialize};
+use surrealdb::types::{SurrealValue, Table};
+
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue, View)]
+#[view(
+    sql = "SELECT record::id(id) AS id, created_at, title FROM $table WHERE created_at <= $before ORDER BY created_at DESC, id DESC LIMIT $limit;",
+    params = RecentPosts
+)]
+struct RecentPost {
+    id: Id,
+    created_at: i64,
+    title: String,
+}
+
+struct RecentPosts {
+    before: i64,
+    limit: i64,
+}
+
+impl ViewParams for RecentPosts {
+    fn bind_view_params(self, stmt: RawSqlStmt) -> anyhow::Result<RawSqlStmt> {
+        Ok(stmt
+            .bind("table", Table::from(Post::storage_table()))
+            .bind("before", self.before)
+            .bind("limit", self.limit))
+    }
+}
+
+async fn example() -> anyhow::Result<()> {
+    let recent = RecentPost::query(RecentPosts {
+        before: 1_900_000_000,
+        limit: 20,
+    })
+    .await?;
+    Ok(())
+}
+```
+
+SQL-backed Views do not support table-source methods such as `list()` and
+`get()`, because their source is the custom query itself.
+
+## Sensitive Fields
+
+`#[derive(Sensitive)]` encrypts fields marked with `#[secure]` before
+persistence and decrypts them on read.
 
 ```rust
 use appdb::prelude::*;
@@ -76,101 +376,72 @@ struct Profile {
     alias: String,
     #[secure]
     secret: String,
+    #[secure]
+    note: Option<String>,
 }
 ```
 
-The model still uses the same `Store` APIs, while secure fields are encrypted before persistence and decrypted on read.
+Supported secure shapes include `String`, `Option<String>`, nested
+`Sensitive` children, `Option<Child>`, `Vec<Child>`, and
+`SensitiveValueOf<T>` for enum-bearing payloads inside an approved secure
+container.
 
-Sensitive models now auto-register their crypto metadata on first runtime use, so the default `Store`/resolver paths do not require manual registration code. You can override the defaults globally with `appdb::crypto::set_default_crypto_service`, `set_default_crypto_account`, or `set_default_crypto_config`, and refine a model or field with `#[crypto(...)]`.
+Sensitive models auto-register crypto metadata on first runtime use. Override
+defaults globally with `set_default_crypto_service`,
+`set_default_crypto_account`, or `set_default_crypto_config`, and refine models
+or fields with `#[crypto(...)]`.
 
-Supported secure shapes include:
+## Schema And Vector Indexes
 
-- `String`
-- `Option<String>`
-- nested `Sensitive` children such as `Child`, `Option<Child>`, and `Vec<Child>`
-- enum-bearing leaves inside a secure container via `SensitiveValueOf<T>`
+`#[unique]`, `#[pagin]`, `impl_schema!`, and `impl_hnsw_index!` register schema
+items through inventory. Runtime initialization applies those items
+idempotently.
 
-Every `Sensitive` model also exposes stable secure-field metadata through `Model::secure_fields()`.
+```rust
+use appdb::model::schema::{VectorDistance, VectorIndexType};
 
-### Foreign fields
+struct EventEmbedding;
 
-Use `#[foreign]` on supported child model fields to persist related values as record links while hydrating them back into full models when reading.
+appdb::impl_hnsw_index!(
+    EventEmbedding,
+    name: "event_embedding_hnsw",
+    table: "event_embedding",
+    field: "embedding",
+    dimension: 64,
+    vector_type: VectorIndexType::F32,
+    distance: VectorDistance::Cosine,
+    ef_construction: 150,
+    m: 12,
+    concurrently: true,
+);
+```
 
-Foreign-backed fields also participate in automatic Store lookup by resolving the caller-facing child value into its stored `RecordId` shape before querying.
+HNSW index definitions validate plain identifiers, support nested field paths
+such as `items.embedding`, and render SurrealDB `DEFINE INDEX ... HNSW` DDL.
 
-Supported shapes include:
+## Raw SQL And Transactions
 
-- `Child`
-- `Option<Child>`
-- `Vec<Child>`
-
-`#[table_as(...)]` is also supported for referenced models.
-
-### Relation-backed fields
-
-Use `#[relate("edge_name")]` on supported child model fields when the relation should live in a dedicated SurrealDB relation table instead of being stored inline on the parent row.
-
-Supported shapes include:
-
-- `Child`
-- `Option<Child>`
-- `Vec<Child>`
-
-At write time the parent table omits the field, while appdb synchronizes ordered edges in the named relation table. `get`, `list`, `list_limit`, `save`, and `save_many` hydrate those fields back into full models on read.
-
-### Graph relations
-
-`GraphRepo` provides helpers around SurrealDB relation tables.
+For query shapes outside the derive-driven API, use `RawSqlStmt` and the raw
+query helpers. Unbound helpers include `query_raw`, `query_checked`,
+`query_take`, and `query_return`; bound helpers include `query_bound`,
+`query_bound_checked`, `query_bound_take`, and `query_bound_return`.
 
 ```rust
 use appdb::prelude::*;
 
-let rel = relation_name::<FollowRel>();
-GraphRepo::relate_at(user_a.id(), user_b.id(), rel).await?;
-GraphRepo::back_relate_at(user_a.id(), user_b.id(), rel).await?; // creates user_b -> user_a
-let targets = GraphRepo::out_ids(user_a.id(), rel, "user").await?;
+async fn example() -> anyhow::Result<()> {
+    let stmt = RawSqlStmt::new("RETURN $value;").bind("value", 42);
+    let value: Option<i64> = query_bound_return(stmt).await?;
+    Ok(())
+}
 ```
 
-`#[derive(Store)]` models also expose instance-side graph accessors by relation name.
+Use `run_tx` and `TxStmt` when several statements must run inside one explicit
+SurrealDB transaction.
 
-```rust
-let rel = relation_name::<FollowRel>();
-let ids = user_a.outgoing_ids(rel).await?;
-let users = user_a.outgoing::<User>(rel).await?;
-let total = user_a.outgoing_count(rel).await?;
-let typed_total = user_a.outgoing_count_as::<User>(rel).await?;
-```
-
-If you do not want to declare a dedicated `#[derive(Relation)]` type, `#[derive(Store)]`
-models can also mutate graph edges directly with a raw relation name:
-
-```rust
-user_a.relate_by_name(&user_b, "follow_edge").await?;
-user_a.back_relate_by_name(&user_b, "follow_edge").await?;
-user_a.unrelate_by_name(&user_b, "follow_edge").await?;
-```
-
-### Raw SQL with bind values
-
-For queries outside the derive-driven CRUD surface, use the raw SQL helpers with bind values.
-
-```rust
-use appdb::prelude::*;
-
-let stmt = RawSqlStmt::new("RETURN $value;").bind("value", 42);
-let value: Option<i64> = query_bound_return(stmt).await?;
-```
-
-## Capabilities
-
-- `#[derive(Store)]` for model-level CRUD
-- `appdb::prelude::*` for common imports
-- `#[derive(Sensitive)]` and `#[secure]` for encrypted fields
-- `#[unique]`-driven schema registration
-- Foreign fields via `#[foreign]`
-- Table remapping with `#[table_as(...)]`
-- Graph relation helpers via `GraphRepo`
-- Raw SQL helpers with bind support
+Errors are normalized through `DBError` / `DBErrorKind` for common cases such as
+not found, missing table, conflict, decode failure, invalid models, and query
+response errors.
 
 ## Workspace Layout
 
@@ -179,7 +450,7 @@ let value: Option<i64> = query_bound_return(stmt).await?;
 
 ## Development
 
-Run the final Rust 2024 workspace validator contract from the workspace root:
+Run the workspace checks from the repository root:
 
 ```bash
 cargo check --workspace --all-targets
