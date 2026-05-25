@@ -391,6 +391,14 @@ defaults globally with `set_default_crypto_service`,
 `set_default_crypto_account`, or `set_default_crypto_config`, and refine models
 or fields with `#[crypto(...)]`.
 
+By default, auto-registered crypto contexts use the OS keyring and a local
+protected backup for the symmetric key. Secure field ciphertext is therefore
+bound to the machine/user environment that generated that key. Copying the
+database to another machine does not make `#[secure]` fields decryptable there;
+only non-secure fields remain portable by themselves. Cross-machine decryption
+requires explicitly registering a crypto context backed by the same externally
+managed key.
+
 ## Schema And Vector Indexes
 
 `#[unique]`, `#[pagin]`, `impl_schema!`, and `impl_hnsw_index!` register schema
