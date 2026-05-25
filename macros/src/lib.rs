@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashSet;
 use syn::{
-    Attribute, Data, DeriveInput, Error, Field, Fields, GenericArgument, Meta, PathArguments, Type,
-    TypePath, parse_macro_input,
+    Attribute, Data, DeriveInput, Error, Field, Fields, GenericArgument, LitInt, LitStr, Meta,
+    PathArguments, Type, TypePath, parse_macro_input,
 };
 
 #[proc_macro_derive(Sensitive, attributes(secure, crypto))]
@@ -1135,7 +1135,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 fn derive_view_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let struct_ident = input.ident;
     let vis = input.vis.clone();
-    let source_ty = view_source_target(&input.attrs)?;
+    let view_source = view_source_config(&input.attrs)?;
 
     let named_fields = match input.data {
         Data::Struct(data) => match data.fields {
@@ -1201,6 +1201,9 @@ fn derive_view_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
         }
     });
 
+    let source_impl = view_source.impl_tokens();
+    let source_methods_impl = view_source.methods_tokens(&struct_ident);
+
     Ok(quote! {
         #[derive(
             Debug,
@@ -1215,7 +1218,7 @@ fn derive_view_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
 
         #[::async_trait::async_trait]
         impl ::appdb::model::meta::ViewMeta for #struct_ident {
-            type Source = #source_ty;
+            #source_impl
             type Stored = #stored_struct_ident;
 
             fn view_fields() -> &'static [&'static str] {
@@ -1252,6 +1255,8 @@ fn derive_view_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
             pub fn list() -> ::appdb::repository::ViewListQuery<Self> {
                 ::appdb::repository::ViewRepo::<Self>::list()
             }
+
+            #source_methods_impl
 
             pub async fn get<T>(id: T) -> ::anyhow::Result<Self>
             where
@@ -1905,28 +1910,80 @@ fn table_alias_target(attrs: &[Attribute]) -> syn::Result<Option<Type>> {
     Ok(target)
 }
 
-fn view_source_target(attrs: &[Attribute]) -> syn::Result<Type> {
-    let mut target = None;
+enum ViewSourceConfig {
+    Table {
+        source_ty: Type,
+    },
+    Sql {
+        params_ty: Type,
+        sql: LitStr,
+        result_idx: usize,
+    },
+}
+
+impl ViewSourceConfig {
+    fn impl_tokens(&self) -> proc_macro2::TokenStream {
+        match self {
+            Self::Table { source_ty } => quote! {
+                type Source = #source_ty;
+                type Params = ();
+            },
+            Self::Sql {
+                params_ty,
+                sql,
+                result_idx,
+            } => quote! {
+                type Source = ::appdb::model::meta::NoViewSource;
+                type Params = #params_ty;
+
+                fn source_kind() -> ::appdb::model::meta::ViewSource {
+                    ::appdb::model::meta::ViewSource::Sql
+                }
+
+                fn sql() -> ::std::option::Option<&'static str> {
+                    ::std::option::Option::Some(#sql)
+                }
+
+                fn sql_result_index() -> usize {
+                    #result_idx
+                }
+            },
+        }
+    }
+
+    fn methods_tokens(&self, struct_ident: &syn::Ident) -> proc_macro2::TokenStream {
+        match self {
+            Self::Table { .. } => quote! {},
+            Self::Sql { params_ty, .. } => quote! {
+                pub async fn query(params: #params_ty) -> ::anyhow::Result<::std::vec::Vec<#struct_ident>> {
+                    ::appdb::repository::ViewRepo::<Self>::query(params).await
+                }
+            },
+        }
+    }
+}
+
+fn view_source_config(attrs: &[Attribute]) -> syn::Result<ViewSourceConfig> {
+    let mut source = None;
+    let mut sql = None;
+    let mut params = None;
+    let mut result = None;
 
     for attr in attrs {
         if !attr.path().is_ident("view") {
             continue;
         }
 
-        if target.is_some() {
-            return Err(Error::new_spanned(
-                attr,
-                "duplicate #[view(...)] attribute is not supported",
-            ));
-        }
-
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("source") {
+                if source.is_some() {
+                    return Err(meta.error("duplicate #[view(source = ...)] attribute is not supported"));
+                }
                 let value = meta.value()?;
                 let parsed: Type = value.parse()?;
                 match parsed {
                     Type::Path(TypePath { ref path, .. }) if !path.segments.is_empty() => {
-                        target = Some(parsed);
+                        source = Some(parsed);
                         Ok(())
                     }
                     _ => Err(Error::new_spanned(
@@ -1934,18 +1991,75 @@ fn view_source_target(attrs: &[Attribute]) -> syn::Result<Type> {
                         "#[view(source = ...)] source must be a type path",
                     )),
                 }
+            } else if meta.path.is_ident("sql") {
+                if sql.is_some() {
+                    return Err(meta.error("duplicate #[view(sql = ...)] attribute is not supported"));
+                }
+                let value = meta.value()?;
+                sql = Some(value.parse()?);
+                Ok(())
+            } else if meta.path.is_ident("params") {
+                if params.is_some() {
+                    return Err(meta.error("duplicate #[view(params = ...)] attribute is not supported"));
+                }
+                let value = meta.value()?;
+                let parsed: Type = value.parse()?;
+                match parsed {
+                    Type::Path(TypePath { ref path, .. }) if !path.segments.is_empty() => {
+                        params = Some(parsed);
+                        Ok(())
+                    }
+                    _ => Err(Error::new_spanned(
+                        parsed,
+                        "#[view(params = ...)] params must be a type path",
+                    )),
+                }
+            } else if meta.path.is_ident("result") {
+                if result.is_some() {
+                    return Err(meta.error("duplicate #[view(result = ...)] attribute is not supported"));
+                }
+                let value = meta.value()?;
+                let parsed: LitInt = value.parse()?;
+                result = Some(parsed.base10_parse::<usize>()?);
+                Ok(())
             } else {
-                Err(meta.error("unsupported view attribute; expected `source = Type`"))
+                Err(meta.error("unsupported view attribute; expected `source = Type`, `sql = \"...\"`, `params = Type`, or `result = N`"))
             }
         })?;
     }
 
-    target.ok_or_else(|| {
-        Error::new(
+    match (sql, params, result) {
+        (None, None, None) => {
+            let source_ty = source.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "View requires #[view(source = SourceStoreType)] or #[view(sql = \"...\", params = ParamsType)]",
+                )
+            })?;
+            Ok(ViewSourceConfig::Table { source_ty })
+        }
+        (Some(sql), Some(params_ty), result_idx) => {
+            if source.is_some() {
+                return Err(Error::new(
+                    proc_macro2::Span::call_site(),
+                    "SQL View cannot combine #[view(source = ...)] with #[view(sql = ...)]",
+                ));
+            }
+            Ok(ViewSourceConfig::Sql {
+                params_ty,
+                sql,
+                result_idx: result_idx.unwrap_or(0),
+            })
+        }
+        (Some(_), None, _) => Err(Error::new(
             proc_macro2::Span::call_site(),
-            "View requires #[view(source = SourceStoreType)]",
-        )
-    })
+            "SQL View requires #[view(params = ParamsType)]",
+        )),
+        (None, Some(_), _) | (None, _, Some(_)) => Err(Error::new(
+            proc_macro2::Span::call_site(),
+            "#[view(params = ...)] and #[view(result = ...)] require #[view(sql = \"...\")]",
+        )),
+    }
 }
 
 fn field_view_nested_attr(field: &Field) -> syn::Result<bool> {

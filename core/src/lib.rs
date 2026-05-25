@@ -32,6 +32,7 @@ pub use connection::*;
 pub use crypto::*;
 pub use error::*;
 pub use graph::*;
+pub use model::meta::{ViewParams, ViewSource};
 pub use model::schema::{HnswIndexDef, VectorDistance, VectorIndexType};
 pub use query::Order;
 pub use repository::*;
