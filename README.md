@@ -130,7 +130,13 @@ while `upsert_at` and `save` update the same addressed record.
 ## Auto-filled Fields
 
 `AutoFill` is an appdb-managed scalar for fields that should be filled by the
-write path. Today the supported fill policy is `#[fill(now)]`.
+write path. Application code passes `AutoFill::pending()` instead of manually
+writing the value. The Store write path resolves pending values before
+persistence and returns the resolved value in the saved model.
+
+Today the supported fill policy is `#[fill(now)]`. It writes the current UTC
+timestamp as a string, normalized with a fixed nine-digit fractional second:
+`YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ`. It is not an integer millisecond timestamp.
 
 ```rust
 use appdb::prelude::*;
@@ -160,8 +166,9 @@ async fn example() -> anyhow::Result<()> {
 }
 ```
 
-Pending values are resolved on `save` and `save_many`. Already resolved values
-are preserved.
+Pending values are resolved on `save` and `save_many`; already resolved values
+are preserved. Use `AutoFill::resolved(value)` only when importing or replaying a
+known timestamp that should not be replaced.
 
 ## Foreign Fields
 
