@@ -20,7 +20,7 @@ error type such as `anyhow`:
 ```bash
 cargo add appdb
 cargo add serde --features derive
-cargo add surrealdb@3.1.0-beta.3 --features kv-surrealkv
+cargo add surrealdb@3.1.2 --features kv-surrealkv
 cargo add tokio --features macros,rt-multi-thread
 cargo add anyhow
 ```
