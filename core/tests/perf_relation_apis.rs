@@ -41,6 +41,13 @@ struct PerfGraphNode {
     label: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SurrealValue, Store)]
+struct PerfPlainRow {
+    id: Id,
+    label: String,
+    count: i64,
+}
+
 fn test_db_path() -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -71,6 +78,24 @@ async fn ensure_db() {
 
 fn ms_per_call(elapsed: Duration, iterations: u32) -> f64 {
     elapsed.as_secs_f64() * 1000.0 / f64::from(iterations)
+}
+
+fn emit_perf_metric(
+    metric: &str,
+    scenario: &str,
+    iterations: u32,
+    elapsed: Duration,
+    dimensions: &[(&str, usize)],
+) {
+    let mut line = format!(
+        "APPDB_PERF {{\"metric\":\"{metric}\",\"scenario\":\"{scenario}\",\"unit\":\"ms_per_call\",\"iterations\":{iterations},\"avg_ms\":{:.6}",
+        ms_per_call(elapsed, iterations)
+    );
+    for (key, value) in dimensions {
+        line.push_str(&format!(",\"{key}\":{value}"));
+    }
+    line.push('}');
+    println!("{line}");
 }
 
 fn perf_leaf(id: String) -> PerfRelationLeaf {
@@ -113,6 +138,16 @@ fn perf_graph_node(id: String) -> PerfGraphNode {
         id: Id::from(id.clone()),
         label: format!("node-{id}"),
     }
+}
+
+fn perf_plain_batch(prefix: &str, row_count: usize) -> Vec<PerfPlainRow> {
+    (0..row_count)
+        .map(|idx| PerfPlainRow {
+            id: Id::from(format!("{prefix}-{idx}")),
+            label: format!("plain-{prefix}-{idx}"),
+            count: idx as i64,
+        })
+        .collect()
 }
 
 fn perf_graph_record(id: &str) -> RecordId {
@@ -178,6 +213,18 @@ fn perf_relation_field_save_smoke() {
             "perf_relation_field_save_smoke: items={item_count}, backlinks={backlink_count}, avg_ms_per_save={:.3}",
             ms_per_call(elapsed, iterations)
         );
+        emit_perf_metric(
+            "relation_field_save",
+            "single_root_replace_edges",
+            iterations,
+            elapsed,
+            &[
+                ("roots", 1),
+                ("items_per_root", item_count),
+                ("backlinks_per_root", backlink_count),
+                ("edges_per_root", item_count + backlink_count),
+            ],
+        );
     });
 }
 
@@ -234,6 +281,129 @@ fn perf_relation_field_save_many_smoke() {
         println!(
             "perf_relation_field_save_many_smoke: roots={root_count}, items_per_root={item_count}, backlinks_per_root={backlink_count}, avg_ms_per_batch={:.3}",
             ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "relation_field_save_many",
+            "batch_roots_replace_edges",
+            iterations,
+            elapsed,
+            &[
+                ("roots", root_count),
+                ("items_per_root", item_count),
+                ("backlinks_per_root", backlink_count),
+                ("edges_per_root", item_count + backlink_count),
+            ],
+        );
+    });
+}
+
+#[test]
+#[ignore = "manual performance smoke test"]
+fn perf_plain_store_write_paths_smoke() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<PerfPlainRow>::delete_all()
+            .await
+            .expect("plain row cleanup should succeed");
+
+        let row_count = 512usize;
+        let iterations = 4u32;
+
+        let insert_batches: Vec<Vec<PerfPlainRow>> = (0..iterations)
+            .map(|idx| perf_plain_batch(&format!("insert-{idx}"), row_count))
+            .collect();
+        let start = Instant::now();
+        for batch in insert_batches {
+            let inserted = Repo::<PerfPlainRow>::insert(batch)
+                .await
+                .expect("plain insert should succeed");
+            assert_eq!(inserted.len(), row_count);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "perf_plain_store_write_paths_smoke: insert rows={row_count}, avg_ms_per_batch={:.3}",
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "plain_store_write",
+            "raw_insert_new_rows",
+            iterations,
+            elapsed,
+            &[("rows", row_count)],
+        );
+
+        let ignore_seed = perf_plain_batch("insert-ignore-conflict", row_count);
+        Repo::<PerfPlainRow>::insert(ignore_seed.clone())
+            .await
+            .expect("plain insert_ignore seed should succeed");
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let inserted = Repo::<PerfPlainRow>::insert_ignore(ignore_seed.clone())
+                .await
+                .expect("plain insert_ignore should succeed");
+            assert!(inserted.is_empty());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "perf_plain_store_write_paths_smoke: insert_ignore all_conflicts rows={row_count}, avg_ms_per_batch={:.3}",
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "plain_store_write",
+            "raw_insert_ignore_all_conflicts",
+            iterations,
+            elapsed,
+            &[("rows", row_count)],
+        );
+
+        let replace_seed = perf_plain_batch("insert-or-replace-existing", row_count);
+        Repo::<PerfPlainRow>::insert(replace_seed.clone())
+            .await
+            .expect("plain insert_or_replace seed should succeed");
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let replaced = Repo::<PerfPlainRow>::insert_or_replace(replace_seed.clone())
+                .await
+                .expect("plain insert_or_replace should succeed");
+            assert_eq!(replaced.len(), row_count);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "perf_plain_store_write_paths_smoke: insert_or_replace existing rows={row_count}, avg_ms_per_batch={:.3}",
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "plain_store_write",
+            "raw_insert_or_replace_existing_rows",
+            iterations,
+            elapsed,
+            &[("rows", row_count)],
+        );
+
+        let save_many_batch = perf_plain_batch("save-many-existing", row_count);
+        PerfPlainRow::save_many(save_many_batch.clone())
+            .await
+            .expect("plain save_many seed should succeed");
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let saved = PerfPlainRow::save_many(save_many_batch.clone())
+                .await
+                .expect("plain save_many should succeed");
+            assert_eq!(saved.len(), row_count);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "perf_plain_store_write_paths_smoke: save_many existing rows={row_count}, avg_ms_per_batch={:.3}",
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "plain_store_write",
+            "save_many_existing_rows",
+            iterations,
+            elapsed,
+            &[("rows", row_count)],
         );
     });
 }
@@ -308,9 +478,17 @@ fn perf_store_graph_accessors_smoke() {
                 .expect("outgoing_ids should succeed");
             assert_eq!(ids.len(), edge_count);
         }
+        let elapsed = start.elapsed();
         println!(
             "perf_store_graph_accessors_smoke: outgoing_ids avg_ms={:.3}",
-            ms_per_call(start.elapsed(), iterations)
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "graph_accessor",
+            "outgoing_ids",
+            iterations,
+            elapsed,
+            &[("edges", edge_count)],
         );
 
         let start = Instant::now();
@@ -321,9 +499,17 @@ fn perf_store_graph_accessors_smoke() {
                 .expect("outgoing rows should succeed");
             assert_eq!(rows.len(), edge_count);
         }
+        let elapsed = start.elapsed();
         println!(
             "perf_store_graph_accessors_smoke: outgoing_rows avg_ms={:.3}",
-            ms_per_call(start.elapsed(), iterations)
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "graph_accessor",
+            "outgoing_rows",
+            iterations,
+            elapsed,
+            &[("edges", edge_count)],
         );
 
         let start = Instant::now();
@@ -334,9 +520,17 @@ fn perf_store_graph_accessors_smoke() {
                 .expect("outgoing_count should succeed");
             assert_eq!(count, edge_count as i64);
         }
+        let elapsed = start.elapsed();
         println!(
             "perf_store_graph_accessors_smoke: outgoing_count avg_ms={:.3}",
-            ms_per_call(start.elapsed(), iterations)
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "graph_accessor",
+            "outgoing_count",
+            iterations,
+            elapsed,
+            &[("edges", edge_count)],
         );
 
         let start = Instant::now();
@@ -347,9 +541,17 @@ fn perf_store_graph_accessors_smoke() {
                 .expect("typed outgoing_count should succeed");
             assert_eq!(count, edge_count as i64);
         }
+        let elapsed = start.elapsed();
         println!(
             "perf_store_graph_accessors_smoke: outgoing_count_as avg_ms={:.3}",
-            ms_per_call(start.elapsed(), iterations)
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "graph_accessor",
+            "outgoing_count_as",
+            iterations,
+            elapsed,
+            &[("edges", edge_count)],
         );
 
         let start = Instant::now();
@@ -360,9 +562,17 @@ fn perf_store_graph_accessors_smoke() {
                 .expect("incoming_ids should succeed");
             assert_eq!(ids.len(), edge_count);
         }
+        let elapsed = start.elapsed();
         println!(
             "perf_store_graph_accessors_smoke: incoming_ids avg_ms={:.3}",
-            ms_per_call(start.elapsed(), iterations)
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "graph_accessor",
+            "incoming_ids",
+            iterations,
+            elapsed,
+            &[("edges", edge_count)],
         );
 
         let start = Instant::now();
@@ -373,9 +583,17 @@ fn perf_store_graph_accessors_smoke() {
                 .expect("incoming rows should succeed");
             assert_eq!(rows.len(), edge_count);
         }
+        let elapsed = start.elapsed();
         println!(
             "perf_store_graph_accessors_smoke: incoming_rows avg_ms={:.3}",
-            ms_per_call(start.elapsed(), iterations)
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "graph_accessor",
+            "incoming_rows",
+            iterations,
+            elapsed,
+            &[("edges", edge_count)],
         );
 
         let start = Instant::now();
@@ -386,9 +604,17 @@ fn perf_store_graph_accessors_smoke() {
                 .expect("incoming_count should succeed");
             assert_eq!(count, edge_count as i64);
         }
+        let elapsed = start.elapsed();
         println!(
             "perf_store_graph_accessors_smoke: incoming_count avg_ms={:.3}",
-            ms_per_call(start.elapsed(), iterations)
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "graph_accessor",
+            "incoming_count",
+            iterations,
+            elapsed,
+            &[("edges", edge_count)],
         );
 
         let start = Instant::now();
@@ -399,9 +625,17 @@ fn perf_store_graph_accessors_smoke() {
                 .expect("typed incoming_count should succeed");
             assert_eq!(count, edge_count as i64);
         }
+        let elapsed = start.elapsed();
         println!(
             "perf_store_graph_accessors_smoke: incoming_count_as avg_ms={:.3}",
-            ms_per_call(start.elapsed(), iterations)
+            ms_per_call(elapsed, iterations)
+        );
+        emit_perf_metric(
+            "graph_accessor",
+            "incoming_count_as",
+            iterations,
+            elapsed,
+            &[("edges", edge_count)],
         );
     });
 }

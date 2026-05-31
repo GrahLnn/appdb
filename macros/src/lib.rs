@@ -723,6 +723,17 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
     };
 
     let foreign_model_impl = if foreign_fields.is_empty() {
+        let supports_raw_partial_update_impl =
+            if secure_field_count(&named_fields) == 0 && relate_fields.is_empty() {
+                quote! {
+                    fn supports_raw_partial_update() -> bool {
+                        true
+                    }
+                }
+            } else {
+                quote! {}
+            };
+
         quote! {
             impl ::appdb::ForeignModel for #struct_ident {
                 async fn persist_foreign(value: Self) -> ::anyhow::Result<Self::Stored> {
@@ -753,6 +764,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 }
 
                 #relation_methods_impl
+                #supports_raw_partial_update_impl
             }
         }
     } else {
@@ -1487,6 +1499,7 @@ fn derive_relation_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStr
     let struct_ident = input.ident;
     let relation_name = relation_name_override(&input.attrs)?
         .unwrap_or_else(|| to_snake_case(&struct_ident.to_string()));
+    validate_relation_name_literal(&relation_name, &struct_ident, "#[derive(Relation)]")?;
 
     match input.data {
         Data::Struct(data) => match data.fields {
@@ -2339,12 +2352,7 @@ fn parse_relate_field(field: &Field, attr: &Attribute) -> syn::Result<RelateFiel
             )
         })?
         .value();
-    if relation_name.is_empty() {
-        return Err(Error::new_spanned(
-            attr,
-            format!("{} relation name must not be empty", direction.attr_label()),
-        ));
-    }
+    validate_relation_name_literal(&relation_name, attr, direction.attr_label())?;
 
     validate_relate_field(field, attr)?;
 
@@ -2672,7 +2680,13 @@ fn relation_name_override(attrs: &[Attribute]) -> syn::Result<Option<String>> {
             if meta.path.is_ident("name") {
                 let value = meta.value()?;
                 let literal: syn::LitStr = value.parse()?;
-                name = Some(literal.value());
+                let relation_name = literal.value();
+                validate_relation_name_literal(
+                    &relation_name,
+                    &literal,
+                    "#[relation(name = ...)]",
+                )?;
+                name = Some(relation_name);
                 Ok(())
             } else {
                 Err(meta.error("unsupported relation attribute"))
@@ -2682,6 +2696,31 @@ fn relation_name_override(attrs: &[Attribute]) -> syn::Result<Option<String>> {
     }
 
     Ok(None)
+}
+
+fn validate_relation_name_literal<T: quote::ToTokens>(
+    name: &str,
+    tokens: T,
+    label: &str,
+) -> syn::Result<()> {
+    if is_relation_identifier(name) {
+        return Ok(());
+    }
+
+    Err(Error::new_spanned(
+        tokens,
+        format!("{label} relation name must be a plain SurrealQL identifier"),
+    ))
+}
+
+fn is_relation_identifier(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+
+    matches!(first, b'A'..=b'Z' | b'a'..=b'z' | b'_')
+        && bytes.all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_'))
 }
 
 enum SecureKind {

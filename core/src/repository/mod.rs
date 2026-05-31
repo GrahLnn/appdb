@@ -30,9 +30,31 @@ use relation_sync::{
 fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
     let value = serde_json::to_value(data)?;
     match value {
-        Value::Object(map) => Ok(map.keys().cloned().collect()),
+        Value::Object(map) => {
+            let mut fields = Vec::with_capacity(map.len());
+            for key in map.keys() {
+                if !is_plain_surreal_identifier(key) {
+                    return Err(DBError::InvalidIdentifier(format!(
+                        "insert_or_replace field `{key}` must be a plain SurrealQL identifier"
+                    ))
+                    .into());
+                }
+                fields.push(key.clone());
+            }
+            Ok(fields)
+        }
         _ => Ok(vec![]),
     }
+}
+
+fn is_plain_surreal_identifier(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+
+    matches!(first, b'A'..=b'Z' | b'a'..=b'z' | b'_')
+        && bytes.all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_'))
 }
 
 fn strip_null_db_fields(value: &mut SurrealDbValue) {
@@ -1133,6 +1155,30 @@ impl<T> Repo<T>
 where
     T: ModelMeta + StoredModel + ForeignModel,
 {
+    fn ensure_raw_partial_update_supported() -> Result<()> {
+        if T::supports_raw_partial_update() {
+            return Ok(());
+        }
+
+        Err(DBError::InvalidModel(format!(
+            "merge/patch is not supported for model `{}` because raw partial updates bypass Store field modifiers; use update_at, save, or upsert instead",
+            std::any::type_name::<T>()
+        ))
+        .into())
+    }
+
+    fn ensure_raw_bulk_insert_supported(api: &str) -> Result<()> {
+        if !T::has_foreign_fields() && !T::has_relation_fields() {
+            return Ok(());
+        }
+
+        Err(DBError::InvalidModel(format!(
+            "{api} is not supported for model `{}` because bulk insert cannot compose Store field modifiers with nested write effects; use save_many or per-row create/save instead",
+            std::any::type_name::<T>()
+        ))
+        .into())
+    }
+
     fn validate_list_order_field(field: &str) -> Result<&str>
     where
         T: PaginationMeta,
@@ -1422,6 +1468,8 @@ where
     /// Merges a partial JSON object into the row at `id`.
     /// Merges a partial JSON object into an existing row.
     pub async fn merge(id: RecordId, data: Value) -> Result<T> {
+        Self::ensure_raw_partial_update_supported()?;
+
         let db = get_db()?;
         let merged: Option<T> = db.update(id).merge(data).await?;
         merged.ok_or(DBError::NotFound.into())
@@ -1430,6 +1478,8 @@ where
     /// Applies SurrealDB patch operations to the row at `id`.
     /// Applies SurrealDB patch operations to an existing row.
     pub async fn patch(id: RecordId, data: Vec<PatchOp>) -> Result<T> {
+        Self::ensure_raw_partial_update_supported()?;
+
         let db = get_db()?;
 
         if data.is_empty() {
@@ -1448,13 +1498,7 @@ where
     /// Bulk-inserts rows into the model table.
     /// Inserts many rows using SurrealDB bulk insert.
     pub async fn insert(data: Vec<T>) -> Result<Vec<T>> {
-        if T::has_relation_fields() {
-            return Err(DBError::InvalidModel(
-                "insert is not supported for models with #[relate(...)] fields; use save_many"
-                    .to_owned(),
-            )
-            .into());
-        }
+        Self::ensure_raw_bulk_insert_supported("insert")?;
 
         let db = get_db()?;
         let mut stored = Vec::with_capacity(data.len());
@@ -1468,13 +1512,7 @@ where
     /// Bulk-inserts rows while ignoring conflicting duplicates.
     /// Inserts many rows while ignoring duplicate-key conflicts.
     pub async fn insert_ignore(data: Vec<T>) -> Result<Vec<T>> {
-        if T::has_relation_fields() {
-            return Err(DBError::InvalidModel(
-                "insert_ignore is not supported for models with #[relate(...)] fields; use save_many"
-                    .to_owned(),
-            )
-            .into());
-        }
+        Self::ensure_raw_bulk_insert_supported("insert_ignore")?;
 
         let db = get_db()?;
         let chunk_size = 50_000;
@@ -1501,13 +1539,7 @@ where
     /// Bulk-inserts rows and updates existing rows on duplicate keys.
     /// Inserts many rows and updates existing rows on duplicate key.
     pub async fn insert_or_replace(data: Vec<T>) -> Result<Vec<T>> {
-        if T::has_relation_fields() {
-            return Err(DBError::InvalidModel(
-                "insert_or_replace is not supported for models with #[relate(...)] fields; use save_many"
-                    .to_owned(),
-            )
-            .into());
-        }
+        Self::ensure_raw_bulk_insert_supported("insert_or_replace")?;
 
         if data.is_empty() {
             return Ok(vec![]);

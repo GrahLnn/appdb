@@ -16,6 +16,8 @@ fn sensitive_macro_rules_are_enforced() {
     tests.compile_fail("tests/ui/store/relation_enum_rejected.rs");
     tests.compile_fail("tests/ui/store/relation_tuple_struct_rejected.rs");
     tests.compile_fail("tests/ui/store/relation_invalid_attribute_rejected.rs");
+    tests.compile_fail("tests/ui/store/relation_invalid_name_rejected.rs");
+    tests.compile_fail("tests/ui/store/relate_field_invalid_relation_name.rs");
     tests.compile_fail("tests/ui/store/relate_field_unsupported_nested_wrapper.rs");
     tests.compile_fail("tests/ui/store/back_relate_field_unsupported_nested_wrapper.rs");
     tests.compile_fail("tests/ui/store/relate_field_foreign_conflict.rs");

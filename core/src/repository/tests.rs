@@ -23,6 +23,13 @@ struct NumberIdType {
     id: i64,
 }
 
+#[derive(Serialize)]
+struct RenamedFieldModel {
+    id: String,
+    #[serde(rename = "bad-field")]
+    renamed: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 struct AutoTableModel {
     id: String,
@@ -146,6 +153,22 @@ fn extract_id_fails_when_id_empty() {
         err.to_string()
             .contains("not a non-empty string or i64 number")
     );
+}
+
+#[test]
+fn insert_or_replace_field_names_reject_non_identifier_fields() {
+    let err = super::struct_field_names(&RenamedFieldModel {
+        id: "renamed".to_owned(),
+        renamed: "value".to_owned(),
+    })
+    .expect_err("renamed field should be rejected");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("insert_or_replace field `bad-field`"),
+        "{message}"
+    );
+    assert!(message.contains("plain SurrealQL identifier"), "{message}");
 }
 
 #[test]

@@ -52,12 +52,18 @@ impl From<OrderedRelationEdgeRow> for OrderedRelationEdge {
 pub struct GraphRepo;
 
 impl GraphRepo {
+    fn relation_table(rel: &str) -> Result<Table> {
+        ensure_relation_name(rel)?;
+        Ok(Table::from(rel))
+    }
+
     /// Creates a relation row from `in_id` to `out_id` in `rel`.
     pub async fn relate_at(in_id: RecordId, out_id: RecordId, rel: &str) -> Result<()> {
+        let relation = Self::relation_table(rel)?;
         let db = get_db()?;
         let sql = QueryKind::relate(&in_id, &out_id, rel);
         db.query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("in", in_id))
             .bind(("out", out_id))
             .await?
@@ -72,9 +78,10 @@ impl GraphRepo {
 
     /// Deletes a single outgoing relation from `self_id` to `target_id`.
     pub async fn unrelate_at(self_id: RecordId, target_id: RecordId, rel: &str) -> Result<()> {
+        let relation = Self::relation_table(rel)?;
         let db = get_db()?;
         db.query(QueryKind::unrelate(&self_id, &target_id, rel))
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("in", self_id))
             .bind(("out", target_id))
             .await?
@@ -84,9 +91,10 @@ impl GraphRepo {
 
     /// Deletes all outgoing relations for `self_id` in `rel`.
     pub async fn unrelate_all(self_id: RecordId, rel: &str) -> Result<()> {
+        let relation = Self::relation_table(rel)?;
         let db = get_db()?;
         db.query(QueryKind::unrelate_all(&self_id, rel))
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("in", self_id))
             .await?
             .check()?;
@@ -95,11 +103,12 @@ impl GraphRepo {
 
     /// Lists target record ids reachable from `in_id` through `rel`.
     pub async fn out_ids(in_id: RecordId, rel: &str, out_table: &str) -> Result<Vec<RecordId>> {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::select_out_ids(&in_id, rel, out_table);
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("in", in_id))
             .bind(("out_table", out_table.to_owned()))
             .await?
@@ -110,11 +119,12 @@ impl GraphRepo {
 
     /// Lists all outgoing target record ids for `in_id` through `rel`.
     pub async fn outgoing_ids(in_id: RecordId, rel: &str) -> Result<Vec<RecordId>> {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::select_all_out_ids(&in_id, rel);
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("in", in_id))
             .await?
             .check()?;
@@ -128,11 +138,12 @@ impl GraphRepo {
         T: ModelMeta + StoredModel + ForeignModel,
         T::Stored: serde::de::DeserializeOwned,
     {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::select_outgoing_rows(&in_id, rel, T::storage_table());
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("in", in_id))
             .bind(("out_table", T::storage_table().to_owned()))
             .await?
@@ -143,11 +154,12 @@ impl GraphRepo {
 
     /// Counts all outgoing edges for `in_id` through `rel`.
     pub async fn outgoing_count(in_id: RecordId, rel: &str) -> Result<i64> {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::count_all_outgoing(&in_id, rel);
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("in", in_id))
             .await?
             .check()?;
@@ -160,11 +172,12 @@ impl GraphRepo {
     where
         T: ModelMeta + StoredModel + ForeignModel,
     {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::count_outgoing_in_table(&in_id, rel, T::storage_table());
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("in", in_id))
             .bind(("out_table", T::storage_table().to_owned()))
             .await?
@@ -175,11 +188,12 @@ impl GraphRepo {
 
     /// Lists ordered outgoing relation edges for `in_id` through `rel`.
     pub async fn out_edges(in_id: RecordId, rel: &str) -> Result<Vec<OrderedRelationEdge>> {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::select_out_edges(&in_id, rel);
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("in", in_id))
             .await?
             .check()?;
@@ -189,11 +203,12 @@ impl GraphRepo {
 
     /// Lists source record ids that point to `out_id` through `rel`.
     pub async fn in_ids(out_id: RecordId, rel: &str, in_table: &str) -> Result<Vec<RecordId>> {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::select_in_ids(&out_id, rel, in_table);
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("out", out_id))
             .bind(("in_table", in_table.to_owned()))
             .await?
@@ -204,11 +219,12 @@ impl GraphRepo {
 
     /// Lists ordered incoming relation edges for `out_id` through `rel`.
     pub async fn in_edges(out_id: RecordId, rel: &str) -> Result<Vec<OrderedRelationEdge>> {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::select_in_edges(&out_id, rel);
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("out", out_id))
             .await?
             .check()?;
@@ -218,11 +234,12 @@ impl GraphRepo {
 
     /// Lists all incoming source record ids for `out_id` through `rel`.
     pub async fn incoming_ids(out_id: RecordId, rel: &str) -> Result<Vec<RecordId>> {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::select_all_in_ids(&out_id, rel);
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("out", out_id))
             .await?
             .check()?;
@@ -236,11 +253,12 @@ impl GraphRepo {
         T: ModelMeta + StoredModel + ForeignModel,
         T::Stored: serde::de::DeserializeOwned,
     {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::select_incoming_rows(&out_id, rel, T::storage_table());
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("out", out_id))
             .bind(("in_table", T::storage_table().to_owned()))
             .await?
@@ -251,11 +269,12 @@ impl GraphRepo {
 
     /// Counts all incoming edges for `out_id` through `rel`.
     pub async fn incoming_count(out_id: RecordId, rel: &str) -> Result<i64> {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::count_all_incoming(&out_id, rel);
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("out", out_id))
             .await?
             .check()?;
@@ -268,11 +287,12 @@ impl GraphRepo {
     where
         T: ModelMeta + StoredModel + ForeignModel,
     {
+        let relation = Self::relation_table(rel)?;
         let sql = QueryKind::count_incoming_in_table(&out_id, rel, T::storage_table());
         let db = get_db()?;
         let mut result = db
             .query(sql)
-            .bind(("rel", Table::from(rel)))
+            .bind(("rel", relation))
             .bind(("out", out_id))
             .bind(("in_table", T::storage_table().to_owned()))
             .await?
@@ -283,6 +303,8 @@ impl GraphRepo {
 
     /// Inserts multiple relation rows into the given relation table.
     pub async fn insert_relation(rel: &str, data: Vec<RelationEdge>) -> Result<Vec<RelationEdge>> {
+        ensure_relation_name(rel)?;
+
         let db = get_db()?;
         let relate: Vec<RelationEdge> = db.insert(rel).relation(data).await?;
         Ok(relate)

@@ -1,0 +1,5 @@
+error: #[relation(name = ...)] relation name must be a plain SurrealQL identifier
+ --> tests/ui/store/relation_invalid_name_rejected.rs:4:19
+  |
+4 | #[relation(name = "bad-name")]
+  |                   ^^^^^^^^^^

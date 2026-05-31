@@ -4,6 +4,7 @@ use anyhow::Result;
 use surrealdb::types::{RecordId, Table, ToSql};
 
 use crate::error::DBError;
+use crate::model::relation::ensure_relation_name;
 use crate::query::{RawSqlStmt, query_bound_checked};
 use crate::{RelationWrite, RelationWriteDirection};
 
@@ -74,6 +75,7 @@ pub(crate) async fn ensure_relation_tables(writes: &[RelationWrite]) -> Result<(
 
     let mut stmt = RawSqlStmt::new("BEGIN TRANSACTION;");
     for relation in relations {
+        ensure_relation_name(relation)?;
         let relation_sql = Table::from(relation).to_sql();
         stmt.sql.push_str(&format!(
             "DEFINE TABLE IF NOT EXISTS {relation_sql} TYPE RELATION SCHEMALESS;"
