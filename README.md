@@ -2,7 +2,6 @@
 
 [![Crates.io](https://img.shields.io/crates/v/appdb.svg)](https://crates.io/crates/appdb)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/GrahLnn/appdb/actions/workflows/ci.yml/badge.svg)](https://github.com/GrahLnn/appdb/actions/workflows/ci.yml)
 
 `appdb` is a lightweight SurrealDB helper library for embedded Rust applications,
 especially local-first desktop apps. It gives domain models a small, derive-driven
