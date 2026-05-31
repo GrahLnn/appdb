@@ -14,10 +14,15 @@ fn relation_name_accepts_valid_identifier() {
 }
 
 #[test]
-fn relation_name_accepts_arbitrary_name() {
-    assert!(ensure_relation_name("9invalid").is_ok());
-    assert!(ensure_relation_name("bad-name").is_ok());
-    assert!(ensure_relation_name("").is_ok());
+fn relation_name_rejects_non_identifier() {
+    for name in ["9invalid", "bad-name", "", "bad name", "bad;name"] {
+        let err = ensure_relation_name(name).expect_err("invalid relation name should fail");
+        assert!(
+            err.to_string()
+                .contains("must be a plain SurrealQL identifier"),
+            "{err}"
+        );
+    }
 }
 
 #[test]

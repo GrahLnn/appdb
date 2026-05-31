@@ -103,6 +103,11 @@ help: the trait `ModelMeta` is not implemented for `PlainChild`
    |
  7 | struct PlainChild {
    | ^^^^^^^^^^^^^^^^^
+help: the trait `ModelMeta` is implemented for `NoViewSource`
+  --> src/model/meta.rs
+   |
+   | impl ModelMeta for NoViewSource {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[E0277]: the trait bound `PlainChild: Bridge` is not satisfied
   --> tests/ui/store/derive_bridge_payload_without_bridge.rs:13:11

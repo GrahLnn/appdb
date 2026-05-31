@@ -508,6 +508,11 @@ pub trait ForeignModel: StoredModel {
         &[]
     }
 
+    /// Whether raw partial update APIs can return this model without Store-owned modifiers.
+    fn supports_raw_partial_update() -> bool {
+        false
+    }
+
     /// Removes relation-backed fields from a serialized row before persistence.
     fn strip_relation_fields(_row: &mut serde_json::Value) {}
 

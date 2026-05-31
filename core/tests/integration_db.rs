@@ -19,6 +19,7 @@ use appdb::{
     SensitiveValueOf, Store, StoredModel, View, ViewParams,
 };
 use serde::{Deserialize, Serialize};
+use surrealdb::opt::PatchOp;
 use surrealdb::types::{RecordId, SurrealValue, Table};
 use tokio::runtime::Runtime;
 
@@ -932,6 +933,34 @@ async fn ensure_db() {
         .expect("database should initialize");
 }
 
+fn assert_raw_partial_update_rejected(err: anyhow::Error) {
+    let message = err.to_string();
+    assert!(
+        message.contains("merge/patch is not supported"),
+        "unexpected partial update error: {message}"
+    );
+    assert!(
+        message.contains("bypass Store field modifiers"),
+        "unexpected partial update error: {message}"
+    );
+}
+
+fn assert_raw_bulk_insert_rejected(err: anyhow::Error, api: &str) {
+    let message = err.to_string();
+    assert!(
+        message.contains(api),
+        "unexpected bulk insert error for {api}: {message}"
+    );
+    assert!(
+        message.contains("bulk insert cannot compose Store field modifiers"),
+        "unexpected bulk insert error for {api}: {message}"
+    );
+    assert!(
+        message.contains("save_many"),
+        "unexpected bulk insert error for {api}: {message}"
+    );
+}
+
 async fn load_sensitive_profile_raw(id: &str) -> StoredSensitiveProfileRow {
     let stmt = RawSqlStmt::new("SELECT * FROM type::record($table, $id);")
         .bind("table", ItSensitiveProfile::table_name())
@@ -1542,6 +1571,124 @@ fn inherent_model_api_roundtrip_passes() {
         assert_eq!(typed.kind(), DBErrorKind::NotFound);
 
         drop(inserted);
+    });
+}
+
+#[test]
+fn plain_store_merge_and_patch_remain_available() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItStringUser>::delete_all()
+            .await
+            .expect("delete_all should succeed");
+
+        Repo::<ItStringUser>::save(ItStringUser {
+            id: Id::from("partial-plain"),
+            payload: "before".to_owned(),
+        })
+        .await
+        .expect("save should succeed");
+
+        let merged = Repo::<ItStringUser>::merge(
+            RecordId::new(ItStringUser::table_name(), "partial-plain"),
+            serde_json::json!({ "payload": "merged" }),
+        )
+        .await
+        .expect("plain merge should succeed");
+        assert_eq!(merged.payload, "merged");
+
+        let patched = Repo::<ItStringUser>::patch(
+            RecordId::new(ItStringUser::table_name(), "partial-plain"),
+            vec![PatchOp::replace("/payload", "patched")],
+        )
+        .await
+        .expect("plain patch should succeed");
+        assert_eq!(patched.payload, "patched");
+    });
+}
+
+#[test]
+fn modifier_store_merge_and_patch_are_rejected() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItSensitiveProfile>::delete_all()
+            .await
+            .expect("sensitive delete_all should succeed");
+        Repo::<ItNestedForeignRoot>::delete_all()
+            .await
+            .expect("foreign root delete_all should succeed");
+        Repo::<ItNestedForeignBranch>::delete_all()
+            .await
+            .expect("foreign branch delete_all should succeed");
+        Repo::<ItNestedForeignLeaf>::delete_all()
+            .await
+            .expect("foreign leaf delete_all should succeed");
+        Repo::<ItRelateRoot>::delete_all()
+            .await
+            .expect("relate root delete_all should succeed");
+        Repo::<ItRelateLeaf>::delete_all()
+            .await
+            .expect("relate leaf delete_all should succeed");
+
+        Repo::<ItSensitiveProfile>::save(ItSensitiveProfile {
+            id: Id::from("partial-sensitive"),
+            alias: "before".to_owned(),
+            secret: "secret".to_owned(),
+            note: Some("note".to_owned()),
+        })
+        .await
+        .expect("sensitive save should succeed");
+        let sensitive_err = Repo::<ItSensitiveProfile>::merge(
+            RecordId::new(ItSensitiveProfile::table_name(), "partial-sensitive"),
+            serde_json::json!({ "alias": "after" }),
+        )
+        .await
+        .expect_err("sensitive merge should be rejected");
+        assert_raw_partial_update_rejected(sensitive_err);
+
+        Repo::<ItNestedForeignRoot>::save(ItNestedForeignRoot {
+            id: Id::from("partial-foreign"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("partial-foreign-branch"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("partial-foreign-leaf"),
+                    code: "partial-foreign-leaf".to_owned(),
+                },
+            },
+        })
+        .await
+        .expect("foreign save should succeed");
+        let foreign_err = Repo::<ItNestedForeignRoot>::patch(
+            RecordId::new(ItNestedForeignRoot::table_name(), "partial-foreign"),
+            Vec::new(),
+        )
+        .await
+        .expect_err("foreign patch should be rejected before raw select");
+        assert_raw_partial_update_rejected(foreign_err);
+
+        Repo::<ItRelateRoot>::save(ItRelateRoot {
+            id: Id::from("partial-relate"),
+            title: "before".to_owned(),
+            primary: ItRelateLeaf {
+                id: Id::from("partial-relate-primary"),
+                label: "primary".to_owned(),
+            },
+            optional: None,
+            items: Vec::new(),
+        })
+        .await
+        .expect("relate save should succeed");
+        let relate_err = Repo::<ItRelateRoot>::merge(
+            RecordId::new(ItRelateRoot::table_name(), "partial-relate"),
+            serde_json::json!({ "title": "after" }),
+        )
+        .await
+        .expect_err("relate merge should be rejected");
+        assert_raw_partial_update_rejected(relate_err);
     });
 }
 
@@ -5866,13 +6013,18 @@ fn graph_relation_name_is_bound_as_identifier() {
             .await
             .expect("create y should succeed");
 
-        GraphRepo::relate_at(
+        let err = GraphRepo::relate_at(
             x.id.clone(),
             y.id.clone(),
             "bad-name; DELETE it_record_user RETURN NONE;",
         )
         .await
-        .expect("relation name should be treated as bound identifier");
+        .expect_err("invalid relation name should be rejected before query execution");
+        assert!(
+            err.to_string()
+                .contains("must be a plain SurrealQL identifier"),
+            "{err}"
+        );
 
         let selected_x = Repo::<ItRecordUser>::get_record(RecordId::new("it_record_user", "x"))
             .await
@@ -9000,6 +9152,103 @@ fn store_sensitive_insert_ignore_and_insert_or_replace_preserve_plaintext_semant
             "new",
             "new-secret",
             None,
+        );
+    });
+}
+
+#[test]
+fn modifier_store_raw_bulk_insert_apis_are_rejected() {
+    let _guard = acquire_test_lock();
+    run_async(async {
+        ensure_db().await;
+
+        Repo::<ItNestedForeignRoot>::delete_all()
+            .await
+            .expect("foreign root delete_all should succeed");
+        Repo::<ItNestedForeignBranch>::delete_all()
+            .await
+            .expect("foreign branch delete_all should succeed");
+        Repo::<ItNestedForeignLeaf>::delete_all()
+            .await
+            .expect("foreign leaf delete_all should succeed");
+        Repo::<ItRelateRoot>::delete_all()
+            .await
+            .expect("relate root delete_all should succeed");
+        Repo::<ItRelateLeaf>::delete_all()
+            .await
+            .expect("relate leaf delete_all should succeed");
+
+        let foreign = ItNestedForeignRoot {
+            id: Id::from("raw-bulk-foreign"),
+            branch: ItNestedForeignBranch {
+                id: Id::from("raw-bulk-foreign-branch"),
+                leaf: ItNestedForeignLeaf {
+                    id: Id::from("raw-bulk-foreign-leaf"),
+                    code: "raw-bulk-foreign-leaf".to_owned(),
+                },
+            },
+        };
+        let relation = ItRelateRoot {
+            id: Id::from("raw-bulk-relation"),
+            title: "raw bulk relation".to_owned(),
+            primary: ItRelateLeaf {
+                id: Id::from("raw-bulk-relation-primary"),
+                label: "primary".to_owned(),
+            },
+            optional: None,
+            items: vec![ItRelateLeaf {
+                id: Id::from("raw-bulk-relation-item"),
+                label: "item".to_owned(),
+            }],
+        };
+
+        let err = Repo::<ItNestedForeignRoot>::insert(vec![foreign.clone()])
+            .await
+            .expect_err("foreign insert should be rejected");
+        assert_raw_bulk_insert_rejected(err, "insert");
+
+        let err = Repo::<ItNestedForeignRoot>::insert_ignore(vec![foreign.clone()])
+            .await
+            .expect_err("foreign insert_ignore should be rejected");
+        assert_raw_bulk_insert_rejected(err, "insert_ignore");
+
+        let err = Repo::<ItNestedForeignRoot>::insert_or_replace(vec![foreign])
+            .await
+            .expect_err("foreign insert_or_replace should be rejected");
+        assert_raw_bulk_insert_rejected(err, "insert_or_replace");
+
+        let err = Repo::<ItRelateRoot>::insert(vec![relation.clone()])
+            .await
+            .expect_err("relation insert should be rejected");
+        assert_raw_bulk_insert_rejected(err, "insert");
+
+        let err = Repo::<ItRelateRoot>::insert_ignore(vec![relation.clone()])
+            .await
+            .expect_err("relation insert_ignore should be rejected");
+        assert_raw_bulk_insert_rejected(err, "insert_ignore");
+
+        let err = Repo::<ItRelateRoot>::insert_or_replace(vec![relation])
+            .await
+            .expect_err("relation insert_or_replace should be rejected");
+        assert_raw_bulk_insert_rejected(err, "insert_or_replace");
+
+        assert!(
+            !Repo::<ItNestedForeignLeaf>::exists_record(RecordId::new(
+                ItNestedForeignLeaf::table_name(),
+                "raw-bulk-foreign-leaf"
+            ))
+            .await
+            .expect("foreign leaf existence check should succeed"),
+            "rejected foreign bulk insert should not persist nested leaves"
+        );
+        assert!(
+            !Repo::<ItRelateLeaf>::exists_record(RecordId::new(
+                ItRelateLeaf::table_name(),
+                "raw-bulk-relation-primary"
+            ))
+            .await
+            .expect("relation primary existence check should succeed"),
+            "rejected relation bulk insert should not persist relation targets"
         );
     });
 }
