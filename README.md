@@ -47,7 +47,7 @@ struct User {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_db("data/appdb".into()).await?;
+    init_local_app_db("data/appdb".into()).await?;
 
     let saved = User {
         id: Id::from("u1"),
@@ -71,13 +71,15 @@ stay on the model type.
 
 ## Runtime
 
-`init_db(path)` opens an embedded SurrealKV database, selects the `app/app`
+`init_local_app_db(path)` opens an embedded SurrealKV database with appdb's
+recommended storage policy for local interactive apps, selects the `app/app`
 namespace and database, applies registered schema items, and installs the handle
 used by model, graph, view, query, and transaction helpers.
 
-Use `init_db_with_options(path, InitDbOptions::default()...)` when the database
-needs SurrealKV versioning, retention, query timeouts, transaction timeouts,
-changefeed garbage collection, or AST payload storage.
+Use `init_db(path)` when the caller wants appdb's bare default storage policy.
+Use `init_db_with_options(path, InitDbOptions::default()...)` only when an
+advanced integration needs explicit versioning, retention, query timeouts,
+transaction timeouts, changefeed garbage collection, or AST payload storage.
 
 Use `DbRuntime::open*` when a caller needs to own a runtime and install it later
 with `DbRuntime::install_global()`.

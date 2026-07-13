@@ -1,4 +1,8 @@
-use super::{DbRuntime, InitDbOptions, get_db, make_schema_ddl_idempotent, reinit_db, reset_db};
+use super::{
+    DbRuntime, InitDbOptions, LocalStorageSync, format_duration_param, get_db,
+    local_datastore_config, local_engine_options, local_storage_datastore_path,
+    make_schema_ddl_idempotent, reinit_db, reset_db, reset_db_and_remove_path,
+};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
@@ -15,6 +19,8 @@ fn default_init_options_are_non_versioned() {
     assert!(options.transaction_timeout.is_none());
     assert!(options.changefeed_gc_interval.is_none());
     assert!(!options.ast_payload);
+    assert!(options.local_storage_sync.is_none());
+    assert!(options.surreal_kv_max_memtable_size.is_none());
 }
 
 #[test]
@@ -25,7 +31,9 @@ fn init_options_builders_override_values() {
         .query_timeout(Some(Duration::from_secs(3)))
         .transaction_timeout(Some(Duration::from_secs(9)))
         .changefeed_gc_interval(Some(Duration::from_secs(30)))
-        .ast_payload(true);
+        .ast_payload(true)
+        .local_storage_sync(Some(LocalStorageSync::Interval(Duration::from_millis(200))))
+        .surreal_kv_max_memtable_size(Some(16 * 1024 * 1024));
 
     assert!(options.versioned);
     assert_eq!(options.version_retention, Some(Duration::from_secs(60)));
@@ -36,6 +44,79 @@ fn init_options_builders_override_values() {
         Some(Duration::from_secs(30))
     );
     assert!(options.ast_payload);
+    assert_eq!(
+        options.local_storage_sync,
+        Some(LocalStorageSync::Interval(Duration::from_millis(200)))
+    );
+    assert_eq!(options.surreal_kv_max_memtable_size, Some(16 * 1024 * 1024));
+}
+
+#[test]
+fn local_app_init_options_own_interactive_storage_policy() {
+    let options = InitDbOptions::local_app();
+
+    assert!(!options.versioned);
+    assert_eq!(options.changefeed_gc_interval, Some(Duration::ZERO));
+    assert_eq!(options.local_storage_sync, Some(LocalStorageSync::Every));
+    assert_eq!(options.surreal_kv_max_memtable_size, Some(16 * 1024 * 1024));
+}
+
+#[test]
+fn local_storage_sync_formats_for_surrealdb_endpoint_params() {
+    assert_eq!(LocalStorageSync::Never.to_string(), "never");
+    assert_eq!(LocalStorageSync::Every.to_string(), "every");
+    assert_eq!(
+        LocalStorageSync::Interval(Duration::from_millis(200)).to_string(),
+        "200ms"
+    );
+    assert_eq!(
+        LocalStorageSync::Interval(Duration::from_secs(1)).to_string(),
+        "1s"
+    );
+}
+
+#[test]
+fn duration_params_use_surrealdb_duration_units() {
+    assert_eq!(format_duration_param(Duration::ZERO), "0");
+    assert_eq!(format_duration_param(Duration::from_micros(250)), "250us");
+    assert_eq!(format_duration_param(Duration::from_millis(200)), "200ms");
+    assert_eq!(format_duration_param(Duration::from_secs(1)), "1s");
+    assert_eq!(format_duration_param(Duration::from_secs(60)), "1m");
+}
+
+#[test]
+fn local_storage_datastore_path_keeps_policy_out_of_the_path() {
+    assert_eq!(
+        local_storage_datastore_path(&PathBuf::from("data/surreal.db")),
+        "surrealkv://data/surreal.db"
+    );
+}
+
+#[test]
+fn local_datastore_config_uses_core_config_keys() {
+    let config = local_datastore_config(
+        &InitDbOptions::default()
+            .versioned(true)
+            .version_retention(Some(Duration::from_secs(60)))
+            .local_storage_sync(Some(LocalStorageSync::Every))
+            .surreal_kv_max_memtable_size(Some(16 * 1024 * 1024)),
+    );
+
+    let serialized = format!("{config:?}");
+    assert!(serialized.contains("\"datastore_versioned\": \"true\""));
+    assert!(serialized.contains("\"datastore_retention\": \"1m\""));
+    assert!(serialized.contains("\"datastore_sync\": \"every\""));
+    assert!(serialized.contains("\"surrealkv_max_memtable_size\": \"16777216\""));
+    assert!(!serialized.contains("datastore_surrealkv_max_memtable_size"));
+}
+
+#[test]
+fn zero_changefeed_interval_is_preserved_for_engine_options() {
+    let engine = local_engine_options(
+        &InitDbOptions::default().changefeed_gc_interval(Some(Duration::ZERO)),
+    );
+
+    assert_eq!(engine.changefeed_gc_interval, Duration::ZERO);
 }
 
 #[test]
@@ -122,23 +203,29 @@ fn reset_db_clears_installed_handle() {
 }
 
 #[test]
-fn reinit_db_survives_sequential_runtime_teardown() {
+fn reset_db_and_remove_path_removes_storage_artifact() {
     let _guard = TEST_DB_LOCK
         .lock()
         .expect("test db lock should not be poisoned");
     reset_db();
 
-    fn temp_path() -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock before epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "appdb_connection_runtime_teardown_{}_{}",
-            std::process::id(),
-            nanos
-        ))
-    }
+    let path = temp_path("appdb_connection_remove_artifact");
+    let storage_artifact_dir = path.join("storage-artifacts");
+    std::fs::create_dir_all(&storage_artifact_dir).expect("storage artifact should be created");
+    std::fs::write(storage_artifact_dir.join("entry.bin"), b"test")
+        .expect("storage file should be created");
+
+    reset_db_and_remove_path(&path).expect("storage artifact should be removed");
+
+    assert!(!path.exists());
+}
+
+#[test]
+fn reinit_db_survives_sequential_runtime_teardown() {
+    let _guard = TEST_DB_LOCK
+        .lock()
+        .expect("test db lock should not be poisoned");
+    reset_db();
 
     fn open_and_reinstall(path: PathBuf) -> anyhow::Result<()> {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -153,7 +240,7 @@ fn reinit_db_survives_sequential_runtime_teardown() {
         })
     }
 
-    let first_path = temp_path();
+    let first_path = temp_path("appdb_connection_runtime_teardown");
     open_and_reinstall(first_path.clone()).expect("first runtime cycle should succeed");
 
     let stale = get_db().expect("first db should remain globally installed");
@@ -168,7 +255,7 @@ fn reinit_db_survives_sequential_runtime_teardown() {
                 .expect("stale handle should stay usable while its worker is still alive");
         });
 
-    let second_path = temp_path();
+    let second_path = temp_path("appdb_connection_runtime_teardown");
     open_and_reinstall(second_path.clone()).expect("second runtime cycle should succeed");
 
     tokio::runtime::Builder::new_current_thread()
@@ -196,19 +283,7 @@ async fn reinit_db_replaces_a_closed_runtime() {
         .expect("test db lock should not be poisoned");
     reset_db();
 
-    fn temp_path() -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock before epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "appdb_connection_reinit_{}_{}",
-            std::process::id(),
-            nanos
-        ))
-    }
-
-    let first_path = temp_path();
+    let first_path = temp_path("appdb_connection_reinit");
     reinit_db(first_path.clone())
         .await
         .expect("first init should succeed");
@@ -221,7 +296,7 @@ async fn reinit_db_replaces_a_closed_runtime() {
     reset_db();
     drop(first);
 
-    let second_path = temp_path();
+    let second_path = temp_path("appdb_connection_reinit");
     reinit_db(second_path.clone())
         .await
         .expect("second init should succeed");
@@ -244,19 +319,7 @@ async fn repeated_reinit_keeps_cleanup_queries_usable() {
         .expect("test db lock should not be poisoned");
     reset_db();
 
-    fn temp_path() -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock before epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "appdb_connection_repeat_{}_{}",
-            std::process::id(),
-            nanos
-        ))
-    }
-
-    let first_path = temp_path();
+    let first_path = temp_path("appdb_connection_repeat");
     reinit_db(first_path.clone())
         .await
         .expect("first init should succeed");
@@ -269,7 +332,7 @@ async fn repeated_reinit_keeps_cleanup_queries_usable() {
     reset_db();
     drop(first);
 
-    let second_path = temp_path();
+    let second_path = temp_path("appdb_connection_repeat");
     reinit_db(second_path.clone())
         .await
         .expect("second init should succeed");
@@ -286,4 +349,12 @@ async fn repeated_reinit_keeps_cleanup_queries_usable() {
     reset_db();
     let _ = std::fs::remove_dir_all(first_path);
     let _ = std::fs::remove_dir_all(second_path);
+}
+
+fn temp_path(prefix: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock before epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos))
 }

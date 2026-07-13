@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 extern crate self as appdb;
 
 /// Authentication helpers for bootstrapping the embedded database.
