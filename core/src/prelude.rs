@@ -6,7 +6,10 @@ pub use crate::Store;
 pub use crate::View;
 pub use crate::ViewShape;
 pub use crate::auth::ensure_root_user;
-pub use crate::connection::{InitDbOptions, get_db, init_db, init_db_with_options};
+pub use crate::connection::{
+    InitDbOptions, LocalStorageSync, get_db, init_db, init_db_with_options, init_local_app_db,
+    reset_db_and_remove_path,
+};
 pub use crate::crypto::{CryptoContext, CryptoError};
 pub use crate::error::DBError;
 pub use crate::graph::{GraphCrud, GraphRepo, RelationEdge};
