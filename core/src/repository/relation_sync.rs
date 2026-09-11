@@ -87,10 +87,19 @@ pub(crate) async fn ensure_relation_tables(writes: &[RelationWrite]) -> Result<(
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum RelationSyncAnchor<'a> {
+    /// Bind every source record and edge endpoint independently.
+    Records,
+    /// Use one expression for the synchronized record, such as `$created`.
+    Expression(&'a str),
+}
+
 pub(crate) fn append_relation_sync_to_stmt(
     mut stmt: RawSqlStmt,
     writes: &[RelationWrite],
     prefix: &str,
+    anchor: RelationSyncAnchor<'_>,
 ) -> Result<(RawSqlStmt, usize)> {
     let batches = relation_write_batches(writes)?;
     let mut statement_count = 0usize;
@@ -103,125 +112,94 @@ pub(crate) fn append_relation_sync_to_stmt(
         let relation_sql = Table::from(batch.relation).to_sql();
         stmt.sql
             .push_str(&format!("DELETE FROM {relation_sql} WHERE "));
-        for (record_idx, _) in batch.records.iter().enumerate() {
-            if record_idx > 0 {
-                stmt.sql.push_str(" OR ");
-            }
-            stmt.sql.push_str(&format!(
-                "{field} = ${prefix}_record_{batch_idx}_{record_idx}"
-            ));
-        }
-        stmt.sql.push_str(" RETURN NONE;");
-        statement_count += 1;
-    }
-
-    for (batch_idx, batch) in batches.iter().enumerate() {
-        if batch.edges.is_empty() {
-            continue;
-        }
-
-        let relation_sql = Table::from(batch.relation).to_sql();
-        for (edge_idx, _) in batch.edges.iter().enumerate() {
-            stmt.sql.push_str(&format!(
-                "RELATE ${prefix}_in_{batch_idx}_{edge_idx} -> {relation_sql} -> ${prefix}_out_{batch_idx}_{edge_idx} SET position = ${prefix}_position_{batch_idx}_{edge_idx};"
-            ));
-            statement_count += 1;
-        }
-    }
-
-    for (batch_idx, batch) in batches.iter().enumerate() {
-        for (record_idx, record) in batch.records.iter().enumerate() {
-            stmt = stmt.bind(
-                format!("{prefix}_record_{batch_idx}_{record_idx}"),
-                record.clone(),
-            );
-        }
-        for (edge_idx, edge) in batch.edges.iter().enumerate() {
-            let in_record = edge._in.clone().ok_or_else(|| {
-                DBError::InvalidModel(
-                    "relation edge write is missing its source record id".to_owned(),
-                )
-            })?;
-            stmt = stmt
-                .bind(format!("{prefix}_in_{batch_idx}_{edge_idx}"), in_record)
-                .bind(
-                    format!("{prefix}_out_{batch_idx}_{edge_idx}"),
-                    edge.out.clone(),
-                )
-                .bind(
-                    format!("{prefix}_position_{batch_idx}_{edge_idx}"),
-                    edge.position,
-                );
-        }
-    }
-
-    Ok((stmt, statement_count))
-}
-
-pub(crate) fn append_relation_sync_with_anchor_expr_to_stmt(
-    mut stmt: RawSqlStmt,
-    writes: &[RelationWrite],
-    prefix: &str,
-    anchor_expr: &str,
-) -> Result<(RawSqlStmt, usize)> {
-    let batches = relation_write_batches(writes)?;
-    let mut statement_count = 0usize;
-
-    for batch in &batches {
-        let field = match batch.direction {
-            RelationWriteDirection::Outgoing => "in",
-            RelationWriteDirection::Incoming => "out",
-        };
-        let relation_sql = Table::from(batch.relation).to_sql();
-        stmt.sql
-            .push_str(&format!("DELETE FROM {relation_sql} WHERE "));
-        stmt.sql.push_str(&format!("{field} = {anchor_expr}"));
-        stmt.sql.push_str(" RETURN NONE;");
-        statement_count += 1;
-    }
-
-    for (batch_idx, batch) in batches.iter().enumerate() {
-        if batch.edges.is_empty() {
-            continue;
-        }
-
-        let relation_sql = Table::from(batch.relation).to_sql();
-        for (edge_idx, _) in batch.edges.iter().enumerate() {
-            match batch.direction {
-                RelationWriteDirection::Outgoing => stmt.sql.push_str(&format!(
-                    "RELATE {anchor_expr} -> {relation_sql} -> ${prefix}_target_{batch_idx}_{edge_idx} SET position = ${prefix}_position_{batch_idx}_{edge_idx};"
-                )),
-                RelationWriteDirection::Incoming => stmt.sql.push_str(&format!(
-                    "RELATE ${prefix}_source_{batch_idx}_{edge_idx} -> {relation_sql} -> {anchor_expr} SET position = ${prefix}_position_{batch_idx}_{edge_idx};"
-                )),
-            }
-            statement_count += 1;
-        }
-    }
-
-    for (_batch_idx, batch) in batches.iter().enumerate() {
-        for (edge_idx, edge) in batch.edges.iter().enumerate() {
-            match batch.direction {
-                RelationWriteDirection::Outgoing => {
-                    stmt = stmt.bind(
-                        format!("{prefix}_target_{_batch_idx}_{edge_idx}"),
-                        edge.out.clone(),
-                    );
+        match anchor {
+            RelationSyncAnchor::Records => {
+                for (record_idx, _) in batch.records.iter().enumerate() {
+                    if record_idx > 0 {
+                        stmt.sql.push_str(" OR ");
+                    }
+                    stmt.sql.push_str(&format!(
+                        "{field} = ${prefix}_record_{batch_idx}_{record_idx}"
+                    ));
                 }
-                RelationWriteDirection::Incoming => {
+            }
+            RelationSyncAnchor::Expression(anchor_expr) => {
+                stmt.sql.push_str(&format!("{field} = {anchor_expr}"));
+            }
+        }
+        stmt.sql.push_str(" RETURN NONE;");
+        statement_count += 1;
+    }
+
+    for (batch_idx, batch) in batches.iter().enumerate() {
+        if batch.edges.is_empty() {
+            continue;
+        }
+
+        let relation_sql = Table::from(batch.relation).to_sql();
+        for (edge_idx, _) in batch.edges.iter().enumerate() {
+            match anchor {
+                RelationSyncAnchor::Records => stmt.sql.push_str(&format!(
+                    "RELATE ${prefix}_in_{batch_idx}_{edge_idx} -> {relation_sql} -> ${prefix}_out_{batch_idx}_{edge_idx} SET position = ${prefix}_position_{batch_idx}_{edge_idx};"
+                )),
+                RelationSyncAnchor::Expression(anchor_expr) => match batch.direction {
+                    RelationWriteDirection::Outgoing => stmt.sql.push_str(&format!(
+                        "RELATE {anchor_expr} -> {relation_sql} -> ${prefix}_target_{batch_idx}_{edge_idx} SET position = ${prefix}_position_{batch_idx}_{edge_idx};"
+                    )),
+                    RelationWriteDirection::Incoming => stmt.sql.push_str(&format!(
+                        "RELATE ${prefix}_source_{batch_idx}_{edge_idx} -> {relation_sql} -> {anchor_expr} SET position = ${prefix}_position_{batch_idx}_{edge_idx};"
+                    )),
+                },
+            }
+            statement_count += 1;
+        }
+    }
+
+    for (batch_idx, batch) in batches.iter().enumerate() {
+        if matches!(anchor, RelationSyncAnchor::Records) {
+            for (record_idx, record) in batch.records.iter().enumerate() {
+                stmt = stmt.bind(
+                    format!("{prefix}_record_{batch_idx}_{record_idx}"),
+                    record.clone(),
+                );
+            }
+        }
+
+        for (edge_idx, edge) in batch.edges.iter().enumerate() {
+            match anchor {
+                RelationSyncAnchor::Records => {
                     let in_record = edge._in.clone().ok_or_else(|| {
                         DBError::InvalidModel(
                             "relation edge write is missing its source record id".to_owned(),
                         )
                     })?;
-                    stmt = stmt.bind(
-                        format!("{prefix}_source_{_batch_idx}_{edge_idx}"),
-                        in_record,
-                    );
+                    stmt = stmt
+                        .bind(format!("{prefix}_in_{batch_idx}_{edge_idx}"), in_record)
+                        .bind(
+                            format!("{prefix}_out_{batch_idx}_{edge_idx}"),
+                            edge.out.clone(),
+                        );
                 }
+                RelationSyncAnchor::Expression(_) => match batch.direction {
+                    RelationWriteDirection::Outgoing => {
+                        stmt = stmt.bind(
+                            format!("{prefix}_target_{batch_idx}_{edge_idx}"),
+                            edge.out.clone(),
+                        );
+                    }
+                    RelationWriteDirection::Incoming => {
+                        let in_record = edge._in.clone().ok_or_else(|| {
+                            DBError::InvalidModel(
+                                "relation edge write is missing its source record id".to_owned(),
+                            )
+                        })?;
+                        stmt =
+                            stmt.bind(format!("{prefix}_source_{batch_idx}_{edge_idx}"), in_record);
+                    }
+                },
             }
             stmt = stmt.bind(
-                format!("{prefix}_position_{_batch_idx}_{edge_idx}"),
+                format!("{prefix}_position_{batch_idx}_{edge_idx}"),
                 edge.position,
             );
         }

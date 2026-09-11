@@ -53,7 +53,8 @@ pub struct InitDbOptions {
     pub query_timeout: Option<Duration>,
     /// Optional per-transaction timeout.
     pub transaction_timeout: Option<Duration>,
-    /// Optional changefeed garbage-collection interval.
+    /// Optional positive changefeed garbage-collection interval.
+    /// `None` uses the engine default; zero is rejected when opening the runtime.
     pub changefeed_gc_interval: Option<Duration>,
     /// Enables SurrealDB AST payload storage.
     pub ast_payload: bool,
@@ -72,7 +73,6 @@ impl InitDbOptions {
     pub fn local_app() -> Self {
         Self::default()
             .versioned(false)
-            .changefeed_gc_interval(Some(Duration::ZERO))
             .local_storage_sync(Some(LocalStorageSync::Every))
             .surreal_kv_max_memtable_size(Some(16 * 1024 * 1024))
     }
@@ -102,6 +102,8 @@ impl InitDbOptions {
     }
 
     /// Sets the changefeed garbage-collection interval.
+    /// `None` uses the engine default. Zero does not disable garbage collection
+    /// and is rejected when opening the runtime.
     pub fn changefeed_gc_interval(mut self, duration: Option<Duration>) -> Self {
         self.changefeed_gc_interval = duration;
         self
@@ -147,6 +149,12 @@ impl DbRuntime {
     /// get automatic table bootstrap on first write, but that guarantee must not
     /// rely on schema side effects from this startup path.
     pub async fn open_with_options(path: PathBuf, options: InitDbOptions) -> Result<Self> {
+        anyhow::ensure!(
+            !options
+                .changefeed_gc_interval
+                .is_some_and(|interval| interval.is_zero()),
+            "changefeed_gc_interval must be greater than zero; use None for the engine default"
+        );
         fs::create_dir_all(&path)?;
         let worker = Arc::new(DbWorker::spawn(path, options)?);
         let runtime = Self {
@@ -219,40 +227,78 @@ impl DbWorker {
                 }
             };
 
-            runtime.block_on(async move {
-                let db = match open_db(path, &options).await {
+            let datastore = runtime.block_on(async move {
+                let (db, datastore) = match open_db(path, &options).await {
                     Ok(db) => db,
                     Err(err) => {
                         let _ = ready_tx.send(Err(err));
-                        return;
+                        return None;
                     }
                 };
 
                 if let Err(err) = db.use_ns("app").use_db("app").await {
                     let _ = ready_tx.send(Err(err.into()));
-                    return;
+                    drop(db);
+                    return Some(datastore);
                 }
 
                 let db = Arc::new(db);
                 if let Err(err) = apply_schema(&db).await {
                     let _ = ready_tx.send(Err(err));
-                    return;
+                    drop(db);
+                    return Some(datastore);
                 }
 
                 let caller_db = db.clone();
                 if ready_tx.send(Ok(caller_db)).is_err() {
-                    return;
+                    drop(db);
+                    return Some(datastore);
                 }
 
                 let _ = shutdown_rx.await;
                 drop(db);
-                tokio::task::yield_now().await;
+                Some(datastore)
             });
+
+            drop(runtime);
+
+            if let Some(datastore) = datastore {
+                match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(cleanup_runtime) => {
+                        cleanup_runtime.block_on(async move {
+                            if let Err(err) = datastore.shutdown().await {
+                                tracing::error!(
+                                    error = %err,
+                                    "database datastore shutdown failed during worker cleanup"
+                                );
+                            }
+                        });
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            error = %err,
+                            "database cleanup runtime failed to start"
+                        );
+                    }
+                }
+            }
         });
 
-        let db = ready_rx.recv().map_err(|err| {
-            anyhow::anyhow!("database worker failed before initialization: {err}")
-        })??;
+        let db = match ready_rx.recv() {
+            Ok(Ok(db)) => db,
+            Ok(Err(err)) => {
+                join_worker(thread, "initialization");
+                return Err(err);
+            }
+            Err(err) => {
+                let error = anyhow::anyhow!("database worker failed before initialization: {err}");
+                join_worker(thread, "initialization");
+                return Err(error);
+            }
+        };
 
         Ok(Self {
             db: Some(db),
@@ -285,8 +331,14 @@ impl Drop for DbWorker {
         }
 
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            join_worker(thread, "shutdown");
         }
+    }
+}
+
+fn join_worker(thread: thread::JoinHandle<()>, phase: &'static str) {
+    if let Err(payload) = thread.join() {
+        tracing::error!(phase, panic = ?payload, "database worker thread panicked");
     }
 }
 
@@ -328,7 +380,7 @@ fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
     haystack_upper.find(&needle_upper)
 }
 
-async fn open_db(path: PathBuf, options: &InitDbOptions) -> Result<Surreal<Db>> {
+async fn open_db(path: PathBuf, options: &InitDbOptions) -> Result<(Surreal<Db>, Arc<Datastore>)> {
     let capabilities = Capabilities::default();
     let (notifications, builder) = if capabilities.allows_live_query_notifications() {
         let (send, recv) = surrealdb_core::channel::bounded(NOTIFICATIONS_CHANNEL_SIZE);
@@ -345,16 +397,42 @@ async fn open_db(path: PathBuf, options: &InitDbOptions) -> Result<Surreal<Db>> 
         .build_with_path(&local_storage_datastore_path(&path))
         .await?;
 
-    datastore.check_version().await?;
-    datastore.bootstrap().await?;
+    let datastore = Arc::new(datastore);
+    if let Err(err) = datastore.check_version().await {
+        return Err(shutdown_datastore_after_startup_error(&datastore, err.into()).await);
+    }
+    if let Err(err) = datastore.bootstrap().await {
+        return Err(shutdown_datastore_after_startup_error(&datastore, err.into()).await);
+    }
 
-    Ok(Surreal::unstable_from_datastore(
+    let db = match Surreal::unstable_from_datastore(
         CancellationToken::new(),
-        Arc::new(datastore),
+        Arc::clone(&datastore),
         notifications,
         local_engine_options(options),
     )
-    .await?)
+    .await
+    {
+        Ok(db) => db,
+        Err(err) => {
+            return Err(shutdown_datastore_after_startup_error(&datastore, err.into()).await);
+        }
+    };
+
+    Ok((db, datastore))
+}
+
+async fn shutdown_datastore_after_startup_error(
+    datastore: &Datastore,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    if let Err(shutdown_error) = datastore.shutdown().await {
+        tracing::error!(
+            error = %shutdown_error,
+            "database datastore shutdown failed after startup error"
+        );
+    }
+    error
 }
 
 fn local_storage_datastore_path(path: &Path) -> String {

@@ -1,0 +1,17 @@
+diff --git a/dist/surrealdb-node.mjs b/dist/surrealdb-node.mjs
+index 8cd22ee70ecd2c27c769ab33b788430835ae4677..838f902b85f9eec2061603eb8c6cf3e21227a6c2 100644
+--- a/dist/surrealdb-node.mjs
++++ b/dist/surrealdb-node.mjs
+@@ -440,10 +440,11 @@ var NodeEngine = class extends RpcEngine {
+ 		this.#abort?.abort();
+ 		this.#abort = void 0;
+ 		this.#active = false;
+-		this.#engine?.free();
++		const free = this.#engine?.free();
+ 		this.#engine = void 0;
+ 		this.#notificationReceiver = void 0;
+ 		this.#publisher.publish("disconnected");
++		await free;
+ 	}
+ 	ready() {}
+ 	subscribe(event, listener) {

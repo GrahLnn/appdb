@@ -6,6 +6,12 @@ use syn::{
     PathArguments, Type, TypePath, parse_macro_input,
 };
 
+mod shape;
+use shape::{option_inner_type, vec_inner_type};
+
+#[cfg(test)]
+mod shape_tests;
+
 #[proc_macro_derive(Sensitive, attributes(secure, crypto))]
 pub fn derive_sensitive(input: TokenStream) -> TokenStream {
     match derive_sensitive_impl(parse_macro_input!(input as DeriveInput)) {
@@ -2540,17 +2546,9 @@ fn view_stored_type(field: &Field) -> syn::Result<Type> {
 }
 
 fn view_record_shape_type(ty: &Type) -> Option<Type> {
-    if let Some(inner) = option_inner_type(ty) {
-        let inner = view_record_shape_type(inner)?;
-        return Some(syn::parse_quote!(::std::option::Option<#inner>));
-    }
-
-    if let Some(inner) = vec_inner_type(ty) {
-        let inner = view_record_shape_type(inner)?;
-        return Some(syn::parse_quote!(::std::vec::Vec<#inner>));
-    }
-
-    view_leaf_type(ty).map(|_| syn::parse_quote!(::surrealdb::types::RecordId))
+    shape::map_option_vec(ty, &|leaf| {
+        view_leaf_type(leaf).map(|_| syn::parse_quote!(::surrealdb::types::RecordId))
+    })
 }
 
 fn view_leaf_type(ty: &Type) -> Option<&TypePath> {
@@ -2576,31 +2574,15 @@ fn view_leaf_type(ty: &Type) -> Option<&TypePath> {
 }
 
 fn foreign_stored_type(ty: &Type) -> Option<Type> {
-    if let Some(inner) = option_inner_type(ty) {
-        let inner = foreign_stored_type(inner)?;
-        return Some(syn::parse_quote!(::std::option::Option<#inner>));
-    }
-
-    if let Some(inner) = vec_inner_type(ty) {
-        let inner = foreign_stored_type(inner)?;
-        return Some(syn::parse_quote!(::std::vec::Vec<#inner>));
-    }
-
-    direct_store_child_type(ty)
-        .cloned()
-        .map(|_| syn::parse_quote!(::surrealdb::types::RecordId))
+    shape::map_option_vec(ty, &|leaf| {
+        direct_store_child_type(leaf).map(|_| syn::parse_quote!(::surrealdb::types::RecordId))
+    })
 }
 
 fn foreign_leaf_type(ty: &Type) -> Option<Type> {
-    if let Some(inner) = option_inner_type(ty) {
-        return foreign_leaf_type(inner);
-    }
-
-    if let Some(inner) = vec_inner_type(ty) {
-        return foreign_leaf_type(inner);
-    }
-
-    direct_store_child_type(ty).cloned().map(Type::Path)
+    shape::peel_option_vec(ty, &|leaf| {
+        direct_store_child_type(leaf).cloned().map(Type::Path)
+    })
 }
 
 fn invalid_foreign_leaf_type(ty: &Type) -> Option<Type> {
@@ -2890,40 +2872,6 @@ fn is_record_id_type(ty: &Type) -> bool {
         }),
         _ => false,
     }
-}
-
-fn option_inner_type(ty: &Type) -> Option<&Type> {
-    let Type::Path(TypePath { path, .. }) = ty else {
-        return None;
-    };
-    let segment = path.segments.last()?;
-    if segment.ident != "Option" {
-        return None;
-    }
-    let PathArguments::AngleBracketed(args) = &segment.arguments else {
-        return None;
-    };
-    let GenericArgument::Type(inner) = args.args.first()? else {
-        return None;
-    };
-    Some(inner)
-}
-
-fn vec_inner_type(ty: &Type) -> Option<&Type> {
-    let Type::Path(TypePath { path, .. }) = ty else {
-        return None;
-    };
-    let segment = path.segments.last()?;
-    if segment.ident != "Vec" {
-        return None;
-    }
-    let PathArguments::AngleBracketed(args) = &segment.arguments else {
-        return None;
-    };
-    let GenericArgument::Type(inner) = args.args.first()? else {
-        return None;
-    };
-    Some(inner)
 }
 
 fn sensitive_value_wrapper_inner_type(ty: &Type) -> Option<&Type> {

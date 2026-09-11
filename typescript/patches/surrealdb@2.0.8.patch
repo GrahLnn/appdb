@@ -1,0 +1,52 @@
+diff --git a/dist/surrealdb.cjs b/dist/surrealdb.cjs
+index 80664a74d04f54b2bf6287a4ed0713b3357b79fd..b83370363aeca75bd396aa58eeba3d14752403d7 100644
+--- a/dist/surrealdb.cjs
++++ b/dist/surrealdb.cjs
+@@ -7949,10 +7949,19 @@ var ConnectionController = class {
+ 		this.#engine.subscribe("connected", () => this.#onConnected());
+ 		this.#engine.subscribe("disconnected", () => this.#onDisconnected());
+ 		this.#engine.subscribe("reconnecting", () => this.#onReconnecting());
++		this.#engine.subscribe("error", (error) => {
++			if (this.#engine === engine) this.#eventPublisher.publish("error", error);
++		});
+ 		this.#status = "connecting";
+ 		this.#eventPublisher.publish("connecting");
+-		this.#engine.open(this.#state);
+-		await this.ready();
++		const ready = this.#eventPublisher.subscribeFirst("connected", "error");
++		try {
++			this.#engine.open(this.#state);
++		} catch (error) {
++			this.#eventPublisher.publish("error", error instanceof Error ? error : new UnexpectedConnectionError(error));
++		}
++		const [result] = await ready;
++		if (result instanceof Error) throw result;
+ 		return true;
+ 	}
+ 	async disconnect() {
+diff --git a/dist/surrealdb.mjs b/dist/surrealdb.mjs
+index d48a87bee2f1598e07173d4612c1c31fcb8c895a..1f36d591425c8e783f312150d2f199845eecf27a 100644
+--- a/dist/surrealdb.mjs
++++ b/dist/surrealdb.mjs
+@@ -7948,10 +7948,19 @@ var ConnectionController = class {
+ 		this.#engine.subscribe("connected", () => this.#onConnected());
+ 		this.#engine.subscribe("disconnected", () => this.#onDisconnected());
+ 		this.#engine.subscribe("reconnecting", () => this.#onReconnecting());
++		this.#engine.subscribe("error", (error) => {
++			if (this.#engine === engine) this.#eventPublisher.publish("error", error);
++		});
+ 		this.#status = "connecting";
+ 		this.#eventPublisher.publish("connecting");
+-		this.#engine.open(this.#state);
+-		await this.ready();
++		const ready = this.#eventPublisher.subscribeFirst("connected", "error");
++		try {
++			this.#engine.open(this.#state);
++		} catch (error) {
++			this.#eventPublisher.publish("error", error instanceof Error ? error : new UnexpectedConnectionError(error));
++		}
++		const [result] = await ready;
++		if (result instanceof Error) throw result;
+ 		return true;
+ 	}
+ 	async disconnect() {

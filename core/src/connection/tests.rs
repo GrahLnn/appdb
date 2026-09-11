@@ -1,7 +1,8 @@
 use super::{
     DbRuntime, InitDbOptions, LocalStorageSync, format_duration_param, get_db,
     local_datastore_config, local_engine_options, local_storage_datastore_path,
-    make_schema_ddl_idempotent, reinit_db, reset_db, reset_db_and_remove_path,
+    make_schema_ddl_idempotent, reinit_db, reinit_db_with_options, reset_db,
+    reset_db_and_remove_path,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -56,7 +57,7 @@ fn local_app_init_options_own_interactive_storage_policy() {
     let options = InitDbOptions::local_app();
 
     assert!(!options.versioned);
-    assert_eq!(options.changefeed_gc_interval, Some(Duration::ZERO));
+    assert!(options.changefeed_gc_interval.is_none());
     assert_eq!(options.local_storage_sync, Some(LocalStorageSync::Every));
     assert_eq!(options.surreal_kv_max_memtable_size, Some(16 * 1024 * 1024));
 }
@@ -117,6 +118,73 @@ fn zero_changefeed_interval_is_preserved_for_engine_options() {
     );
 
     assert_eq!(engine.changefeed_gc_interval, Duration::ZERO);
+}
+
+#[test]
+fn changefeed_intervals_use_engine_default_or_explicit_positive_value() {
+    let default_interval = surrealdb_core::options::EngineOptions::default().changefeed_gc_interval;
+    assert_eq!(
+        local_engine_options(&InitDbOptions::default()).changefeed_gc_interval,
+        default_interval
+    );
+    assert_eq!(
+        local_engine_options(&InitDbOptions::local_app()).changefeed_gc_interval,
+        default_interval
+    );
+    let interval = Duration::from_millis(25);
+    assert_eq!(
+        local_engine_options(&InitDbOptions::default().changefeed_gc_interval(Some(interval)))
+            .changefeed_gc_interval,
+        interval
+    );
+}
+
+#[tokio::test]
+async fn zero_changefeed_interval_is_rejected_before_creating_storage() {
+    let path = temp_path("appdb_connection_invalid_interval");
+    let error = DbRuntime::open_with_options(
+        path.clone(),
+        InitDbOptions::default().changefeed_gc_interval(Some(Duration::ZERO)),
+    )
+    .await
+    .expect_err("zero interval must fail before starting the database worker");
+
+    assert!(
+        error
+            .to_string()
+            .contains("changefeed_gc_interval must be greater than zero")
+    );
+    assert!(!path.exists());
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn invalid_changefeed_interval_preserves_installed_runtime() {
+    let _guard = TEST_DB_LOCK
+        .lock()
+        .expect("test db lock should not be poisoned");
+    reset_db();
+    let original = DbRuntime::from_handle(Arc::new(Surreal::init()));
+    original.reinstall_global_for_tests();
+    let path = temp_path("appdb_connection_invalid_reinit");
+
+    let result = reinit_db_with_options(
+        path.clone(),
+        InitDbOptions {
+            changefeed_gc_interval: Some(Duration::ZERO),
+            ..InitDbOptions::default()
+        },
+    )
+    .await;
+    let current = get_db();
+    reset_db();
+
+    assert!(result.is_err());
+    assert!(Arc::ptr_eq(
+        &original.handle(),
+        &current.expect("original runtime remains installed")
+    ));
+    assert!(!path.exists());
 }
 
 #[test]

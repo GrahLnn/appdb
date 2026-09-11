@@ -1,0 +1,46 @@
+{
+  "name": "@appdb/core",
+  "version": "0.2.24",
+  "private": true,
+  "description": "Native TypeScript implementation of appdb",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:example": "tsc -p tsconfig.example.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "example": "pnpm run build && pnpm run typecheck:example && node --experimental-strip-types examples/basic.ts"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node-entry.d.ts",
+      "import": "./dist/node-entry.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "patches/@surrealdb__node@3.0.3.patch",
+    "patches/surrealdb@2.0.8.patch"
+  ],
+  "dependencies": {
+    "@napi-rs/keyring": "2.0.0",
+    "@surrealdb/node": "3.0.3",
+    "effect": "4.0.0-rc.115",
+    "surrealdb": "2.0.8"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.115",
+    "@types/node": "22.20.2",
+    "typescript": "5.9.3",
+    "vitest": "5.0.0"
+  }
+}

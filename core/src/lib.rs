@@ -24,6 +24,7 @@ pub mod query;
 pub mod repository;
 /// Serde helpers for ids and SurrealDB-friendly encoding.
 pub mod serde_utils;
+mod shape;
 /// Explicit transaction runner helpers.
 pub mod tx;
 
@@ -975,21 +976,17 @@ where
     type Stored = Option<T::Stored>;
 
     async fn persist_foreign_shape(self) -> anyhow::Result<Self::Stored> {
-        match self {
-            Some(value) => Ok(Some(
-                <T as ForeignShape>::persist_foreign_shape(value).await?,
-            )),
-            None => Ok(None),
-        }
+        shape::try_map_option(self, |value| {
+            <T as ForeignShape>::persist_foreign_shape(value)
+        })
+        .await
     }
 
     async fn hydrate_foreign_shape(stored: Self::Stored) -> anyhow::Result<Self> {
-        match stored {
-            Some(value) => Ok(Some(
-                <T as ForeignShape>::hydrate_foreign_shape(value).await?,
-            )),
-            None => Ok(None),
-        }
+        shape::try_map_option(stored, |value| {
+            <T as ForeignShape>::hydrate_foreign_shape(value)
+        })
+        .await
     }
 }
 
@@ -1002,19 +999,17 @@ where
     type Stored = Vec<T::Stored>;
 
     async fn persist_foreign_shape(self) -> anyhow::Result<Self::Stored> {
-        let mut out = Vec::with_capacity(self.len());
-        for value in self {
-            out.push(<T as ForeignShape>::persist_foreign_shape(value).await?);
-        }
-        Ok(out)
+        shape::try_map_sequence(self, |value| {
+            <T as ForeignShape>::persist_foreign_shape(value)
+        })
+        .await
     }
 
     async fn hydrate_foreign_shape(stored: Self::Stored) -> anyhow::Result<Self> {
-        let mut out = Vec::with_capacity(stored.len());
-        for value in stored {
-            out.push(<T as ForeignShape>::hydrate_foreign_shape(value).await?);
-        }
-        Ok(out)
+        shape::try_map_sequence(stored, |value| {
+            <T as ForeignShape>::hydrate_foreign_shape(value)
+        })
+        .await
     }
 }
 
@@ -1047,12 +1042,7 @@ where
     fn resolve_foreign_lookup_shape(
         &self,
     ) -> impl std::future::Future<Output = anyhow::Result<Self::LookupStored>> {
-        async move {
-            match self {
-                Some(value) => Ok(Some(value.resolve_foreign_lookup_shape().await?)),
-                None => Ok(None),
-            }
-        }
+        shape::try_map_option(self.as_ref(), |value| value.resolve_foreign_lookup_shape())
     }
 }
 
@@ -1065,13 +1055,7 @@ where
     fn resolve_foreign_lookup_shape(
         &self,
     ) -> impl std::future::Future<Output = anyhow::Result<Self::LookupStored>> {
-        async move {
-            let mut out = Vec::with_capacity(self.len());
-            for value in self {
-                out.push(value.resolve_foreign_lookup_shape().await?);
-            }
-            Ok(out)
-        }
+        shape::try_map_sequence(self.iter(), |value| value.resolve_foreign_lookup_shape())
     }
 }
 
@@ -1084,10 +1068,7 @@ where
     type Stored = Option<T::Stored>;
 
     async fn hydrate_view_shape(stored: Self::Stored) -> anyhow::Result<Self> {
-        match stored {
-            Some(value) => Ok(Some(<T as ViewShape>::hydrate_view_shape(value).await?)),
-            None => Ok(None),
-        }
+        shape::try_map_option(stored, |value| <T as ViewShape>::hydrate_view_shape(value)).await
     }
 }
 
@@ -1100,11 +1081,7 @@ where
     type Stored = Vec<T::Stored>;
 
     async fn hydrate_view_shape(stored: Self::Stored) -> anyhow::Result<Self> {
-        let mut out = Vec::with_capacity(stored.len());
-        for value in stored {
-            out.push(<T as ViewShape>::hydrate_view_shape(value).await?);
-        }
-        Ok(out)
+        shape::try_map_sequence(stored, |value| <T as ViewShape>::hydrate_view_shape(value)).await
     }
 }
 
@@ -1159,19 +1136,11 @@ where
     T: Bridge + Send,
 {
     async fn persist_relate_shape(self) -> anyhow::Result<Vec<surrealdb::types::RecordId>> {
-        let mut out = Vec::with_capacity(self.len());
-        for value in self {
-            out.push(<T as Bridge>::persist_foreign(value).await?);
-        }
-        Ok(out)
+        shape::try_map_sequence(self, |value| <T as Bridge>::persist_foreign(value)).await
     }
 
     async fn hydrate_relate_shape(stored: Vec<surrealdb::types::RecordId>) -> anyhow::Result<Self> {
-        let mut out = Vec::with_capacity(stored.len());
-        for value in stored {
-            out.push(<T as Bridge>::hydrate_foreign(value).await?);
-        }
-        Ok(out)
+        shape::try_map_sequence(stored, |value| <T as Bridge>::hydrate_foreign(value)).await
     }
 }
 
@@ -1183,11 +1152,7 @@ where
     async fn persist_relate_shape(self) -> anyhow::Result<Vec<surrealdb::types::RecordId>> {
         match self {
             Some(values) => {
-                let mut out = Vec::with_capacity(values.len());
-                for value in values {
-                    out.push(<T as Bridge>::persist_foreign(value).await?);
-                }
-                Ok(out)
+                shape::try_map_sequence(values, |value| <T as Bridge>::persist_foreign(value)).await
             }
             None => Ok(vec![]),
         }
@@ -1198,10 +1163,8 @@ where
             return Ok(None);
         }
 
-        let mut out = Vec::with_capacity(stored.len());
-        for value in stored {
-            out.push(<T as Bridge>::hydrate_foreign(value).await?);
-        }
-        Ok(Some(out))
+        Ok(Some(
+            shape::try_map_sequence(stored, |value| <T as Bridge>::hydrate_foreign(value)).await?,
+        ))
     }
 }

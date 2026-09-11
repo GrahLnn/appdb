@@ -1,0 +1,3 @@
+patchedDependencies:
+  '@surrealdb/node@3.0.3': patches/@surrealdb__node@3.0.3.patch
+  surrealdb@2.0.8: patches/surrealdb@2.0.8.patch

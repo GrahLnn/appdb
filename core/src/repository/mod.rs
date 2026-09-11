@@ -22,10 +22,7 @@ use crate::serde_utils::id::parse_record_id_or_plain_string;
 use crate::{ForeignModel, ForeignWritePlan, StoredModel};
 
 pub use crate::pagination::{Page, PageCursor};
-use relation_sync::{
-    append_relation_sync_to_stmt, append_relation_sync_with_anchor_expr_to_stmt,
-    ensure_relation_tables,
-};
+use relation_sync::{RelationSyncAnchor, append_relation_sync_to_stmt, ensure_relation_tables};
 
 fn struct_field_names<T: Serialize>(data: &T) -> Result<Vec<String>> {
     let value = serde_json::to_value(data)?;
@@ -317,6 +314,55 @@ impl ExplicitWriteMode {
     }
 }
 
+#[derive(Clone, Copy)]
+enum AtomicWriteErrorPolicy {
+    Checked,
+    Explicit(ExplicitWriteMode),
+}
+
+/// Executes the one transaction that owns a record write and its relation-edge
+/// synchronization. Callers prepare model-specific content and retain their
+/// own decode/cleanup policy; this owner keeps SQL ordering, table bootstrap,
+/// response checking, and relation result offsets together.
+async fn execute_atomic_record_edge_write(
+    stmt: RawSqlStmt,
+    relation_writes: &[crate::RelationWrite],
+    anchor: RelationSyncAnchor<'_>,
+    post_relation_sql: Option<&str>,
+    error_policy: AtomicWriteErrorPolicy,
+) -> Result<(surrealdb::IndexedResults, usize)> {
+    ensure_relation_tables(relation_writes).await?;
+    let (mut stmt, relation_statement_count) =
+        append_relation_sync_to_stmt(stmt, relation_writes, "rel", anchor)?;
+    if let Some(sql) = post_relation_sql {
+        stmt.sql.push_str(sql);
+    }
+    stmt.sql.push_str("COMMIT TRANSACTION;");
+
+    let result = match error_policy {
+        AtomicWriteErrorPolicy::Checked => query_bound_checked(stmt).await?,
+        AtomicWriteErrorPolicy::Explicit(mode) => {
+            let mut result = match query_bound(stmt).await {
+                Ok(result) => result,
+                Err(err) => {
+                    let typed = DBError::from(err);
+                    return Err(mode.map_error(typed).into());
+                }
+            };
+            result = match result.check() {
+                Ok(result) => result,
+                Err(err) => {
+                    let typed = DBError::from(err);
+                    return Err(mode.map_error(typed).into());
+                }
+            };
+            result
+        }
+    };
+
+    Ok((result, relation_statement_count))
+}
+
 async fn decode_write_return_view<V>(row: SurrealDbValue, id: RecordId) -> Result<V>
 where
     V: ViewMeta,
@@ -354,29 +400,17 @@ where
     let stored_input = T::persist_foreign_with_plan(data, foreign_plan).await?;
     let content = prepare_content::<T, _>(stored_input)?;
     let relation_writes = original.prepare_relation_writes(record.clone()).await?;
-    ensure_relation_tables(&relation_writes).await?;
     let mut stmt = RawSqlStmt::new("BEGIN TRANSACTION;");
     stmt.sql.push_str(mode.write_sql());
     stmt = stmt.bind("record", record.clone()).bind("data", content);
-    let (stmt_with_relations, _) = append_relation_sync_to_stmt(stmt, &relation_writes, "rel")?;
-    let mut stmt = stmt_with_relations;
-    stmt.sql.push_str("COMMIT TRANSACTION;");
-
-    let result = query_bound(stmt).await;
-    let mut result = match result {
-        Ok(result) => result,
-        Err(err) => {
-            let typed = DBError::from(err);
-            return Err(mode.map_error(typed).into());
-        }
-    };
-    result = match result.check() {
-        Ok(result) => result,
-        Err(err) => {
-            let typed = DBError::from(err);
-            return Err(mode.map_error(typed).into());
-        }
-    };
+    let (mut result, _) = execute_atomic_record_edge_write(
+        stmt,
+        &relation_writes,
+        RelationSyncAnchor::Records,
+        None,
+        AtomicWriteErrorPolicy::Explicit(mode),
+    )
+    .await?;
 
     let row: Option<SurrealDbValue> = result.take(1)?;
     let row = row.ok_or_else(|| mode.empty_result_error())?;
@@ -1211,24 +1245,20 @@ where
             let content = prepare_create_content::<T, _>(stored_input)?;
             let anchor_record = RecordId::new(T::storage_table(), "__appdb_pending_create__");
             let relation_writes = original.prepare_relation_writes(anchor_record).await?;
-            ensure_relation_tables(&relation_writes).await?;
             let mut stmt = RawSqlStmt::new(
                 "BEGIN TRANSACTION; LET $created = CREATE ONLY $table CONTENT $data RETURN AFTER;",
             );
             stmt = stmt
                 .bind("table", Table::from(T::storage_table()))
                 .bind("data", content);
-            let (mut stmt, relation_statement_count) =
-                append_relation_sync_with_anchor_expr_to_stmt(
-                    stmt,
-                    &relation_writes,
-                    "rel",
-                    "$created",
-                )?;
-            stmt.sql
-                .push_str("SELECT *, record::id(id) AS id FROM ONLY $created;");
-            stmt.sql.push_str("COMMIT TRANSACTION;");
-            let mut result = query_bound_checked(stmt).await?;
+            let (mut result, relation_statement_count) = execute_atomic_record_edge_write(
+                stmt,
+                &relation_writes,
+                RelationSyncAnchor::Expression("$created"),
+                Some("SELECT *, record::id(id) AS id FROM ONLY $created;"),
+                AtomicWriteErrorPolicy::Checked,
+            )
+            .await?;
             let row: Option<SurrealDbValue> = result.take(2 + relation_statement_count)?;
             let row = row.ok_or(DBError::EmptyResult("create"))?;
             let row_json = row.into_json_value();
@@ -1397,15 +1427,17 @@ where
             let stored_input = T::persist_foreign(data).await?;
             let content = prepare_content::<T, _>(stored_input)?;
             let relation_writes = original.prepare_relation_writes(id.clone()).await?;
-            ensure_relation_tables(&relation_writes).await?;
             let mut stmt =
                 RawSqlStmt::new("BEGIN TRANSACTION; UPDATE $record CONTENT $data RETURN AFTER;");
             stmt = stmt.bind("record", id.clone()).bind("data", content);
-            let (stmt_with_relations, _) =
-                append_relation_sync_to_stmt(stmt, &relation_writes, "rel")?;
-            let mut stmt = stmt_with_relations;
-            stmt.sql.push_str("COMMIT TRANSACTION;");
-            let mut result = query_bound_checked(stmt).await?;
+            let (mut result, _) = execute_atomic_record_edge_write(
+                stmt,
+                &relation_writes,
+                RelationSyncAnchor::Records,
+                None,
+                AtomicWriteErrorPolicy::Checked,
+            )
+            .await?;
             let row: Option<SurrealDbValue> = result.take(1)?;
             let row = row.ok_or(DBError::NotFound)?;
             let stored =
@@ -1722,16 +1754,19 @@ where
                 .await?;
         let (record, content, id) = prepare_save_parts::<T, _>(T::storage_table(), stored)?;
         let relation_writes = original.prepare_relation_writes(record.clone()).await?;
-        ensure_relation_tables(&relation_writes).await?;
         let mut stmt =
             RawSqlStmt::new("BEGIN TRANSACTION; UPSERT ONLY $record CONTENT $data RETURN AFTER;");
         stmt = stmt
             .bind("record", record.clone())
             .bind("data", content.clone());
-        let (stmt_with_relations, _) = append_relation_sync_to_stmt(stmt, &relation_writes, "rel")?;
-        let mut stmt = stmt_with_relations;
-        stmt.sql.push_str("COMMIT TRANSACTION;");
-        let mut result = query_bound_checked(stmt).await?;
+        let (mut result, _) = execute_atomic_record_edge_write(
+            stmt,
+            &relation_writes,
+            RelationSyncAnchor::Records,
+            None,
+            AtomicWriteErrorPolicy::Checked,
+        )
+        .await?;
         let row: Option<SurrealDbValue> = result.take(1)?;
         let row = row.ok_or(DBError::EmptyResult("save"))?;
         let stored = decode_saved_row_from_model::<T>(row, id, &original)?;
@@ -1975,19 +2010,20 @@ where
                 prepared.push((record, content, id));
             }
 
-            ensure_relation_tables(&relation_writes).await?;
             let mut stmt = RawSqlStmt::new(sql);
             for (idx, (record, content, _)) in prepared.iter().enumerate() {
                 stmt = stmt
                     .bind(format!("record_{idx}"), record.clone())
                     .bind(format!("data_{idx}"), content.clone());
             }
-            let (stmt_with_relations, _) =
-                append_relation_sync_to_stmt(stmt, &relation_writes, "rel")?;
-            let mut stmt = stmt_with_relations;
-            stmt.sql.push_str("COMMIT TRANSACTION;");
-
-            let mut result = query_bound_checked(stmt).await?;
+            let (mut result, _) = execute_atomic_record_edge_write(
+                stmt,
+                &relation_writes,
+                RelationSyncAnchor::Records,
+                None,
+                AtomicWriteErrorPolicy::Checked,
+            )
+            .await?;
 
             for (idx, (_, _, id)) in prepared.clone().into_iter().enumerate() {
                 let row: Option<SurrealDbValue> = result.take(idx + 1)?;

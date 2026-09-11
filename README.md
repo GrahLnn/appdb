@@ -13,7 +13,7 @@ The workspace publishes two crates:
 - `appdb`: the runtime, model APIs, query helpers, and public re-exports
 - `appdb-macros`: the procedural macros re-exported by `appdb`
 
-The current workspace targets Rust 2024 and requires Rust `1.94.0` or newer.
+The current workspace targets Rust 2024 and requires Rust `1.95.0` or newer.
 
 ## Installation
 
@@ -23,7 +23,7 @@ error type such as `anyhow`:
 ```bash
 cargo add appdb
 cargo add serde --features derive
-cargo add surrealdb@3.1.2 --features kv-surrealkv
+cargo add surrealdb@3.2.4 --features kv-surrealkv
 cargo add tokio --features macros,rt-multi-thread
 cargo add anyhow
 ```
@@ -80,6 +80,11 @@ Use `init_db(path)` when the caller wants appdb's bare default storage policy.
 Use `init_db_with_options(path, InitDbOptions::default()...)` only when an
 advanced integration needs explicit versioning, retention, query timeouts,
 transaction timeouts, changefeed garbage collection, or AST payload storage.
+
+The local app profile leaves changefeed garbage collection at SurrealDB's
+default interval (30 seconds in 3.2.4). An explicit interval must be positive;
+zero is rejected before creating storage or starting the database worker.
+Use `None` to keep the engine default. A zero interval is not a disable switch.
 
 Use `DbRuntime::open*` when a caller needs to own a runtime and install it later
 with `DbRuntime::install_global()`.
