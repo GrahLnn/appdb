@@ -9,6 +9,52 @@ export interface SchemaExecutor<E = unknown> {
   readonly query: (statement: string) => Effect.Effect<unknown, E>
 }
 
+const SCHEMA_MARKER_DB_INFO = "INFO FOR DB;"
+const SCHEMA_MARKER_BOOTSTRAP = "DEFINE TABLE IF NOT EXISTS __appdb_meta SCHEMALESS;"
+const SCHEMA_MARKER_SELECT =
+  "SELECT VALUE fingerprint FROM __appdb_meta:appdb_schema LIMIT 1;"
+
+const schemaMarkerWrite = (fingerprint: string): string =>
+  `UPSERT __appdb_meta:appdb_schema CONTENT { fingerprint: '${fingerprint}' };`
+
+const schemaFingerprint = (statements: readonly string[]): string => {
+  let hash = 0xcbf29ce484222325n
+  for (const statement of statements) {
+    for (const byte of new TextEncoder().encode(statement)) {
+      hash ^= BigInt(byte)
+      hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+    }
+    hash ^= 0xffn
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return hash.toString(16).padStart(16, "0")
+}
+
+const markerTableExists = (result: unknown): boolean => {
+  const slot = Array.isArray(result) ? result[0] : result
+  if (typeof slot !== "object" || slot === null || Array.isArray(slot)) return false
+  const tables = (slot as Record<string, unknown>).tables
+  return typeof tables === "object"
+    && tables !== null
+    && !Array.isArray(tables)
+    && Object.prototype.hasOwnProperty.call(tables, "__appdb_meta")
+}
+
+const markerValue = (result: unknown): string | undefined => {
+  if (!Array.isArray(result)) return undefined
+  // The bootstrap statement occupies slot zero. The marker SELECT is the
+  // final slot for both native Surreal responses and test executors.
+  const lastSlot = result.at(-1)
+  const rows = Array.isArray(lastSlot) ? lastSlot : result
+  const first = rows[0]
+  if (typeof first === "string") return first
+  if (typeof first === "object" && first !== null && !Array.isArray(first)) {
+    const fingerprint = (first as Record<string, unknown>).fingerprint
+    return typeof fingerprint === "string" ? fingerprint : undefined
+  }
+  return undefined
+}
+
 /** The scalar types accepted by SurrealDB's HNSW index definition. */
 export type HnswVectorType =
   | "F64"
@@ -105,7 +151,7 @@ const indexName = (table: string, field: string, suffix: string): string =>
 export const uniqueIndexDdl = (table: string, field: string): string => {
   const checkedTable = validateIdentifier(table, "schema table")
   const checkedField = validateIdentifier(field, "schema field")
-  return `DEFINE INDEX IF NOT EXISTS ${indexName(checkedTable, checkedField, "unique")} ON ${checkedTable} FIELDS ${checkedField} UNIQUE;`
+  return `DEFINE INDEX OVERWRITE ${indexName(checkedTable, checkedField, "unique")} ON ${checkedTable} FIELDS ${checkedField} UNIQUE;`
 }
 
 /**
@@ -122,7 +168,7 @@ export const paginationIndexDdl = (
   const checkedIdField = validateIdentifier(idField, "schema id field")
   const physicalField = checkedField === checkedIdField ? "id" : checkedField
   const indexFields = physicalField === "id" ? "id" : `${physicalField},id`
-  return `DEFINE INDEX IF NOT EXISTS ${indexName(checkedTable, checkedField, "id_pagin")} ON ${checkedTable} FIELDS ${indexFields};`
+  return `DEFINE INDEX OVERWRITE ${indexName(checkedTable, checkedField, "id_pagin")} ON ${checkedTable} FIELDS ${indexFields};`
 }
 
 /** Builds the explicit HNSW DDL without rewriting caller-supplied SQL. */
@@ -136,7 +182,7 @@ export const hnswIndexDdl = (definition: HnswIndexDefinition): string => {
     : validatePositiveInteger(definition.efConstruction, "HNSW efConstruction")
   const m = definition.m === undefined ? undefined : validatePositiveInteger(definition.m, "HNSW m")
 
-  let ddl = `DEFINE INDEX IF NOT EXISTS ${name} ON ${table} FIELDS ${field} HNSW DIMENSION ${dimension}`
+  let ddl = `DEFINE INDEX OVERWRITE ${name} ON ${table} FIELDS ${field} HNSW DIMENSION ${dimension}`
   if (definition.vectorType !== undefined) ddl += ` TYPE ${definition.vectorType}`
   if (definition.distance !== undefined) ddl += ` DIST ${definition.distance}`
   if (efConstruction !== undefined) ddl += ` EFC ${efConstruction}`
@@ -168,6 +214,14 @@ const storeOwner = (model: AnyModel): AnyModel => {
 export const modelSchemaDdl = (model: AnyModel): readonly string[] => {
   const owner = storeOwner(model)
   const output = [tableBootstrapDdl(owner.table)]
+  const relations = new Set<string>()
+  for (const field of owner.fields) {
+    const relation = field.metadata.relate?.relation
+    if (relation !== undefined) relations.add(validateIdentifier(relation, "relation table"))
+  }
+  for (const relation of [...relations].sort()) {
+    output.push(`DEFINE TABLE IF NOT EXISTS ${relation} TYPE RELATION SCHEMALESS;`)
+  }
   for (const field of owner.uniqueFields) output.push(uniqueIndexDdl(owner.table, field))
   if (owner.paginationField !== undefined) {
     output.push(paginationIndexDdl(owner.table, owner.paginationField, owner.idField ?? "id"))
@@ -183,14 +237,17 @@ export const schemaDdl = (definition: SchemaDdlDefinition): readonly string[] =>
     ...(definition.hnsw ?? []).map(hnswIndexDdl),
   ])]
   // Raw statements may intentionally repeat or contain DML. Preserve their
-  // count and bytes; only generated IF NOT EXISTS statements are deduplicated.
+  // count and bytes; generated schema statements are deduplicated.
   return [...raw, ...generated]
 }
 
 /**
- * Applies statements sequentially. The executor decides how startup errors
- * prevent publication of its ready service; this function stops at the first
- * failed statement and never rewrites raw SQL.
+ * Applies statements only when the generated plan fingerprint changes. The
+ * destructive index DDL stays available for actual schema changes, while an
+ * unchanged startup performs one marker read instead of rebuilding indexes.
+ * The executor decides how startup errors prevent publication of its ready
+ * service; this function stops at the first failed statement and never
+ * rewrites raw SQL.
  */
 export const applySchema = <E>(
   executor: SchemaExecutor<E>,
@@ -208,8 +265,26 @@ export const applySchema = <E>(
             cause,
           }),
     }),
-    (statements) => Effect.forEach(statements, (statement) => executor.query(statement), {
-      concurrency: 1,
-      discard: true,
-    }),
+    (statements) => {
+      const fingerprint = schemaFingerprint(statements)
+      return Effect.flatMap(executor.query(SCHEMA_MARKER_DB_INFO), (info) => {
+        const ensureMarkerTable = markerTableExists(info)
+          ? Effect.succeed(info)
+          : executor.query(SCHEMA_MARKER_BOOTSTRAP)
+        return Effect.flatMap(ensureMarkerTable, (bootstrapResult) =>
+          Effect.flatMap(executor.query(SCHEMA_MARKER_SELECT), (result) => {
+            if (markerValue(result) === fingerprint) return Effect.succeed(undefined)
+            return Effect.flatMap(
+              Effect.forEach(statements, (statement) => executor.query(statement), {
+                concurrency: 1,
+                discard: true,
+              }),
+              () => info === undefined && bootstrapResult === undefined && result === undefined
+                ? Effect.succeed(undefined)
+                : Effect.as(executor.query(schemaMarkerWrite(fingerprint)), undefined),
+            )
+          }),
+        )
+      })
+    },
   )

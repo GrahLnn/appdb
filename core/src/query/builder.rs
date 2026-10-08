@@ -22,7 +22,13 @@ impl QueryKind {
     pub fn replace(_id: RecordId, _data: Value) -> String {
         "UPDATE $id REPLACE $data;".to_owned()
     }
-    /// Builds a keyset pagination query for a table.
+    /// Builds the indexed keyset query used by `#[pagin]`.
+    ///
+    /// Keep the public-id projection in the same `SELECT` as the indexed scan.
+    /// Wrapping the scan in `LET $rows = (...)` forces SurrealDB to materialize
+    /// an intermediate relation before it can apply the order and limit.
+    /// Callers should prefer the generated `pagin_asc`/`pagin_desc` methods;
+    /// `list()` remains an explicit full-table operation for offline work.
     pub fn pagin(
         _table: &str,
         _count: i64,
@@ -34,15 +40,23 @@ impl QueryKind {
             Order::Asc => (">", "ASC"),
             Order::Desc => ("<", "DESC"),
         };
+        let public_key = if order_key == "__page_public_id" {
+            // SurrealQL accepts the physical record id in ORDER BY and its
+            // index, while `record::id(id)` is only used for the public row
+            // projection. The cursor binder supplies the matching RecordId.
+            "id"
+        } else {
+            order_key
+        };
+        let tie_key = "id";
+        let select = "SELECT *, record::id(id) AS id FROM $table";
         if has_cursor {
             format!(
-                "LET $rows = (SELECT *, id AS __page_record, record::id(id) AS __page_public_id FROM $table); SELECT *, __page_public_id AS id FROM $rows WHERE ({page_order_key} {than} $cursor_value OR ({page_order_key} = $cursor_value AND __page_record {than} $cursor_record)) ORDER BY {page_order_key} {order_str}, __page_record {order_str} LIMIT $count;",
-                page_order_key = order_key
+                "{select} WHERE ({public_key} {than} $cursor_value OR ({public_key} = $cursor_value AND {tie_key} {than} $cursor_record)) ORDER BY {public_key} {order_str}, {tie_key} {order_str} LIMIT $count;"
             )
         } else {
             format!(
-                "LET $rows = (SELECT *, id AS __page_record, record::id(id) AS __page_public_id FROM $table); SELECT *, __page_public_id AS id FROM $rows ORDER BY {page_order_key} {order_str}, __page_record {order_str} LIMIT $count;",
-                page_order_key = order_key
+                "{select} ORDER BY {public_key} {order_str}, {tie_key} {order_str} LIMIT $count;"
             )
         }
     }
@@ -233,6 +247,11 @@ impl QueryKind {
         "SELECT `in` AS source, out, position FROM $rel WHERE in = $in ORDER BY position ASC;"
             .to_owned()
     }
+    /// Builds one ordered edge scan for many source records.
+    pub fn select_out_edges_by_owners(_rel: &str) -> String {
+        "SELECT `in` AS owner, out AS target, position FROM $rel WHERE `in` IN $owners ORDER BY `in` ASC, position ASC;"
+            .to_owned()
+    }
     /// Builds a query that returns incoming record ids for one target record.
     pub fn select_in_ids(_out_id: &RecordId, _rel: &str, _in_table: &str) -> String {
         "RETURN (SELECT VALUE in FROM $rel WHERE out = $out AND record::tb(in) = $in_table);"
@@ -241,6 +260,11 @@ impl QueryKind {
     /// Builds a query that returns ordered incoming relation edges for one target record.
     pub fn select_in_edges(_out_id: &RecordId, _rel: &str) -> String {
         "SELECT `in` AS source, out, position FROM $rel WHERE out = $out ORDER BY position ASC;"
+            .to_owned()
+    }
+    /// Builds one ordered edge scan for many target records.
+    pub fn select_in_edges_by_owners(_rel: &str) -> String {
+        "SELECT out AS owner, `in` AS target, position FROM $rel WHERE out IN $owners ORDER BY out ASC, position ASC;"
             .to_owned()
     }
     /// Builds a query that returns all incoming record ids for one target record.

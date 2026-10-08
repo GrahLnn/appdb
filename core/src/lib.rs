@@ -48,7 +48,7 @@ use surrealdb_types::Kind;
 /// One-shot overrides for `#[foreign]` fields during a Store write.
 ///
 /// The domain model stays unchanged; this plan only gives the foreign write
-/// interpreter already-known record ids for selected fields in one transaction.
+/// interpreter already-known record ids for selected fields in one write plan.
 #[derive(Debug, Clone, Default)]
 pub struct ForeignWritePlan {
     fields: std::collections::BTreeMap<&'static str, serde_json::Value>,
@@ -543,6 +543,22 @@ pub trait ForeignModel: StoredModel {
         async { Ok(()) }
     }
 
+    /// Hydrates relation fields for many rows while keeping the input order.
+    /// Generated Store implementations override this with one edge query per
+    /// relation field; the default preserves the behavior for custom models.
+    fn inject_relation_values_from_db_many(
+        rows: Vec<(surrealdb::types::RecordId, serde_json::Value)>,
+    ) -> impl std::future::Future<Output = anyhow::Result<Vec<serde_json::Value>>> + Send {
+        async move {
+            let mut output = Vec::with_capacity(rows.len());
+            for (record, mut row) in rows {
+                Self::inject_relation_values_from_db(record, &mut row).await?;
+                output.push(row);
+            }
+            Ok(output)
+        }
+    }
+
     /// Decodes a raw row returned by SurrealDB into the stored representation for this model.
     fn decode_stored_row(row: surrealdb::types::Value) -> anyhow::Result<Self::Stored>
     where
@@ -614,6 +630,26 @@ fn foreign_cleanup_push(id: surrealdb::types::RecordId) {
     });
 }
 
+pub(crate) async fn cleanup_records(records: Vec<surrealdb::types::RecordId>) {
+    if records.is_empty() {
+        return;
+    }
+    let Ok(db) = crate::connection::get_db() else {
+        tracing::warn!(
+            count = records.len(),
+            "write cleanup skipped because the database is unavailable"
+        );
+        return;
+    };
+    for record in records.into_iter().rev() {
+        let result: surrealdb::Result<Option<surrealdb::types::Value>> =
+            db.delete(record.clone()).await;
+        if let Err(error) = result {
+            tracing::warn!(?record, %error, "write cleanup failed");
+        }
+    }
+}
+
 pub(crate) async fn run_with_foreign_cleanup_scope<F, Fut, T>(
     f: F,
 ) -> anyhow::Result<(T, Vec<surrealdb::types::RecordId>)>
@@ -621,11 +657,23 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
 {
+    if foreign_cleanup_enabled() {
+        return Ok((f().await?, Vec::new()));
+    }
+
     FOREIGN_SAVE_CLEANUP_STACK
         .scope(std::cell::RefCell::new(Vec::new()), async move {
-            let value = f().await?;
-            let cleanup = FOREIGN_SAVE_CLEANUP_STACK.with(|stack| stack.borrow().clone());
-            Ok((value, cleanup))
+            match f().await {
+                Ok(value) => {
+                    let cleanup = FOREIGN_SAVE_CLEANUP_STACK.with(|stack| stack.borrow().clone());
+                    Ok((value, cleanup))
+                }
+                Err(error) => {
+                    let cleanup = FOREIGN_SAVE_CLEANUP_STACK.with(|stack| stack.borrow().clone());
+                    cleanup_records(cleanup).await;
+                    Err(error)
+                }
+            }
         })
         .await
 }

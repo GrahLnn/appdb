@@ -17,13 +17,17 @@ fn pagin_uses_stable_tiebreaker_cursor_predicate() {
     assert!(sql.contains("$cursor_record"));
     assert!(sql.contains("OR"));
     assert!(sql.contains("record::id(id)"));
+    assert!(sql.contains("SELECT *, record::id(id) AS id FROM $table"));
+    assert!(sql.contains("ORDER BY created_at DESC, id DESC LIMIT $count"));
+    assert!(!sql.contains("LET $rows"));
 }
 
 #[test]
 fn pagin_uses_public_id_projection_when_ordering_by_id() {
     let sql = QueryKind::pagin("user", 10, true, Order::Desc, "__page_public_id");
-    assert!(sql.contains("__page_public_id < $cursor_value"));
-    assert!(sql.contains("ORDER BY __page_public_id DESC, __page_record DESC"));
+    assert!(sql.contains("id < $cursor_value"));
+    assert!(sql.contains("ORDER BY id DESC, id DESC"));
+    assert!(!sql.contains("LET $rows"));
 }
 
 #[test]

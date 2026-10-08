@@ -63,10 +63,15 @@ export class WritePlanBuilder {
     this.resultSlots.push({ ...result, index })
   }
 
+  /**
+   * Returns an immutable execution snapshot. Calling this more than once is
+   * safe: the builder never appends a second COMMIT and remains reusable for
+   * decoding or retry planning.
+   */
   finish(): WritePlan {
-    this.statement = new BoundQuery(this.statement).append("COMMIT TRANSACTION;")
+    const statement = new BoundQuery(this.statement).append("COMMIT TRANSACTION;")
     return {
-      statement: this.statement,
+      statement,
       resultSlots: [...this.resultSlots],
     }
   }

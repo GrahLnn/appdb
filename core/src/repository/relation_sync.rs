@@ -1,11 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use anyhow::Result;
 use surrealdb::types::{RecordId, Table, ToSql};
 
 use crate::error::DBError;
-use crate::model::relation::ensure_relation_name;
-use crate::query::{RawSqlStmt, query_bound_checked};
+use crate::query::RawSqlStmt;
 use crate::{RelationWrite, RelationWriteDirection};
 
 #[derive(Debug)]
@@ -62,29 +61,6 @@ fn relation_write_batches(writes: &[RelationWrite]) -> Result<Vec<RelationWriteB
     }
 
     Ok(groups)
-}
-
-pub(crate) async fn ensure_relation_tables(writes: &[RelationWrite]) -> Result<()> {
-    let relations = writes
-        .iter()
-        .map(|write| write.relation)
-        .collect::<BTreeSet<_>>();
-    if relations.is_empty() {
-        return Ok(());
-    }
-
-    let mut stmt = RawSqlStmt::new("BEGIN TRANSACTION;");
-    for relation in relations {
-        ensure_relation_name(relation)?;
-        let relation_sql = Table::from(relation).to_sql();
-        stmt.sql.push_str(&format!(
-            "DEFINE TABLE IF NOT EXISTS {relation_sql} TYPE RELATION SCHEMALESS;"
-        ));
-    }
-    stmt.sql.push_str("COMMIT TRANSACTION;");
-
-    query_bound_checked(stmt).await?;
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]

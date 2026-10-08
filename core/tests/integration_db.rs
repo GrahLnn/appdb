@@ -3675,26 +3675,26 @@ fn store_unique_field_registers_schema_index() {
         .collect::<Vec<_>>();
 
     assert!(ddls.iter().any(|ddl| {
-        ddl.contains("DEFINE INDEX IF NOT EXISTS it_profile_name_unique")
+        ddl.contains("DEFINE INDEX OVERWRITE it_profile_name_unique")
             && ddl.contains("ON it_profile")
             && ddl.contains("FIELDS name UNIQUE")
     }));
 
     assert!(ddls.iter().any(|ddl| {
-        ddl.contains("DEFINE INDEX IF NOT EXISTS it_aliased_post_slug_unique")
+        ddl.contains("DEFINE INDEX OVERWRITE it_aliased_post_slug_unique")
             && ddl.contains("ON it_aliased_post")
             && ddl.contains("FIELDS slug UNIQUE")
     }));
 
     assert!(ddls.iter().any(|ddl| {
-        ddl.contains("DEFINE INDEX IF NOT EXISTS it_paged_entry_created_at_id_pagin")
+        ddl.contains("DEFINE INDEX OVERWRITE it_paged_entry_created_at_id_pagin")
             && ddl.contains("ON it_paged_entry")
             && ddl.contains("FIELDS created_at,id")
             && !ddl.contains("UNIQUE")
     }));
 
     assert!(ddls.iter().any(|ddl| {
-        ddl.contains("DEFINE INDEX IF NOT EXISTS it_auto_filled_entry_created_at_id_pagin")
+        ddl.contains("DEFINE INDEX OVERWRITE it_auto_filled_entry_created_at_id_pagin")
             && ddl.contains("ON it_auto_filled_entry")
             && ddl.contains("FIELDS created_at,id")
             && !ddl.contains("UNIQUE")

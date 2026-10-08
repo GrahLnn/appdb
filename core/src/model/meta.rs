@@ -6,6 +6,8 @@ use surrealdb::types::{RecordId, RecordIdKey, SurrealValue};
 
 static TABLE_REGISTRY: LazyLock<Mutex<HashMap<&'static str, &'static str>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static DEFAULT_TABLE_NAMES: LazyLock<Mutex<HashMap<String, &'static str>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Trait for models that can expose a full SurrealDB record id.
 pub trait HasId {
@@ -202,9 +204,17 @@ pub fn register_table(model: &'static str, table: &'static str) -> &'static str 
 
 /// Converts a Rust type name into the default snake_case table name.
 pub fn default_table_name(type_name: &str) -> &'static str {
+    let mut names = DEFAULT_TABLE_NAMES
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    if let Some(existing) = names.get(type_name) {
+        return existing;
+    }
     let bare = type_name.rsplit("::").next().unwrap_or(type_name);
     let snake = to_snake_case(bare);
-    Box::leak(snake.into_boxed_str())
+    let leaked = Box::leak(snake.into_boxed_str());
+    names.insert(type_name.to_owned(), leaked);
+    leaked
 }
 
 fn to_snake_case(input: &str) -> String {

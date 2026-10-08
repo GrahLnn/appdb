@@ -62,10 +62,10 @@ describe("schema DDL planning and application", () => {
       "DEFINE TABLE IF NOT EXISTS schema_ddl_user SCHEMALESS;",
     )
     expect(uniqueIndexDdl(User.table, "email")).toBe(
-      "DEFINE INDEX IF NOT EXISTS schema_ddl_user_email_unique ON schema_ddl_user FIELDS email UNIQUE;",
+      "DEFINE INDEX OVERWRITE schema_ddl_user_email_unique ON schema_ddl_user FIELDS email UNIQUE;",
     )
     expect(paginationIndexDdl(User.table, "createdAt", User.idField)).toBe(
-      "DEFINE INDEX IF NOT EXISTS schema_ddl_user_createdAt_id_pagin ON schema_ddl_user FIELDS createdAt,id;",
+      "DEFINE INDEX OVERWRITE schema_ddl_user_createdAt_id_pagin ON schema_ddl_user FIELDS createdAt,id;",
     )
     expect(modelSchemaDdl(User)).toEqual([
       tableBootstrapDdl(User.table),
@@ -99,7 +99,7 @@ describe("schema DDL planning and application", () => {
       field: "embedding",
       dimension: 2,
     })).toBe(
-      "DEFINE INDEX IF NOT EXISTS schema_ddl_embedding_hnsw ON schema_ddl_vector FIELDS embedding HNSW DIMENSION 2;",
+      "DEFINE INDEX OVERWRITE schema_ddl_embedding_hnsw ON schema_ddl_vector FIELDS embedding HNSW DIMENSION 2;",
     )
     expect(hnswIndexDdl({
       name: "schema_ddl_nested_hnsw",
@@ -113,7 +113,7 @@ describe("schema DDL planning and application", () => {
       concurrently: true,
       defer: true,
     })).toBe(
-      "DEFINE INDEX IF NOT EXISTS schema_ddl_nested_hnsw ON schema_ddl_vector FIELDS items.embedding HNSW DIMENSION 64 TYPE F32 DIST COSINE EFC 150 M 12 CONCURRENTLY DEFER;",
+      "DEFINE INDEX OVERWRITE schema_ddl_nested_hnsw ON schema_ddl_vector FIELDS items.embedding HNSW DIMENSION 64 TYPE F32 DIST COSINE EFC 150 M 12 CONCURRENTLY DEFER;",
     )
     expect(() => hnswIndexDdl({
       name: "schema_ddl_invalid_hnsw",
@@ -209,7 +209,13 @@ describe("schema DDL planning and application", () => {
       ),
     )
 
-    expect(calls).toEqual(["DEFINE TABLE good;", "DEFINE TABLE bad;"])
+    expect(calls).toEqual([
+      "INFO FOR DB;",
+      "DEFINE TABLE IF NOT EXISTS __appdb_meta SCHEMALESS;",
+      "SELECT VALUE fingerprint FROM __appdb_meta:appdb_schema LIMIT 1;",
+      "DEFINE TABLE good;",
+      "DEFINE TABLE bad;",
+    ])
     expect(result._tag).toBe("Failure")
   })
 

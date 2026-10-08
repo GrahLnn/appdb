@@ -1,6 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use surrealdb::types::{RecordId, SurrealValue, Table, Value as SurrealDbValue};
 
 use crate::connection::get_db;
@@ -35,6 +36,13 @@ pub struct OrderedRelationEdge {
 struct OrderedRelationEdgeRow {
     source: RecordId,
     out: RecordId,
+    position: i64,
+}
+
+#[derive(Debug, Deserialize, SurrealValue)]
+struct RelationOwnerEdgeRow {
+    owner: RecordId,
+    target: RecordId,
     position: i64,
 }
 
@@ -201,6 +209,31 @@ impl GraphRepo {
         Ok(rows.into_iter().map(OrderedRelationEdge::from).collect())
     }
 
+    /// Loads ordered outgoing target ids for many owners in one query.
+    pub async fn out_ids_by_owners(
+        owners: Vec<RecordId>,
+        rel: &str,
+    ) -> Result<HashMap<RecordId, Vec<RecordId>>> {
+        let relation = Self::relation_table(rel)?;
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::select_out_edges_by_owners(rel))
+            .bind(("rel", relation))
+            .bind(("owners", owners))
+            .await?
+            .check()?;
+        let rows: Vec<RelationOwnerEdgeRow> = result.take(0)?;
+        let mut grouped = HashMap::new();
+        for row in rows {
+            let _position = row.position;
+            grouped
+                .entry(row.owner)
+                .or_insert_with(Vec::new)
+                .push(row.target);
+        }
+        Ok(grouped)
+    }
+
     /// Lists source record ids that point to `out_id` through `rel`.
     pub async fn in_ids(out_id: RecordId, rel: &str, in_table: &str) -> Result<Vec<RecordId>> {
         let relation = Self::relation_table(rel)?;
@@ -230,6 +263,31 @@ impl GraphRepo {
             .check()?;
         let rows: Vec<OrderedRelationEdgeRow> = result.take(0)?;
         Ok(rows.into_iter().map(OrderedRelationEdge::from).collect())
+    }
+
+    /// Loads ordered incoming source ids for many owners in one query.
+    pub async fn in_ids_by_owners(
+        owners: Vec<RecordId>,
+        rel: &str,
+    ) -> Result<HashMap<RecordId, Vec<RecordId>>> {
+        let relation = Self::relation_table(rel)?;
+        let db = get_db()?;
+        let mut result = db
+            .query(QueryKind::select_in_edges_by_owners(rel))
+            .bind(("rel", relation))
+            .bind(("owners", owners))
+            .await?
+            .check()?;
+        let rows: Vec<RelationOwnerEdgeRow> = result.take(0)?;
+        let mut grouped = HashMap::new();
+        for row in rows {
+            let _position = row.position;
+            grouped
+                .entry(row.owner)
+                .or_insert_with(Vec::new)
+                .push(row.target);
+        }
+        Ok(grouped)
     }
 
     /// Lists all incoming source record ids for `out_id` through `rel`.
