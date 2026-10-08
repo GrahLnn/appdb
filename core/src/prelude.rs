@@ -22,5 +22,9 @@ pub use crate::query::sql::{
 };
 pub use crate::repository::{Crud, Page, PageCursor};
 pub use crate::serde_utils::id::Id;
+pub use crate::sqlite::{
+    SqliteKey, SqliteModel, SqliteOrderKey, SqlitePage, SqlitePageCursor, SqlitePageOrder,
+    SqliteResult, SqliteStore,
+};
 pub use crate::tx::{TxResults, TxStmt, run_tx};
 pub use surrealdb::types::{RecordId, Table};

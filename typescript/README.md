@@ -13,6 +13,7 @@ the following database packages:
 | --- | --- | --- |
 | `surrealdb` | `2.0.8` (patched locally) | TypeScript SDK and remote engines |
 | `@surrealdb/node` | `3.0.3` | Node native-engine adapter |
+| `better-sqlite3` | `13.0.3` | Node desktop SQLite adapter |
 | embedded engine metadata | `3.0.2` | Version reported by the native package metadata |
 | Rust workspace `surrealdb` | `3.3.1` | Separate Rust implementation; it is not the TypeScript engine |
 
@@ -67,6 +68,40 @@ console.log({ result, nodeLayerDefined: nodeLayer !== undefined })
 Constructing a Node layer is lazy. The example creates a layer but does not
 open an engine or require a local database; an application starts it by
 providing the layer to an Effect runtime.
+
+### SQLite storage
+
+The SQLite adapter keeps the model codec separate from the Surreal connection.
+`sqliteModel(model)` reuses the compiled schema encode/decode boundary, while
+`openSqliteClient` supplies a Node `better-sqlite3` connection. The table uses a
+`WITHOUT ROWID` primary key and bounded keyset pages, so startup can read only
+the first page and repeated saves address the same row.
+
+```ts
+import { Effect, Schema } from "effect"
+import { Model, field, makeSqliteStore, sqliteModel } from "@appdb/core"
+import { openSqliteClient } from "@appdb/core/node"
+
+const Entry = Model.define("entry", Schema.Struct({
+  id: field(Schema.Int, { id: true }),
+  createdAt: field(Schema.Int, { pagination: true }),
+  body: Schema.String,
+}))
+const sqlite = openSqliteClient("data/app.sqlite")
+const store = makeSqliteStore(sqlite.client, sqliteModel(Entry))
+
+await Effect.runPromise(store.init)
+await Effect.runPromise(store.save({ id: 1, createdAt: 1, body: "first" }))
+const firstPage = await Effect.runPromise(store.paginAsc(50))
+sqlite.close()
+```
+
+`saveMany` uses the driver's transaction boundary when one is available;
+`paginAsc`/`paginDesc` use `(order_key,id)` keyset comparisons. If a model has
+no `pagination` field, pages use the primary key directly and no extra index is
+created. The adapter is intentionally separate from Surreal relation and view
+hydration; custom encrypted payloads can provide their own `encode`/`decode`
+functions through `SqliteModel`.
 
 ## Public API
 

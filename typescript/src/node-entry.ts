@@ -6,3 +6,4 @@
  */
 export * from "./node.js"
 export * from "./node-keyring.js"
+export * from "./sqlite-node.js"

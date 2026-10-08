@@ -1,4 +1,5 @@
-import { Effect, Encoding, Result, Schema } from "effect"
+import { Effect, Result, Schema } from "effect"
+import { Base64Url } from "effect/encoding"
 import { RecordId, Table } from "surrealdb"
 
 import { DbError, DbErrorKind, isDbError } from "./errors.js"
@@ -50,7 +51,7 @@ const invalidCursor = (message: string, cause?: unknown): DbError =>
     ...(cause === undefined ? {} : { cause }),
   })
 
-const encodeBase64Url = (input: string): string => Encoding.encodeBase64Url(input)
+const encodeBase64Url = (input: string): string => Base64Url.encode(input)
 
 const decodeBase64Url = (input: string): string => {
   // Encoding accepts padded, CR/LF-containing, and empty Base64Url strings.
@@ -58,7 +59,7 @@ const decodeBase64Url = (input: string): string => {
   if (input.length === 0 || !/^[A-Za-z0-9_-]+$/.test(input)) {
     throw invalidCursor("page cursor is not valid base64url")
   }
-  const decoded = Encoding.decodeBase64Url(input)
+  const decoded = Base64Url.decode(input)
   if (Result.isFailure(decoded)) {
     throw invalidCursor("page cursor contains invalid base64url digits", decoded.failure)
   }

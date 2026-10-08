@@ -16,6 +16,7 @@ export * from "./relation.js"
 export * from "./graph.js"
 export * from "./repository.js"
 export * from "./schema-ddl.js"
+export * from "./sqlite.js"
 
 export {
   compileSchemaPlan,

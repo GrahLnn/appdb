@@ -50,10 +50,12 @@ const makeAutoFillSchema = (counters: Counters) => {
           counters.fillCalls += 1
           return `now-${counters.fillCalls}`
         }),
-      ).map((value) => {
-        counters.autoEncodeCalls += 1
-        return value
-      }),
+      ).pipe(
+        SchemaGetter.map((value) => {
+          counters.autoEncodeCalls += 1
+          return value
+        }),
+      ),
     }),
   )
 }

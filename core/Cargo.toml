@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Lightweight SurrealDB helper library for Tauri embedded database apps"
+description = "Typed SurrealDB and compact SQLite storage for embedded database apps"
 documentation = "https://docs.rs/appdb"
 readme = "../README.md"
 
@@ -20,6 +20,7 @@ async-trait.workspace = true
 inventory.workspace = true
 keyring.workspace = true
 rand.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 specta.workspace = true

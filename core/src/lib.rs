@@ -25,6 +25,8 @@ pub mod repository;
 /// Serde helpers for ids and SurrealDB-friendly encoding.
 pub mod serde_utils;
 mod shape;
+/// Backend-neutral SQLite model codecs and compact keyset storage.
+pub mod sqlite;
 /// Explicit transaction runner helpers.
 pub mod tx;
 
@@ -40,6 +42,10 @@ pub use model::schema::{HnswIndexDef, VectorDistance, VectorIndexType};
 pub use query::Order;
 pub use repository::*;
 pub use serde_utils::id::*;
+pub use sqlite::{
+    SqliteKey, SqliteModel, SqliteOrderKey, SqlitePage, SqlitePageCursor, SqlitePageOrder,
+    SqliteResult, SqliteStore,
+};
 pub use tx::*;
 
 use surrealdb::types::RecordId;

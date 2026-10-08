@@ -69,6 +69,40 @@ The generated model methods are the intended application-facing API. `Repo<T>`
 remains public for advanced integration seams, but normal application code should
 stay on the model type.
 
+## SQLite Backend
+
+For desktop data that should open by reading pages on demand, use the public
+SQLite adapter instead of the Surreal repository path. It reuses serde model
+values and appdb's `Id` domain while storing one `WITHOUT ROWID` row per key;
+`save` updates that row in place and `page` uses an indexed keyset cursor.
+
+```rust
+use appdb::{Id, SqliteKey, SqliteModel, SqliteOrderKey, SqlitePageOrder, SqliteStore};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Entry {
+    id: Id,
+    created_at: i64,
+    body: String,
+}
+
+fn open_store() -> anyhow::Result<SqliteStore<Entry>> {
+    let model = SqliteModel::json("entry", |entry: &Entry| SqliteKey::from(&entry.id))?
+        .with_order(|entry: &Entry| Ok(SqliteOrderKey::Integer(entry.created_at)));
+    Ok(SqliteStore::open("data/app.sqlite", model)?)
+}
+
+let store = open_store()?;
+store.save(&entry)?;
+let page = store.page(50, None, SqlitePageOrder::Desc)?;
+```
+
+The default payload is JSON. `SqliteModel::with_codec` is the explicit seam for
+encrypted or binary payloads; relation hydration and Surreal record links are
+not silently emulated by this backend. Keep the `SqliteStore` on a dedicated
+worker when a synchronous connection would block an async runtime.
+
 ## Runtime
 
 `init_local_app_db(path)` opens an embedded SurrealKV database with appdb's
