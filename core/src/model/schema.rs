@@ -5,6 +5,23 @@ pub struct SchemaItem {
 }
 inventory::collect!(SchemaItem);
 
+/// Stable fingerprint for the ordered schema plan owned by appdb.
+///
+/// The startup adapter stores this value in the database and skips the
+/// destructive `OVERWRITE` statements when the generated plan is unchanged.
+pub fn fingerprint(statements: &[String]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for statement in statements {
+        for byte in statement.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
 /// Inventory item for one HNSW vector index definition.
 pub struct HnswSchemaItem {
     pub index: HnswIndexDef,
@@ -156,7 +173,7 @@ impl HnswIndexDef {
         );
 
         let mut ddl = format!(
-            "DEFINE INDEX IF NOT EXISTS {} ON {} FIELDS {} HNSW DIMENSION {}",
+            "DEFINE INDEX OVERWRITE {} ON {} FIELDS {} HNSW DIMENSION {}",
             self.name, self.table, self.field, self.dimension
         );
         if let Some(vector_type) = self.vector_type {
@@ -200,6 +217,10 @@ mod tests;
 
 #[macro_export]
 /// Registers a schema DDL string for a type.
+///
+/// Expansion only emits a compile-time inventory item; it performs no database
+/// work. The managed runtime compares the complete inventory fingerprint and
+/// executes this DDL only after the plan changes or its marker is absent.
 macro_rules! impl_schema {
     ($ty:ty, $ddl:expr) => {
         impl $crate::model::schema::SchemaDef for $ty {
@@ -216,6 +237,10 @@ macro_rules! impl_schema {
 
 #[macro_export]
 /// Registers a SurrealDB HNSW vector index for a type.
+///
+/// Keep this declaration on the startup schema owner. It is not a per-write
+/// operation: the managed runtime applies the generated index only when the
+/// schema fingerprint changes.
 macro_rules! impl_hnsw_index {
     (
         $ty:ty,

@@ -112,9 +112,15 @@ impl<'a> PaginationPlan<'a> {
 
         if let Some(cursor) = cursor {
             let decoded = self.decode_cursor(cursor)?;
+            let cursor_record = RecordId::new(table, decoded.id);
+            let cursor_value = if self.field == "id" {
+                SurrealDbValue::RecordId(cursor_record.clone())
+            } else {
+                decoded.value
+            };
             stmt = stmt
-                .bind("cursor_value", decoded.value)
-                .bind("cursor_record", RecordId::new(table, decoded.id));
+                .bind("cursor_value", cursor_value)
+                .bind("cursor_record", cursor_record);
         }
 
         Ok(stmt)

@@ -389,7 +389,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             field_name
         );
         let ddl = format!(
-            "DEFINE INDEX IF NOT EXISTS {index_name} ON {} FIELDS {field_name} UNIQUE;",
+            "DEFINE INDEX OVERWRITE {index_name} ON {} FIELDS {field_name} UNIQUE;",
             resolved_schema_table_name(&struct_ident, table_alias.as_ref())
         );
 
@@ -411,16 +411,30 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
         );
         let ddl = if field_name == "id" {
             format!(
-                "DEFINE INDEX IF NOT EXISTS {index_name} ON {} FIELDS id;",
+                "DEFINE INDEX OVERWRITE {index_name} ON {} FIELDS id;",
                 resolved_schema_table_name(&struct_ident, table_alias.as_ref())
             )
         } else {
             format!(
-                "DEFINE INDEX IF NOT EXISTS {index_name} ON {} FIELDS {field_name},id;",
+                "DEFINE INDEX OVERWRITE {index_name} ON {} FIELDS {field_name},id;",
                 resolved_schema_table_name(&struct_ident, table_alias.as_ref())
             )
         };
 
+        quote! {
+            ::inventory::submit! {
+                ::appdb::model::schema::SchemaItem {
+                    ddl: #ddl,
+                }
+            }
+        }
+    });
+
+    let relation_schema_impls = relate_fields.iter().map(|field| {
+        let ddl = format!(
+            "DEFINE TABLE IF NOT EXISTS {} TYPE RELATION SCHEMALESS;",
+            field.relation_name
+        );
         quote! {
             ::inventory::submit! {
                 ::appdb::model::schema::SchemaItem {
@@ -499,6 +513,12 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 
     let pagination_methods_impl = if pagin_field.is_some() {
         quote! {
+            /// Loads one indexed keyset page without materializing the table.
+            ///
+            /// Prefer this method for startup and scrolling reads. The
+            /// `#[pagin]` field generates a `{field},id` index; `list()` is
+            /// an explicit full-table read and should be reserved for batch
+            /// work.
             pub async fn pagin_desc(
                 count: i64,
                 cursor: ::std::option::Option<::appdb::PageCursor>,
@@ -506,6 +526,10 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                 ::appdb::repository::Repo::<Self>::pagin_desc(count, cursor).await
             }
 
+            /// Loads one indexed keyset page in ascending order.
+            ///
+            /// The cursor keeps the `#[pagin]` value and physical record id,
+            /// so equal field values remain stable without offset scans.
             pub async fn pagin_asc(
                 count: i64,
                 cursor: ::std::option::Option<::appdb::PageCursor>,
@@ -678,6 +702,26 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
             }
         });
 
+        let inject_relation_values_from_db_many = relate_fields.iter().map(|field| {
+            let relation_name = &field.relation_name;
+            let field_ty = &field.field_ty;
+            let ident = field.ident.to_string();
+            let load_relation_ids = field.direction.load_edges_many_tokens(relation_name);
+            quote! {
+                {
+                    let owners = rows.iter().map(|(record, _)| record.clone()).collect::<::std::vec::Vec<_>>();
+                    let grouped = #load_relation_ids;
+                    for (record, row) in rows.iter_mut() {
+                        if let ::serde_json::Value::Object(map) = row {
+                            let ids = grouped.get(record).cloned().unwrap_or_default();
+                            let value = <#field_ty as ::appdb::RelateShape>::hydrate_relate_shape(ids).await?;
+                            map.insert(#ident.to_owned(), ::serde_json::to_value(value)?);
+                        }
+                    }
+                }
+            }
+        });
+
         quote! {
             fn has_relation_fields() -> bool {
                 true
@@ -723,6 +767,15 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
                         #( #inject_relation_values_from_db )*
                     }
                     Ok(())
+                }
+            }
+
+            fn inject_relation_values_from_db_many(
+                mut rows: ::std::vec::Vec<(::surrealdb::types::RecordId, ::serde_json::Value)>,
+            ) -> impl ::std::future::Future<Output = ::anyhow::Result<::std::vec::Vec<::serde_json::Value>>> + Send {
+                async move {
+                    #( #inject_relation_values_from_db_many )*
+                    Ok(rows.into_iter().map(|(_, row)| row).collect())
                 }
             }
         }
@@ -951,7 +1004,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 
         impl ::appdb::model::meta::ModelMeta for #struct_ident {
             fn storage_table() -> &'static str {
-                #resolved_table_name_expr
+                Self::table_name()
             }
 
             fn table_name() -> &'static str {
@@ -999,6 +1052,7 @@ fn derive_store_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
 
         #( #unique_schema_impls )*
         #( #pagin_schema_impl )*
+        #( #relation_schema_impls )*
 
         impl ::appdb::repository::Crud for #struct_ident {}
 
@@ -1506,6 +1560,10 @@ fn derive_relation_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStr
     let relation_name = relation_name_override(&input.attrs)?
         .unwrap_or_else(|| to_snake_case(&struct_ident.to_string()));
     validate_relation_name_literal(&relation_name, &struct_ident, "#[derive(Relation)]")?;
+    let relation_ddl = format!(
+        "DEFINE TABLE IF NOT EXISTS {} TYPE RELATION SCHEMALESS;",
+        relation_name
+    );
 
     match input.data {
         Data::Struct(data) => match data.fields {
@@ -1526,6 +1584,12 @@ fn derive_relation_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStr
     }
 
     Ok(quote! {
+        ::inventory::submit! {
+            ::appdb::model::schema::SchemaItem {
+                ddl: #relation_ddl,
+            }
+        }
+
         impl ::appdb::model::relation::RelationMeta for #struct_ident {
             fn relation_name() -> &'static str {
                 static REL_NAME: ::std::sync::OnceLock<&'static str> = ::std::sync::OnceLock::new();
@@ -2295,6 +2359,17 @@ impl RelationFieldDirection {
                     }
                     ids
                 }
+            },
+        }
+    }
+
+    fn load_edges_many_tokens(self, relation_name: &str) -> proc_macro2::TokenStream {
+        match self {
+            Self::Outgoing => quote! {
+                ::appdb::graph::GraphRepo::out_ids_by_owners(owners.clone(), #relation_name).await?
+            },
+            Self::Incoming => quote! {
+                ::appdb::graph::GraphRepo::in_ids_by_owners(owners.clone(), #relation_name).await?
             },
         }
     }

@@ -23,7 +23,7 @@ error type such as `anyhow`:
 ```bash
 cargo add appdb
 cargo add serde --features derive
-cargo add surrealdb@3.2.4 --features kv-surrealkv
+cargo add surrealdb@3.3.1 --features kv-surrealkv
 cargo add tokio --features macros,rt-multi-thread
 cargo add anyhow
 ```
@@ -79,12 +79,8 @@ used by model, graph, view, query, and transaction helpers.
 Use `init_db(path)` when the caller wants appdb's bare default storage policy.
 Use `init_db_with_options(path, InitDbOptions::default()...)` only when an
 advanced integration needs explicit versioning, retention, query timeouts,
-transaction timeouts, changefeed garbage collection, or AST payload storage.
-
-The local app profile leaves changefeed garbage collection at SurrealDB's
-default interval (30 seconds in 3.2.4). An explicit interval must be positive;
-zero is rejected before creating storage or starting the database worker.
-Use `None` to keep the engine default. A zero interval is not a disable switch.
+transaction timeouts, AST payload storage, or the embedded disk-sync policy.
+The options map only to the public SurrealDB SDK configuration surface.
 
 Use `DbRuntime::open*` when a caller needs to own a runtime and install it later
 with `DbRuntime::install_global()`.
@@ -118,7 +114,9 @@ struct Post {
 }
 
 async fn example() -> anyhow::Result<()> {
+    // Startup and scrolling: one bounded indexed keyset query.
     let page = Post::pagin_desc(20, None).await?;
+    // Full-table work is explicit and should stay off the startup path.
     let ordered = Post::list().order_by("created_at", Order::Desc).await?;
     let post_id = Post::find_one_id("slug", "hello").await?;
     Ok(())
@@ -419,8 +417,16 @@ managed key.
 ## Schema And Vector Indexes
 
 `#[unique]`, `#[pagin]`, `impl_schema!`, and `impl_hnsw_index!` register schema
-items through inventory. Runtime initialization applies those items
-idempotently.
+items through inventory. Runtime initialization hashes the sorted generated plan
+in a sidecar next to the SurrealKV directory; an unchanged plan performs no
+`DEFINE` calls, while a changed or missing plan applies the destructive index
+definitions once and records the new fingerprint.
+
+For interactive startup, use the generated `Model::pagin_asc` or
+`Model::pagin_desc` methods with a cursor. They issue one indexed keyset
+`SELECT ... ORDER BY field, id LIMIT ...` and do not materialize the table.
+Reserve `list()` for an explicit full-table operation such as export or batch
+processing. An index declaration alone cannot make a full-table list cheap.
 
 ```rust
 use appdb::model::schema::{VectorDistance, VectorIndexType};

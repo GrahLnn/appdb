@@ -14,14 +14,14 @@ the following database packages:
 | `surrealdb` | `2.0.8` (patched locally) | TypeScript SDK and remote engines |
 | `@surrealdb/node` | `3.0.3` | Node native-engine adapter |
 | embedded engine metadata | `3.0.2` | Version reported by the native package metadata |
-| Rust workspace `surrealdb` | `3.2.4` | Separate Rust implementation; it is not the TypeScript engine |
+| Rust workspace `surrealdb` | `3.3.1` | Separate Rust implementation; it is not the TypeScript engine |
 
 The installed native package reports embedded engine version `3.0.2` at
 runtime; this is distinct from the `@surrealdb/node` package version `3.0.3`.
 The embedded engine version is a runtime property of the installed native
 package, and the metadata above is not a substitute for a runtime probe. The Rust
-workspace's `surrealdb` `3.2.4` dependency is a separate local implementation;
-it does not establish compatibility with a remote SurrealDB `3.2.4` server, and
+workspace's `surrealdb` `3.3.1` dependency is a separate local implementation;
+it does not establish compatibility with a remote SurrealDB `3.3.1` server, and
 this package makes no such remote-version claim.
 
 ## Entry points
@@ -144,9 +144,11 @@ given order, then appends generated `IF NOT EXISTS` table, unique-index, and
 pagination-index statements for the listed model owners. HNSW definitions
 provide the index name, table, field path, dimension, and optional vector type,
 distance, `efConstruction`, `m`, `concurrently`, and `defer` settings.
-`applySchema(executor, definition)` runs those statements sequentially through
-an executor with `query(statement)`. Raw statements must be made idempotent by
-the caller; they are never rewritten.
+`applySchema(executor, definition)` fingerprints the complete plan in the
+internal metadata record and runs statements sequentially only when that
+fingerprint changes. Raw statements must be made idempotent by the caller; they
+are never rewritten. The first connection bootstraps the metadata table, while
+unchanged connections skip generated `DEFINE INDEX OVERWRITE` work.
 
 Pass the same definition to a connection layer when schema must be applied
 before the `Database` service is published:
@@ -170,6 +172,12 @@ Relation tables have a separate SurrealDB table type. The relation write path
 lazily creates them as `TYPE RELATION SCHEMALESS`; keep that declaration
 separate from ordinary model table DDL and do not register a relation table as
 a normal model owner.
+
+For desktop startup and scrolling, use `paginAsc(model, count, cursor)` or
+`paginDesc(model, count, cursor)`. The generated query is a direct indexed
+keyset scan with a `{paginationField}, id` tie-breaker. Avoid offset-style
+pagination and avoid `list()` during startup because both scale with the whole
+table.
 
 ### SQL views
 
@@ -291,6 +299,8 @@ retry policy.
   builds the lookahead cursor from those raw rows before hydrating page items,
   so encoded pagination values remain the values used by the SQL comparison.
   Cursors carry table, field, order, value, and record-ID compatibility data.
+  Use `paginAsc`/`paginDesc` for startup and scrolling; keep `list` for an
+  explicit full-table operation because it scales with the retained rows.
 - `hydrateRows` is the public batch decode/hydrate seam. It keeps one
   operation-local foreign/relation read context, batches candidate reads, and
   preserves input order; `hydrateRow` is the single-row form built on the same

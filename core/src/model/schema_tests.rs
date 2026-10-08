@@ -1,4 +1,13 @@
-use super::{HnswIndexDef, VectorDistance, VectorIndexType};
+use super::{HnswIndexDef, VectorDistance, VectorIndexType, fingerprint};
+
+#[test]
+fn schema_fingerprint_is_order_sensitive_and_stable() {
+    let first = vec!["DEFINE TABLE a;".to_owned(), "DEFINE INDEX i;".to_owned()];
+    let second = vec!["DEFINE INDEX i;".to_owned(), "DEFINE TABLE a;".to_owned()];
+
+    assert_eq!(fingerprint(&first), fingerprint(&first));
+    assert_ne!(fingerprint(&first), fingerprint(&second));
+}
 
 #[test]
 fn hnsw_index_def_renders_surrealql_vector_index() {
@@ -17,7 +26,7 @@ fn hnsw_index_def_renders_surrealql_vector_index() {
 
     assert_eq!(
         ddl,
-        "DEFINE INDEX IF NOT EXISTS audio_style_embedding_hnsw ON audio_style_embedding FIELDS embedding HNSW DIMENSION 256 TYPE F32 DIST COSINE EFC 150 M 12 CONCURRENTLY;"
+        "DEFINE INDEX OVERWRITE audio_style_embedding_hnsw ON audio_style_embedding FIELDS embedding HNSW DIMENSION 256 TYPE F32 DIST COSINE EFC 150 M 12 CONCURRENTLY;"
     );
 }
 
@@ -27,7 +36,7 @@ fn hnsw_index_def_supports_surrealdb_defaults() {
 
     assert_eq!(
         ddl,
-        "DEFINE INDEX IF NOT EXISTS idx_nested ON documents FIELDS items.embedding HNSW DIMENSION 4;"
+        "DEFINE INDEX OVERWRITE idx_nested ON documents FIELDS items.embedding HNSW DIMENSION 4;"
     );
 }
 

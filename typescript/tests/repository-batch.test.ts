@@ -63,7 +63,7 @@ describe("repository batch hydration", () => {
       return { saved, listed, afterSave, afterList, statements: queries.statements }
     }))
 
-    expect(result.afterSave).toBe(2)
+    expect(result.afterSave).toBe(3)
     expect(result.afterList - result.afterSave).toBe(3)
     expect((result.statements[0]!.match(/DEFINE TABLE IF NOT EXISTS repository_batch_edges TYPE RELATION SCHEMALESS/g) ?? []).length).toBe(1)
     expect(result.saved).toEqual(values)

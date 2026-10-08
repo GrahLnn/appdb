@@ -180,6 +180,8 @@ const own = (value: unknown, key: PropertyKey): boolean =>
 
 const dbFailure = <A>(error: DbError): Effect.Effect<A, DbError> => Effect.fail(error)
 
+const relationTablesByClient = new WeakMap<object, Set<string>>()
+
 const asDbError = (cause: unknown, operation: string): DbError => {
   if (cause instanceof DbError) return cause
   return makeDbError(DbErrorKind.Decode, errorMessage(cause), { operation, cause })
@@ -806,14 +808,7 @@ const appendRelationWrites = (
     if (metadata === undefined) continue
     const deleteOwnerBinding = `${prefix}_delete_owner_${index}`
     const anchor = metadata.direction === "outgoing" ? "in" : "out"
-    // Relation tables are created lazily by SurrealDB. Bootstrap each table
-    // once per write plan before synchronizing its first owner.
-    if (!state.relationTables.has(metadata.relation)) {
-      state.builder.appendStatement(
-        `DEFINE TABLE IF NOT EXISTS ${metadata.relation} TYPE RELATION SCHEMALESS;`,
-      )
-      state.relationTables.add(metadata.relation)
-    }
+    state.relationTables.add(metadata.relation)
     state.builder.appendStatement(
       `DELETE FROM ${metadata.relation} WHERE ${anchor} = $${deleteOwnerBinding} RETURN NONE;`,
       {
@@ -876,7 +871,10 @@ const planModelWrite = (
   encodedOverride?: unknown,
 ): Effect.Effect<void, RepositoryError, Database | ModelServices<AnyModel>> =>
   Effect.gen(function* () {
-    const key = recordKey(record)
+    // Planning identity includes the schema owner. Distinct model/view
+    // descriptors may share one physical record while requiring different
+    // encoding and result decoding paths.
+    const key = hydrationRowKey(model, record)
     if (state.planned.has(key)) return
     if (state.planning.has(key)) return
     state.planning.add(key)
@@ -909,7 +907,20 @@ const planModelWrite = (
 
 const executePlan = (
   state: PlanContext,
-): Effect.Effect<readonly unknown[], RepositoryError, Database> => query(state.builder.finish().statement)
+): Effect.Effect<readonly unknown[], RepositoryError, Database> =>
+  Effect.gen(function* () {
+    const database = yield* Database
+    const known = relationTablesByClient.get(database.client) ?? new Set<string>()
+    const missing = [...state.relationTables].filter((relation) => !known.has(relation)).sort()
+    if (missing.length > 0) {
+      yield* database.query(
+        missing.map((relation) => `DEFINE TABLE IF NOT EXISTS ${relation} TYPE RELATION SCHEMALESS;`).join(""),
+      )
+      for (const relation of missing) known.add(relation)
+      relationTablesByClient.set(database.client, known)
+    }
+    return yield* database.query(state.builder.finish().statement)
+  })
 
 /**
  * Rebuild the encoded shape owned by `model` before decoding the model.
@@ -1033,6 +1044,7 @@ const hydrateForeign = (
   })
 
 const HYDRATION_BATCH_SIZE = 5000
+const SAVE_MANY_CHUNK_SIZE = 5000
 
 const batchState = (state: PlannedState): HydrationBatch => {
   if (state.batch !== undefined) return state.batch
@@ -1646,8 +1658,8 @@ const makeStoreImpl = <M extends AnyModel>(model: M): Store<M> => {
       yield* preflightDuplicateIds(model, values)
       const output: ModelValue<M>[] = []
       const targets = new WeakMap<object, AnyModel>()
-      for (let offset = 0; offset < values.length; offset += 5000) {
-        const chunk = values.slice(offset, offset + 5000)
+      for (let offset = 0; offset < values.length; offset += SAVE_MANY_CHUNK_SIZE) {
+        const chunk = values.slice(offset, offset + SAVE_MANY_CHUNK_SIZE)
         const state: PlanContext = {
           builder: new WritePlanBuilder(),
           planned: new Map(),

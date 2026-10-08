@@ -295,24 +295,38 @@ export class PaginationPlan<Table extends string, C extends Schema.Top> {
       table: new Table(this.model.table),
       count: requested,
     }
-    const key = this.field === "id" ? "__page_public_id" : this.field
+    // The physical id is the indexed key when `pagination: true` is on `id`.
+    // `record::id(id)` remains a projection only; SurrealQL cannot order by
+    // that expression directly.
+    const key = this.field
     const direction = this.order.toUpperCase()
-    let statement = "LET $rows = (SELECT *, id AS __page_record, record::id(id) AS __page_public_id FROM $table); "
+    // Keep the public-id projection in the indexed SELECT. The old LET wrapper
+    // materialized the whole table before ORDER/LIMIT and made `pagination: true`
+    // much slower than the equivalent direct bounded query. Prefer paginAsc/
+    // paginDesc for startup reads; list() is an explicit full-table operation.
+    const publicKey = key
+    const tieKey = "id"
+    const select = "SELECT *, record::id(id) AS id FROM $table"
     if (cursor !== undefined) {
       const decoded = normalizeCursor(cursor)
       this.assertCursor(decoded)
-      bindings.cursor_value = decoded.value
       const id = decoded.id
       if (!isRecordId(id)) {
         throw new DbError({ kind: DbErrorKind.Decode, message: "page cursor id is not a RecordId" })
       }
+      bindings.cursor_value = this.field === "id" ? id : decoded.value
       bindings.cursor_record = id
       const than = this.order === "asc" ? ">" : "<"
-      statement += `SELECT *, __page_public_id AS id FROM $rows WHERE (${key} ${than} $cursor_value OR (${key} = $cursor_value AND __page_record ${than} $cursor_record)) ORDER BY ${key} ${direction}, __page_record ${direction} LIMIT $count;`
+      return rawSql(
+        `${select} WHERE (${publicKey} ${than} $cursor_value OR (${publicKey} = $cursor_value AND ${tieKey} ${than} $cursor_record)) ORDER BY ${publicKey} ${direction}, ${tieKey} ${direction} LIMIT $count;`,
+        bindings,
+      )
     } else {
-      statement += `SELECT *, __page_public_id AS id FROM $rows ORDER BY ${key} ${direction}, __page_record ${direction} LIMIT $count;`
+      return rawSql(
+        `${select} ORDER BY ${publicKey} ${direction}, ${tieKey} ${direction} LIMIT $count;`,
+        bindings,
+      )
     }
-    return rawSql(statement, bindings)
   }
 
   buildCursor(row: unknown): PageCursor {
@@ -365,7 +379,13 @@ export class PaginationPlan<Table extends string, C extends Schema.Top> {
   }
 }
 
-/** Build the canonical table keyset statement for a model. */
+/**
+ * Build the canonical bounded keyset statement for a model.
+ *
+ * The generated SQL is one indexed `SELECT` with a field/id tie-breaker.
+ * Callers should use this path for startup and scrolling; `list()` is an
+ * explicit full-table read and scales with the retained row count.
+ */
 export const buildPaginationQuery = <Table extends string, C extends Schema.Top>(
   model: Model<Table, C>,
   count: number,
@@ -407,7 +427,8 @@ export const queryPage = <Table extends string, C extends Schema.Top>(
     }
     const plan = new PaginationPlan(model, field, order)
     const rows = yield* query(plan.buildStatement(count + 1, cursor))
-    const value = rows[1]
+    // The keyset plan is one direct SELECT, so its rows live in slot zero.
+    const value = rows[0]
     if (!Array.isArray(value)) {
       return yield* Effect.fail(new DbError({ kind: DbErrorKind.Decode, message: "pagination query returned no row array" }))
     }
@@ -432,7 +453,8 @@ export const paginate = <Table extends string, C extends Schema.Top>(
     }
     const plan = new PaginationPlan(model, field, order)
     const slots = yield* query(plan.buildStatement(positiveCount(count) + 1, cursor))
-    const raw = slots[1]
+    // The keyset plan is one direct SELECT, so its rows live in slot zero.
+    const raw = slots[0]
     if (!Array.isArray(raw)) {
       return yield* Effect.fail(new DbError({ kind: DbErrorKind.Decode, message: "pagination query returned no row array" }))
     }

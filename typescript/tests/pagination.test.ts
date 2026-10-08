@@ -16,6 +16,14 @@ const Post = Model.define(
   }),
 )
 
+const IdPost = Model.define(
+  "id_post",
+  Schema.Struct({
+    id: field(RootIdSchema, { id: true, pagination: true }),
+    label: Schema.String,
+  }),
+)
+
 describe("keyset pagination contract", () => {
   it("keeps table, field, order, scalar precision, and full record identity in a cursor", () => {
     const plan = new PaginationPlan(Post, "createdAt", "asc")
@@ -31,8 +39,10 @@ describe("keyset pagination contract", () => {
     expect((decoded.id as RecordId).id).toBe(I64_MAX)
 
     const statement = plan.buildStatement(3, decoded)
-    expect(statement.query).toContain("__page_record > $cursor_record")
-    expect(statement.query).toContain("ORDER BY createdAt ASC, __page_record ASC LIMIT $count")
+    expect(statement.query).toContain("id > $cursor_record")
+    expect(statement.query).toContain("SELECT *, record::id(id) AS id FROM $table")
+    expect(statement.query).toContain("ORDER BY createdAt ASC, id ASC LIMIT $count")
+    expect(statement.query).not.toContain("LET $rows")
     expect(statement.bindings.cursor_record).toBeInstanceOf(RecordId)
   })
 
@@ -62,5 +72,15 @@ describe("keyset pagination contract", () => {
     const decoded = PageCursor.decode(cursor.toString())
     expect(decoded.value).toBe(9223372036854775807n)
   })
-})
 
+  it("uses the physical id index when id is the pagination field", () => {
+    const plan = new PaginationPlan(IdPost, "id", "desc")
+    const cursor = plan.buildCursor({ id: "p2" })
+    const statement = plan.buildStatement(2, cursor)
+
+    expect(statement.query).toContain("id < $cursor_value")
+    expect(statement.query).toContain("ORDER BY id DESC, id DESC LIMIT $count")
+    expect(statement.query).not.toContain("ORDER BY record::id(id)")
+    expect(statement.bindings.cursor_value).toBeInstanceOf(RecordId)
+  })
+})

@@ -1,20 +1,14 @@
 use crate::error::DBError;
 use crate::model::schema;
 use anyhow::Result;
-use std::borrow::Cow;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::sync::{Arc, LazyLock, RwLock};
-use std::thread;
 use std::time::Duration;
 use surrealdb::Surreal;
-use surrealdb::engine::local::Db;
-use surrealdb_core::cnf::{ConfigMap, NOTIFICATIONS_CHANNEL_SIZE};
-use surrealdb_core::dbs::Capabilities;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::options::EngineOptions;
-use tokio_util::sync::CancellationToken;
+use surrealdb::engine::local::{Db, SurrealKv};
+use surrealdb::opt::Config;
+use surrealdb::opt::capabilities::Capabilities;
 
 /// Shared SurrealDB handle used by the runtime and global facade.
 pub type DbHandle = Arc<Surreal<Db>>;
@@ -43,6 +37,9 @@ impl std::fmt::Display for LocalStorageSync {
 }
 
 /// Options used when opening the embedded SurrealDB runtime.
+///
+/// Every option maps to the public SurrealDB SDK connection builder. Engine
+/// internals are deliberately not part of this API.
 #[derive(Debug, Clone, Default)]
 pub struct InitDbOptions {
     /// Enables SurrealKV versioned storage.
@@ -53,28 +50,18 @@ pub struct InitDbOptions {
     pub query_timeout: Option<Duration>,
     /// Optional per-transaction timeout.
     pub transaction_timeout: Option<Duration>,
-    /// Optional positive changefeed garbage-collection interval.
-    /// `None` uses the engine default; zero is rejected when opening the runtime.
-    pub changefeed_gc_interval: Option<Duration>,
     /// Enables SurrealDB AST payload storage.
     pub ast_payload: bool,
     /// Optional disk sync policy for the embedded local datastore.
     pub local_storage_sync: Option<LocalStorageSync>,
-    /// Optional SurrealKV memtable size bound in bytes.
-    pub surreal_kv_max_memtable_size: Option<usize>,
 }
 
 impl InitDbOptions {
     /// Uses the storage policy appdb recommends for local interactive apps.
-    ///
-    /// This profile keeps application crates from depending on storage-engine
-    /// tuning details while still bounding local recovery work after repeated
-    /// development or desktop-session writes.
     pub fn local_app() -> Self {
         Self::default()
             .versioned(false)
             .local_storage_sync(Some(LocalStorageSync::Every))
-            .surreal_kv_max_memtable_size(Some(16 * 1024 * 1024))
     }
 
     /// Enables or disables versioned storage.
@@ -101,15 +88,7 @@ impl InitDbOptions {
         self
     }
 
-    /// Sets the changefeed garbage-collection interval.
-    /// `None` uses the engine default. Zero does not disable garbage collection
-    /// and is rejected when opening the runtime.
-    pub fn changefeed_gc_interval(mut self, duration: Option<Duration>) -> Self {
-        self.changefeed_gc_interval = duration;
-        self
-    }
-
-    /// Enables or disables AST payload storage.
+    /// Enables or disables AST payloads.
     pub fn ast_payload(mut self, enabled: bool) -> Self {
         self.ast_payload = enabled;
         self
@@ -120,19 +99,15 @@ impl InitDbOptions {
         self.local_storage_sync = sync;
         self
     }
-
-    /// Sets the SurrealKV memtable size bound in bytes.
-    pub fn surreal_kv_max_memtable_size(mut self, size: Option<usize>) -> Self {
-        self.surreal_kv_max_memtable_size = size;
-        self
-    }
 }
 
 /// Owned database runtime that can be installed globally or passed around directly.
+///
+/// The runtime owns only the public SDK handle. Dropping the last handle lets
+/// SurrealDB release its engine tasks without a synchronous worker join.
 #[derive(Debug, Clone)]
 pub struct DbRuntime {
     db: DbHandle,
-    worker: Arc<DbWorker>,
 }
 
 impl DbRuntime {
@@ -141,40 +116,43 @@ impl DbRuntime {
         Self::open_with_options(path, InitDbOptions::default()).await
     }
 
-    /// Opens a schema-managed runtime with explicit options and applies every
-    /// registered schema inventory item before the handle becomes available.
-    ///
-    /// This managed-open contract is intentionally separate from schemaless
-    /// persistence semantics: callers that use `InitDbOptions::default()` still
-    /// get automatic table bootstrap on first write, but that guarantee must not
-    /// rely on schema side effects from this startup path.
+    /// Opens a schema-managed runtime with explicit options and applies the
+    /// deterministic schema plan before the handle becomes available.
     pub async fn open_with_options(path: PathBuf, options: InitDbOptions) -> Result<Self> {
-        anyhow::ensure!(
-            !options
-                .changefeed_gc_interval
-                .is_some_and(|interval| interval.is_zero()),
-            "changefeed_gc_interval must be greater than zero; use None for the engine default"
-        );
         fs::create_dir_all(&path)?;
-        let worker = Arc::new(DbWorker::spawn(path, options)?);
-        let runtime = Self {
-            db: worker.handle(),
-            worker,
-        };
-        Ok(runtime)
+        let schema_marker_path = path.join(".appdb-schema-fingerprint");
+
+        let config = Config::new()
+            .set_ast_payload(options.ast_payload)
+            .query_timeout(options.query_timeout)
+            .transaction_timeout(options.transaction_timeout)
+            .capabilities(Capabilities::default());
+
+        let mut connection = Surreal::new::<SurrealKv>((path, config));
+        if options.versioned {
+            connection = connection.versioned();
+            if let Some(retention) = options.version_retention {
+                connection = connection.retention(retention);
+            }
+        }
+        if let Some(sync) = options.local_storage_sync {
+            connection = connection.sync(sync);
+        }
+        let db = Arc::new(connection.await?);
+
+        db.use_ns("app").use_db("app").await?;
+        apply_schema(&db, &schema_marker_path).await?;
+
+        Ok(Self { db })
     }
 
     /// Wraps an existing SurrealDB handle.
     pub fn from_handle(db: DbHandle) -> Self {
-        Self {
-            worker: Arc::new(DbWorker::detached(db.clone())),
-            db,
-        }
+        Self { db }
     }
 
     /// Returns a clone of the underlying database handle.
     pub fn handle(&self) -> DbHandle {
-        let _ = &self.worker;
         self.db.clone()
     }
 
@@ -193,275 +171,11 @@ impl DbRuntime {
 
     #[doc(hidden)]
     pub fn reinstall_global_for_tests(&self) {
-        let old_runtime = {
-            let mut db = DB
-                .write()
-                .expect("global database lock should not be poisoned");
-            db.replace(self.clone())
-        };
-        drop(old_runtime);
+        let mut db = DB
+            .write()
+            .expect("global database lock should not be poisoned");
+        *db = Some(self.clone());
     }
-}
-
-#[derive(Debug)]
-struct DbWorker {
-    db: Option<DbHandle>,
-    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    thread: Option<thread::JoinHandle<()>>,
-}
-
-impl DbWorker {
-    fn spawn(path: PathBuf, options: InitDbOptions) -> Result<Self> {
-        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-
-        let thread = thread::spawn(move || {
-            let runtime = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(runtime) => runtime,
-                Err(err) => {
-                    let _ = ready_tx.send(Err(err.into()));
-                    return;
-                }
-            };
-
-            let datastore = runtime.block_on(async move {
-                let (db, datastore) = match open_db(path, &options).await {
-                    Ok(db) => db,
-                    Err(err) => {
-                        let _ = ready_tx.send(Err(err));
-                        return None;
-                    }
-                };
-
-                if let Err(err) = db.use_ns("app").use_db("app").await {
-                    let _ = ready_tx.send(Err(err.into()));
-                    drop(db);
-                    return Some(datastore);
-                }
-
-                let db = Arc::new(db);
-                if let Err(err) = apply_schema(&db).await {
-                    let _ = ready_tx.send(Err(err));
-                    drop(db);
-                    return Some(datastore);
-                }
-
-                let caller_db = db.clone();
-                if ready_tx.send(Ok(caller_db)).is_err() {
-                    drop(db);
-                    return Some(datastore);
-                }
-
-                let _ = shutdown_rx.await;
-                drop(db);
-                Some(datastore)
-            });
-
-            drop(runtime);
-
-            if let Some(datastore) = datastore {
-                match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(cleanup_runtime) => {
-                        cleanup_runtime.block_on(async move {
-                            if let Err(err) = datastore.shutdown().await {
-                                tracing::error!(
-                                    error = %err,
-                                    "database datastore shutdown failed during worker cleanup"
-                                );
-                            }
-                        });
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            error = %err,
-                            "database cleanup runtime failed to start"
-                        );
-                    }
-                }
-            }
-        });
-
-        let db = match ready_rx.recv() {
-            Ok(Ok(db)) => db,
-            Ok(Err(err)) => {
-                join_worker(thread, "initialization");
-                return Err(err);
-            }
-            Err(err) => {
-                let error = anyhow::anyhow!("database worker failed before initialization: {err}");
-                join_worker(thread, "initialization");
-                return Err(error);
-            }
-        };
-
-        Ok(Self {
-            db: Some(db),
-            shutdown_tx: Some(shutdown_tx),
-            thread: Some(thread),
-        })
-    }
-
-    fn detached(db: DbHandle) -> Self {
-        Self {
-            db: Some(db),
-            shutdown_tx: None,
-            thread: None,
-        }
-    }
-
-    fn handle(&self) -> DbHandle {
-        self.db
-            .as_ref()
-            .expect("database worker handle should exist before shutdown")
-            .clone()
-    }
-}
-
-impl Drop for DbWorker {
-    fn drop(&mut self) {
-        self.db.take();
-        if let Some(shutdown_tx) = self.shutdown_tx.take() {
-            let _ = shutdown_tx.send(());
-        }
-
-        if let Some(thread) = self.thread.take() {
-            join_worker(thread, "shutdown");
-        }
-    }
-}
-
-fn join_worker(thread: thread::JoinHandle<()>, phase: &'static str) {
-    if let Err(payload) = thread.join() {
-        tracing::error!(phase, panic = ?payload, "database worker thread panicked");
-    }
-}
-
-fn is_schema_already_defined_error(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("already exists") || lower.contains("already defined")
-}
-
-fn make_schema_ddl_idempotent(ddl: &str) -> Cow<'_, str> {
-    let trimmed = ddl.trim_start();
-    if !trimmed
-        .get(..6)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("DEFINE"))
-        || trimmed.to_ascii_uppercase().contains("IF NOT EXISTS")
-    {
-        return Cow::Borrowed(ddl);
-    }
-
-    for keyword in ["TABLE", "FIELD", "INDEX"] {
-        let needle = format!("DEFINE {keyword}");
-        if let Some(pos) = find_case_insensitive(trimmed, &needle) {
-            let insert_at = pos + needle.len();
-            let leading_ws_len = ddl.len() - trimmed.len();
-            let absolute_insert_at = leading_ws_len + insert_at;
-            let mut normalized = String::with_capacity(ddl.len() + " IF NOT EXISTS".len());
-            normalized.push_str(&ddl[..absolute_insert_at]);
-            normalized.push_str(" IF NOT EXISTS");
-            normalized.push_str(&ddl[absolute_insert_at..]);
-            return Cow::Owned(normalized);
-        }
-    }
-
-    Cow::Borrowed(ddl)
-}
-
-fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
-    let haystack_upper = haystack.to_ascii_uppercase();
-    let needle_upper = needle.to_ascii_uppercase();
-    haystack_upper.find(&needle_upper)
-}
-
-async fn open_db(path: PathBuf, options: &InitDbOptions) -> Result<(Surreal<Db>, Arc<Datastore>)> {
-    let capabilities = Capabilities::default();
-    let (notifications, builder) = if capabilities.allows_live_query_notifications() {
-        let (send, recv) = surrealdb_core::channel::bounded(NOTIFICATIONS_CHANNEL_SIZE);
-        (Some(recv), Datastore::builder().with_notify(send))
-    } else {
-        (None, Datastore::builder())
-    };
-
-    let datastore = builder
-        .with_config(local_datastore_config(options))
-        .with_query_timeout(options.query_timeout)
-        .with_transaction_timeout(options.transaction_timeout)
-        .with_capabilities(capabilities)
-        .build_with_path(&local_storage_datastore_path(&path))
-        .await?;
-
-    let datastore = Arc::new(datastore);
-    if let Err(err) = datastore.check_version().await {
-        return Err(shutdown_datastore_after_startup_error(&datastore, err.into()).await);
-    }
-    if let Err(err) = datastore.bootstrap().await {
-        return Err(shutdown_datastore_after_startup_error(&datastore, err.into()).await);
-    }
-
-    let db = match Surreal::unstable_from_datastore(
-        CancellationToken::new(),
-        Arc::clone(&datastore),
-        notifications,
-        local_engine_options(options),
-    )
-    .await
-    {
-        Ok(db) => db,
-        Err(err) => {
-            return Err(shutdown_datastore_after_startup_error(&datastore, err.into()).await);
-        }
-    };
-
-    Ok((db, datastore))
-}
-
-async fn shutdown_datastore_after_startup_error(
-    datastore: &Datastore,
-    error: anyhow::Error,
-) -> anyhow::Error {
-    if let Err(shutdown_error) = datastore.shutdown().await {
-        tracing::error!(
-            error = %shutdown_error,
-            "database datastore shutdown failed after startup error"
-        );
-    }
-    error
-}
-
-fn local_storage_datastore_path(path: &Path) -> String {
-    format!("surrealkv://{}", path.display())
-}
-
-fn local_datastore_config(options: &InitDbOptions) -> ConfigMap {
-    let mut config =
-        ConfigMap::empty().with_key_value("datastore_versioned", options.versioned.to_string());
-
-    if let Some(retention) = options.version_retention {
-        config = config.with_key_value("datastore_retention", format_duration_param(retention));
-    }
-    if let Some(sync) = options.local_storage_sync {
-        config = config.with_key_value("datastore_sync", sync.to_string());
-    }
-    if let Some(size) = options.surreal_kv_max_memtable_size {
-        config = config.with_key_value("surrealkv_max_memtable_size", size.to_string());
-    }
-
-    config
-}
-
-fn local_engine_options(options: &InitDbOptions) -> EngineOptions {
-    let mut engine = EngineOptions::default();
-    if let Some(interval) = options.changefeed_gc_interval {
-        engine.changefeed_gc_interval = interval;
-    }
-    engine
 }
 
 fn format_duration_param(duration: Duration) -> String {
@@ -500,26 +214,39 @@ fn format_duration_param(duration: Duration) -> String {
     format!("{millis}ms")
 }
 
-async fn apply_schema(db: &DbHandle) -> Result<()> {
-    for item in inventory::iter::<schema::SchemaItem> {
-        apply_schema_ddl(db, item.ddl).await?;
+async fn apply_schema(db: &DbHandle, marker_path: &Path) -> Result<()> {
+    let mut ddl: Vec<String> = inventory::iter::<schema::SchemaItem>
+        .into_iter()
+        .map(|item| item.ddl.to_owned())
+        .collect();
+    ddl.extend(
+        inventory::iter::<schema::HnswSchemaItem>
+            .into_iter()
+            .map(|item| item.index.ddl()),
+    );
+    ddl.sort_unstable();
+
+    let fingerprint = schema::fingerprint(&ddl);
+    if fs::read_to_string(marker_path)
+        .ok()
+        .is_some_and(|value| value == fingerprint)
+    {
+        return Ok(());
     }
-    for item in inventory::iter::<schema::HnswSchemaItem> {
-        apply_schema_ddl(db, &item.index.ddl()).await?;
+
+    for statement in ddl {
+        apply_schema_ddl(db, &statement).await?;
     }
+
+    fs::write(marker_path, fingerprint)?;
     Ok(())
 }
 
 async fn apply_schema_ddl(db: &DbHandle, ddl: &str) -> Result<()> {
-    let ddl = make_schema_ddl_idempotent(ddl);
-    let response = db.query(ddl.as_ref()).await?;
-    if let Err(err) = response.check() {
-        let message = err.to_string();
-        let used_fallback_ddl = matches!(ddl, Cow::Borrowed(_));
-        if !used_fallback_ddl || !is_schema_already_defined_error(&message) {
-            return Err(DBError::QueryResponse(message).into());
-        }
-    }
+    let response = db.query(ddl).await?;
+    response
+        .check()
+        .map_err(|err| DBError::QueryResponse(err.to_string()))?;
     Ok(())
 }
 
@@ -536,20 +263,13 @@ pub async fn init_local_app_db(path: PathBuf) -> Result<()> {
 
 /// Clears the installed global database handle.
 pub fn reset_db() {
-    let old_runtime = {
-        let mut db = DB
-            .write()
-            .expect("global database lock should not be poisoned");
-        db.take()
-    };
-    drop(old_runtime);
+    let mut db = DB
+        .write()
+        .expect("global database lock should not be poisoned");
+    db.take();
 }
 
 /// Clears the installed global database handle and removes the database path.
-///
-/// This is intended for development reset flows. The current process must exit
-/// after calling it so no stale cloned handle can write into a path being
-/// deleted.
 pub fn reset_db_and_remove_path(path: impl AsRef<Path>) -> Result<()> {
     reset_db();
     remove_optional_storage_artifact(path.as_ref())?;
@@ -576,13 +296,10 @@ pub async fn init_db_with_options(path: PathBuf, options: InitDbOptions) -> Resu
 /// Opens a database with explicit options and replaces any previously installed global runtime.
 pub async fn reinit_db_with_options(path: PathBuf, options: InitDbOptions) -> Result<()> {
     let runtime = DbRuntime::open_with_options(path, options).await?;
-    let old_runtime = {
-        let mut db = DB
-            .write()
-            .expect("global database lock should not be poisoned");
-        db.replace(runtime)
-    };
-    drop(old_runtime);
+    let mut db = DB
+        .write()
+        .expect("global database lock should not be poisoned");
+    db.replace(runtime);
     Ok(())
 }
 

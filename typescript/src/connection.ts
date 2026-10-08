@@ -71,6 +71,7 @@ export interface DatabaseLayerOptions {
 
 interface ClientState {
   closed: boolean
+  closing: Promise<void> | undefined
 }
 
 const wrapDbError = dbErrorFromCause
@@ -122,11 +123,25 @@ const makeCloseEffect = (
 ): Effect.Effect<void, DbError> =>
   Effect.suspend(() => {
     if (state.closed) return Effect.succeed(undefined)
-    return Effect.tryPromise({
-      try: async () => {
-        await client.close()
+    if (state.closing !== undefined) {
+      return Effect.tryPromise({
+        try: () => state.closing!,
+        catch: (cause) => wrapDbError("close", cause, "Engine"),
+      })
+    }
+    let closing: Promise<void>
+    try {
+      closing = Promise.resolve(client.close()).then(() => {
         state.closed = true
-      },
+      }).finally(() => {
+        if (state.closing === closing) state.closing = undefined
+      })
+    } catch (cause) {
+      return Effect.fail(wrapDbError("close", cause, "Engine"))
+    }
+    state.closing = closing
+    return Effect.tryPromise({
+      try: () => closing,
       catch: (cause) => wrapDbError("close", cause, "Engine"),
     })
   })
@@ -188,7 +203,7 @@ const acquireClient = (
   Effect.try({
     try: () => ({
       client: (options.makeClient ?? (() => makeDefaultClient(options.clientOptions)))(),
-      state: { closed: false },
+      state: { closed: false, closing: undefined },
     }),
     catch: (cause) => wrapDbError("createClient", cause, options.connectionErrorKind ?? "Transport"),
   })

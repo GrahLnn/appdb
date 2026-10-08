@@ -73,6 +73,52 @@ const instrumentClient = (
 }
 
 describe("Database lifecycle", () => {
+  it("shares one in-flight close across concurrent callers", async () => {
+    const closeStarted = deferred<void>()
+    const releaseClose = deferred<void>()
+    let closeCalls = 0
+    const target = new Surreal({
+      engines: {
+        ...createRemoteEngines(),
+        ...createNodeEngines(),
+      },
+    })
+    const client = new Proxy(target, {
+      get(inner, property) {
+        if (property === "close") {
+          return async () => {
+            closeCalls += 1
+            closeStarted.resolve()
+            await releaseClose.promise
+            return inner.close()
+          }
+        }
+        const value = Reflect.get(inner, property, inner)
+        return typeof value === "function" ? value.bind(inner) : value
+      },
+    }) as unknown as Surreal
+    const layer = makeDatabaseLayer({ endpoint: "mem://", makeClient: () => client })
+
+    const calls = await Effect.runPromise(
+      Effect.scoped(
+        Effect.provide(
+          Effect.gen(function* () {
+            const database = yield* Database
+            Effect.runFork(database.close)
+            yield* Effect.promise(() => closeStarted.promise)
+            Effect.runFork(database.close)
+            releaseClose.resolve()
+            yield* Effect.promise(() => Promise.resolve())
+            return closeCalls
+          }),
+          layer,
+        ),
+      ),
+    )
+
+    expect(calls).toBe(1)
+  })
+
   it("settles an in-flight native query before Scope closes the engine", async () => {
     const events: Event[] = []
     const started = deferred<void>()

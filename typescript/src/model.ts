@@ -150,6 +150,12 @@ const makeModel = <Table extends string, C extends Schema.Top, Params extends Sc
   return model
 }
 
+/**
+ * Builds model metadata only; it never connects to or mutates a database.
+ * Pass the model explicitly in `schema.models` when startup should own its
+ * table/index plan. The connection layer fingerprints that plan and skips
+ * repeated `DEFINE` work on unchanged starts.
+ */
 export const define = <Table extends string, C extends Schema.Top>(
   table: Table,
   schema: C,
