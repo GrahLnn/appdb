@@ -66,10 +66,11 @@ describe("Database connection service", () => {
       }),
     )
 
-    expect(result).toHaveLength(3)
+    expect(result).toHaveLength(4)
     expect(result[0]).toMatchObject({ success: true, result: undefined })
     expect(result[1]).toMatchObject({ success: false, error: { name: "QueryError" } })
     expect(result[2]).toMatchObject({ success: false, error: { name: "ThrownError" } })
+    expect(result[3]).toMatchObject({ success: false, error: { name: "QueryError" } })
   })
 
   it("maps checked statement errors into the shared DbError", async () => {

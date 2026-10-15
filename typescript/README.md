@@ -2,7 +2,7 @@
 
 This directory contains the native TypeScript implementation of the appdb
 model, query, repository, graph, pagination, connection, and crypto APIs. It
-uses Effect `4.0.0-rc.115` for services, layers, scopes, schemas, and typed
+uses Effect `4.0.2` for services, layers, scopes, schemas, and typed
 expected errors. The package is a private workspace artifact while its storage
 consumers are completed.
 
@@ -11,19 +11,17 @@ the following database packages:
 
 | Package | Version | Boundary |
 | --- | --- | --- |
-| `surrealdb` | `2.0.8` (patched locally) | TypeScript SDK and remote engines |
-| `@surrealdb/node` | `3.0.3` | Node native-engine adapter |
+| `surrealdb` | `2.1.1` | TypeScript SDK and remote engines |
+| `@surrealdb/node` | `3.1.0` | Node native-engine adapter |
+| `@surrealdb/node-native` | `3.3.4` | Explicit native engine peer dependency |
 | `better-sqlite3` | `13.0.3` | Node desktop SQLite adapter |
-| embedded engine metadata | `3.0.2` | Version reported by the native package metadata |
-| Rust workspace `surrealdb` | `3.3.1` | Separate Rust implementation; it is not the TypeScript engine |
+| Rust workspace `surrealdb` | `3.3.4` | Separate Rust implementation; it is not the TypeScript engine |
 
-The installed native package reports embedded engine version `3.0.2` at
-runtime; this is distinct from the `@surrealdb/node` package version `3.0.3`.
-The embedded engine version is a runtime property of the installed native
-package, and the metadata above is not a substitute for a runtime probe. The Rust
-workspace's `surrealdb` `3.3.1` dependency is a separate local implementation;
-it does not establish compatibility with a remote SurrealDB `3.3.1` server, and
-this package makes no such remote-version claim.
+The installed native engine reports `surrealdb-3.3.4` through `db.version()`.
+The plugin and native engine have independent release versions, so both are
+declared explicitly. These versions are the 2026-10-16 snapshot, not a promise
+about a remote server. SurrealDB 3.3.4 still resolves SurrealKV 0.21.4; the
+standalone SurrealKV 1.0 release does not upgrade that transitive dependency.
 
 ## Entry points
 
