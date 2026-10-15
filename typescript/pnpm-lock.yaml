@@ -4,14 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  '@surrealdb/node@3.0.3':
-    hash: 3e68a4ce1ecf94bb8e8b97cf1946e8d4edb8e1816a7f6326b6c57ac86e446e08
-    path: patches/@surrealdb__node@3.0.3.patch
-  surrealdb@2.0.8:
-    hash: ac310e4cb84157a6cfac8f0955e0c5d15f7791d365ce1081d5f4ac8ae03743d7
-    path: patches/surrealdb@2.0.8.patch
-
 importers:
 
   .:
@@ -20,8 +12,11 @@ importers:
         specifier: 2.0.0
         version: 2.0.0
       '@surrealdb/node':
-        specifier: 3.0.3
-        version: 3.0.3(patch_hash=3e68a4ce1ecf94bb8e8b97cf1946e8d4edb8e1816a7f6326b6c57ac86e446e08)(surrealdb@2.0.8(patch_hash=ac310e4cb84157a6cfac8f0955e0c5d15f7791d365ce1081d5f4ac8ae03743d7)(tslib@2.8.1)(typescript@5.9.3))
+        specifier: ^3.1.0
+        version: 3.1.0(@surrealdb/node-native@3.3.4)(surrealdb@2.1.1(tslib@2.8.1)(typescript@5.9.3))
+      '@surrealdb/node-native':
+        specifier: ^3.3.4
+        version: 3.3.4
       better-sqlite3:
         specifier: 13.0.3
         version: 13.0.3
@@ -29,8 +24,8 @@ importers:
         specifier: 4.0.2
         version: 4.0.2
       surrealdb:
-        specifier: 2.0.8
-        version: 2.0.8(patch_hash=ac310e4cb84157a6cfac8f0955e0c5d15f7791d365ce1081d5f4ac8ae03743d7)(tslib@2.8.1)(typescript@5.9.3)
+        specifier: ^2.1.1
+        version: 2.1.1(tslib@2.8.1)(typescript@5.9.3)
     devDependencies:
       '@effect/vitest':
         specifier: 4.0.2
@@ -253,13 +248,61 @@ packages:
     resolution: {integrity: sha512-l/hNZ3ZCOJq8rzwx1y5ZV/8b2bYCWdhGqRVY33Pu50NAHyAW5qLsMn3ZBkZow77mAKwNCsbDsRGnyYEuU95mjw==}
     engines: {node: '>=18.0.0'}
 
-  '@surrealdb/node@3.0.3':
-    resolution: {integrity: sha512-A8g/dktGBz1eZs5lWFKAsx22A376v7g+o7jkdvsmlxj/uta9t4sUPkTIFjcG4JjJW8dzwt8JTiMl8+FuFuiRnw==}
+  '@surrealdb/node-native-darwin-arm64@3.3.4':
+    resolution: {integrity: sha512-ORUyoLNQPuhPjPeXOB5+XPTBjwlg18GjA4RoJeicTKULzFNpUMxgzulQtdWmmPl+oZo35Akn8Od0xGCOzMg/uw==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@surrealdb/node-native-darwin-x64@3.3.4':
+    resolution: {integrity: sha512-G1oyllPTAivIkXq+9qyhNugR4jp8syPxyV4Dx1g474rVJ8sgYw2n/LK/7yUyRw7un/QwjMsz9Rx/ZGGQZtjFhg==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@surrealdb/node-native-linux-arm64-gnu@3.3.4':
+    resolution: {integrity: sha512-5VW9wy46zgOvrzkJr3pN0SZO6L8b/FkGDXV6vloGpmZw8RM+ptpIbuVvikx9DOUJMW76oFVu/gaYrsegYGyW5Q==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@surrealdb/node-native-linux-arm64-musl@3.3.4':
+    resolution: {integrity: sha512-V1zi9hASACwW/Gd/XPap1HgBlTkwMqSad5F1DRDQZt2HEl5qZCPqXLKzFaHivNWUHQE0WzYsS9pzzkKtt0/sYA==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@surrealdb/node-native-linux-x64-gnu@3.3.4':
+    resolution: {integrity: sha512-FYWicR1VQyyJp0Z9yGhVkInvuvpZRA7bFlPN9YuMIOuDSeVR9qtelASJbeNM7uu88nFnQuAgvc5Rf2Xk3UvJwQ==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@surrealdb/node-native-linux-x64-musl@3.3.4':
+    resolution: {integrity: sha512-kHlOYT0XYpNVNqXs6RImsybTHVSLCBy8Z6iEBqLO4dKsf617NcEkXaYKxkU0s5wn8o1nbJUtDHOZ/Mfob+7v+Q==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@surrealdb/node-native-win32-arm64-msvc@3.3.4':
+    resolution: {integrity: sha512-3hLtbc4OFdQipqmRuxXhHRCG3VxsZH4/UEg/6DXXmkZRVR/Sh6I1cqblEbNnlbTPsSHR/mAUVXHIPLkRTLM2Qg==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@surrealdb/node-native-win32-x64-msvc@3.3.4':
+    resolution: {integrity: sha512-lE55nGBI34/EIHHQax5yYZzElMtW2Ehfl5X2Rg09Wzp1IqcJXrBk3A/cCOtVc7Etnrd9ajxqxQmsGaLEueHqoA==}
+    cpu: [x64]
+    os: [win32]
+
+  '@surrealdb/node-native@3.3.4':
+    resolution: {integrity: sha512-E6pllLADS99HkVDpBPDc1RAjTlic8zW22QfFbrN0nakkOkYB+e+LtGIVY53EZCcMPLX2u/pN8HPiKBGSEw85SA==}
+
+  '@surrealdb/node@3.1.0':
+    resolution: {integrity: sha512-q2dVTXU3D6dWyeg/SlOh95iQTaMcDBrNnfPIM9fS0hqlyYepf1Sg74h/3d1dboY88skZXsfuhBzFxC+dVX/Dyw==}
     peerDependencies:
+      '@surrealdb/node-native': ^3.3.0-beta.3
       surrealdb: ^2.0.1
 
-  '@surrealdb/sqon@0.1.0':
-    resolution: {integrity: sha512-pooKLZ0W6mN8XHzJQavGOdfZOZksycmIjhwFwvG0kdCAt4I5U6KKPHcXQwFkTDNKFKFKdufczLRnzHapPIslQw==}
+  '@surrealdb/sqon@0.1.6':
+    resolution: {integrity: sha512-rUUxuKYQJxsPy2ezYe2qy28Cd+LYUcYX7Qhi+eWl7d0KFnqBUGXyIkt6y7UgGhVlZjn0OBiGdJkM3fTzl8Qjjw==}
     peerDependencies:
       tslib: ^2.6.3
       typescript: ^5.0.0
@@ -455,8 +498,8 @@ packages:
   std-env@4.2.0:
     resolution: {integrity: sha512-oCUKSupKTHX53EyjDtuZQ64pjLJ6yYCtpmEw0goYxtjG9KpbRe8KAsl2tBUGU9DyMcJ0RwJ8GqJAFzMXcXW1Rw==}
 
-  surrealdb@2.0.8:
-    resolution: {integrity: sha512-nkoTAdnfJYc0EvB2Hut0MET/UiWTOT6+TJODoubHzoC952gJvjEbHMx5TLrecUYo1vIN3/qBgwMIcLKK0WC7zQ==}
+  surrealdb@2.1.1:
+    resolution: {integrity: sha512-FlJue1x8bH3gdLemHIwq3pQnxVLv7sKMFnMvAqlPtY/ePFjEylbWcQUORfD4S2V1RgABb9By8KRxOCA4QU5hgA==}
     peerDependencies:
       tslib: ^2.6.3
       typescript: ^5.0.0 || ^6.0.0
@@ -695,11 +738,47 @@ snapshots:
 
   '@surrealdb/cbor@2.0.0-alpha.4': {}
 
-  '@surrealdb/node@3.0.3(patch_hash=3e68a4ce1ecf94bb8e8b97cf1946e8d4edb8e1816a7f6326b6c57ac86e446e08)(surrealdb@2.0.8(patch_hash=ac310e4cb84157a6cfac8f0955e0c5d15f7791d365ce1081d5f4ac8ae03743d7)(tslib@2.8.1)(typescript@5.9.3))':
-    dependencies:
-      surrealdb: 2.0.8(patch_hash=ac310e4cb84157a6cfac8f0955e0c5d15f7791d365ce1081d5f4ac8ae03743d7)(tslib@2.8.1)(typescript@5.9.3)
+  '@surrealdb/node-native-darwin-arm64@3.3.4':
+    optional: true
 
-  '@surrealdb/sqon@0.1.0(tslib@2.8.1)(typescript@5.9.3)':
+  '@surrealdb/node-native-darwin-x64@3.3.4':
+    optional: true
+
+  '@surrealdb/node-native-linux-arm64-gnu@3.3.4':
+    optional: true
+
+  '@surrealdb/node-native-linux-arm64-musl@3.3.4':
+    optional: true
+
+  '@surrealdb/node-native-linux-x64-gnu@3.3.4':
+    optional: true
+
+  '@surrealdb/node-native-linux-x64-musl@3.3.4':
+    optional: true
+
+  '@surrealdb/node-native-win32-arm64-msvc@3.3.4':
+    optional: true
+
+  '@surrealdb/node-native-win32-x64-msvc@3.3.4':
+    optional: true
+
+  '@surrealdb/node-native@3.3.4':
+    optionalDependencies:
+      '@surrealdb/node-native-darwin-arm64': 3.3.4
+      '@surrealdb/node-native-darwin-x64': 3.3.4
+      '@surrealdb/node-native-linux-arm64-gnu': 3.3.4
+      '@surrealdb/node-native-linux-arm64-musl': 3.3.4
+      '@surrealdb/node-native-linux-x64-gnu': 3.3.4
+      '@surrealdb/node-native-linux-x64-musl': 3.3.4
+      '@surrealdb/node-native-win32-arm64-msvc': 3.3.4
+      '@surrealdb/node-native-win32-x64-msvc': 3.3.4
+
+  '@surrealdb/node@3.1.0(@surrealdb/node-native@3.3.4)(surrealdb@2.1.1(tslib@2.8.1)(typescript@5.9.3))':
+    dependencies:
+      '@surrealdb/node-native': 3.3.4
+      surrealdb: 2.1.1(tslib@2.8.1)(typescript@5.9.3)
+
+  '@surrealdb/sqon@0.1.6(tslib@2.8.1)(typescript@5.9.3)':
     dependencies:
       '@surrealdb/cbor': 2.0.0-alpha.4
       tslib: 2.8.1
@@ -859,9 +938,9 @@ snapshots:
 
   std-env@4.2.0: {}
 
-  surrealdb@2.0.8(patch_hash=ac310e4cb84157a6cfac8f0955e0c5d15f7791d365ce1081d5f4ac8ae03743d7)(tslib@2.8.1)(typescript@5.9.3):
+  surrealdb@2.1.1(tslib@2.8.1)(typescript@5.9.3):
     dependencies:
-      '@surrealdb/sqon': 0.1.0(tslib@2.8.1)(typescript@5.9.3)
+      '@surrealdb/sqon': 0.1.6(tslib@2.8.1)(typescript@5.9.3)
       tslib: 2.8.1
       typescript: 5.9.3
 
