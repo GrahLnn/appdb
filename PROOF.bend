@@ -2,6 +2,7 @@ import Base
 import ./LAWS.bend as Laws
 import ./appdb_model.bend as Model
 import ./benchmark_model.bend as Bench
+import ./endpoint_model.bend as Endpoint
 
 def Laws.close_idempotent(x):
   match x:
@@ -41,6 +42,9 @@ def Laws.distinct_key_delete_write_commute(entries, right):
   match entries:
     case Bench.Entries{a, b}:
       {==}
+
+def Laws.native_path_roundtrip(backend, path):
+  {==}
 
 def main() -> {Model.remove(Model.insert(Model.Layout{2n, 1n+3n})) ==
     Model.Layout{2n, 1n+3n} : Model.Layout}:

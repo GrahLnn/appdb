@@ -1,6 +1,7 @@
 import Base
 import ./appdb_model.bend as Model
 import ./benchmark_model.bend as Bench
+import ./endpoint_model.bend as Endpoint
 
 law close_idempotent:
   for x: Model.Lifecycle
@@ -40,3 +41,8 @@ law distinct_key_delete_write_commute:
   for right: Nat
   {Bench.delete_left(Bench.put_right(entries, right)) ==
     Bench.put_right(Bench.delete_left(entries), right) : Bench.Entries}
+
+law native_path_roundtrip:
+  for backend: Nat
+  for path: Endpoint.NativePath
+  {Endpoint.path(Endpoint.encode(backend, path)) == path : Endpoint.NativePath}

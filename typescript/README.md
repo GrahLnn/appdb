@@ -400,52 +400,26 @@ These links describe the v4 API family. Code examples should be checked
 against the pinned RC and its generated declarations; v3 `Context.Tag` or
 `Effect.Service` recipes are not a compatibility contract for this package.
 
-## SDK and native adapter patches
+## Native engine lifecycle and paths
 
-The workspace applies `patches/surrealdb@2.0.8.patch` through
-`pnpm-workspace.yaml`. The patch changes both `surrealdb` ESM and CommonJS
-builds in `ConnectionController.connect`:
+The current SDK propagates native connection failures and the Node plugin
+awaits datastore shutdown. The old SDK and native adapter patches have been
+removed. Scoped close and disk-reopen tests exercise those upstream contracts.
 
-1. subscribe to the current engine's `error` event before opening it, with an
-   engine-identity guard so a late error from a replaced engine is ignored;
-2. subscribe to the first `connected` or `error` event before `open`; and
-3. convert a synchronous `open` throw into the same error path and rethrow the
-   original `Error` (or an `UnexpectedConnectionError` for a non-Error value).
+Use `nodeEndpoint("surrealkv", absolutePath)` for a native filesystem path.
+On Windows appdb emits `surrealkv:C:/path` so the SDK's WHATWG URL parser
+preserves the drive colon. A drive written as URL authority (`surrealkv://C:/path`)
+would lose that colon and become a relative path; raw string endpoints with
+that spelling are normalized at this same boundary. An already-created URL
+may already have lost the colon, so prefer the structured endpoint.
 
-The upstream path waited only for `connected` and did not forward an engine
-error emitted during startup. A native engine could therefore fail while the
-SDK's `connect` Promise remained pending. The patch is limited to
-`surrealdb@2.0.8` and does not change the embedded engine or the Rust
-workspace.
+Versioned storage uses `?versioned=true` on a SurrealKV endpoint. The removed
+`surrealkv+versioned` backend is not exposed by appdb.
 
-The workspace also applies `patches/@surrealdb__node@3.0.3.patch` to the Node
-native adapter. Its `NodeEngine.close` path captures the native `free()`
-Promise, clears the adapter state and publishes `disconnected` in the upstream
-order, then awaits that captured Promise. This makes `Surreal.close()` and the
-Effect connection scope's release wait for native engine teardown while
-preventing a reentrant reconnect from replacing the engine reference that is
-being released. It does not change the Rust notification architecture or
-native engine behavior.
-
-Both patch files are included in the package tarball as reproducibility
-artifacts. They are not automatically applied to a different consumer
-dependency graph: a downstream workspace that chooses to use the package must
-own and verify its own `patchedDependencies` configuration for both exact
-package versions.
-
-This package is marked `private`. The supported workspace path is to run
-`pnpm install --frozen-lockfile`, `pnpm run build`, `pnpm run typecheck:example`,
-and `pnpm run example` from this directory. No npm or tarball consumer path is
-claimed here: a downstream
-workspace that chooses to use the package must own and verify its own
-`patchedDependencies` configuration. Merely depending on a packed tarball, or
-receiving these patch files inside it, does not apply either patch to that
-downstream install.
-
-The package tarball is intentionally limited to `dist/`, this README, both
-applicable patch files, and the required package metadata. It does not include
-`node_modules`, tests, temporary database directories, or compiled native
-artifacts.
+This package remains `private`. Run `pnpm install --frozen-lockfile`,
+`pnpm run build`, `pnpm run typecheck:example`, and `pnpm run example`
+from this directory. The tarball contains `dist/`, this README, and package
+metadata; no downstream patch configuration is required.
 
 ## Runtime limitations
 

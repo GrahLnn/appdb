@@ -8,7 +8,7 @@ import {
 import type { Database } from "./connection.js"
 import type { DbError } from "./errors.js"
 
-export type NodeEmbeddedBackend = "mem" | "rocksdb" | "surrealkv" | "surrealkv+versioned"
+export type NodeEmbeddedBackend = "mem" | "rocksdb" | "surrealkv"
 export type NodeEngineOptions = Parameters<typeof createNodeEngines>[0]
 
 export interface NodeEmbeddedEndpoint {
@@ -27,8 +27,14 @@ export interface NodeDatabaseLayerOptions
   readonly clientOptions?: Omit<DriverOptions, "engines">
 }
 
+// A drive in URL authority loses its colon in WHATWG URL normalization.
+// The native engine accepts an opaque URI, which preserves the filesystem path.
+const preserveNativeDrive = (endpoint: string): string =>
+  endpoint.replace(/^(surrealkv|rocksdb):\/\/([a-z]:\/)/i, "$1:$2")
+
 const toEndpoint = (endpoint: NodeEndpoint): string | URL => {
-  if (typeof endpoint === "string" || endpoint instanceof URL) return endpoint
+  if (typeof endpoint === "string") return preserveNativeDrive(endpoint)
+  if (endpoint instanceof URL) return endpoint
 
   if (endpoint.backend === "mem") {
     if (endpoint.path !== undefined) {
@@ -41,7 +47,7 @@ const toEndpoint = (endpoint: NodeEndpoint): string | URL => {
     throw new TypeError(`${endpoint.backend} backend requires an explicit storage path`)
   }
 
-  return `${endpoint.backend}://${endpoint.path.replaceAll("\\", "/")}`
+  return preserveNativeDrive(`${endpoint.backend}://${endpoint.path.replaceAll("\\", "/")}`)
 }
 
 /** Construct an embedded endpoint without selecting a storage backend implicitly. */
