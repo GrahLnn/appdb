@@ -2,3 +2,4 @@ target/
 .factory/
 .agents/
 .claude/
+/rounds/
